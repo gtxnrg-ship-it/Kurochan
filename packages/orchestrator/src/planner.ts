@@ -198,6 +198,7 @@ function rankCatalogAgents(
     readonly score?: number;
   })[])[],
   runbookAgentIds: ReadonlySet<string>,
+  requiredRunbookAgentIds: ReadonlySet<string>,
   max: number,
 ): AgentProfile[] {
   const retrievalScores = new Map<string, number>();
@@ -226,14 +227,27 @@ function rankCatalogAgents(
         a.profile.name.localeCompare(b.profile.name) ||
         a.index - b.index,
     );
-  const useful = ranked.filter(
-    (entry) => entry.score > 0 || runbookAgentIds.has(entry.profile.id),
+  const required = ranked.filter((entry) =>
+    requiredRunbookAgentIds.has(entry.profile.id),
   );
-  const ordered =
-    useful.length >= Math.min(5, max)
-      ? useful
-      : [...useful, ...ranked.filter((entry) => !useful.includes(entry))];
-  return ordered.slice(0, max).map((entry) => entry.profile);
+  const requiredIds = new Set(required.map((entry) => entry.profile.id));
+  const useful = ranked.filter(
+    (entry) =>
+      !requiredIds.has(entry.profile.id) &&
+      (entry.score > 0 || runbookAgentIds.has(entry.profile.id)),
+  );
+  const remainder = ranked.filter(
+    (entry) =>
+      !requiredIds.has(entry.profile.id) && !useful.includes(entry),
+  );
+  // Required NEXUS roles are a hard constraint, not merely a ranking bonus.
+  const candidateLimit = Math.max(max, required.length);
+  const ordered = [
+    ...required,
+    ...useful,
+    ...(useful.length < Math.min(5, max) ? remainder : []),
+  ];
+  return ordered.slice(0, candidateLimit).map((entry) => entry.profile);
 }
 
 function safeAgentDescription(profile: AgentProfile): string {
@@ -306,6 +320,7 @@ export class PlanService {
 
     let candidates: AgentProfile[];
     let relevantRunbooks: AgentRunbook[];
+    let requiredRunbookAgentIds: string[];
     let nexusStrategy: string;
     try {
       const searchResults = await Promise.all([
@@ -332,6 +347,26 @@ export class PlanService {
           runbook.roster.flatMap((group) => group.agents),
         ),
       );
+      requiredRunbookAgentIds = [
+        ...new Set(
+          relevantRunbooks.flatMap((runbook) =>
+            runbook.roster
+              .filter((group) => group.activation.trim().toLowerCase() === "required")
+              .flatMap((group) => group.agents),
+          ),
+        ),
+      ];
+      const catalogIds = new Set(allProfiles.map((profile) => profile.id));
+      const missingRequiredProfiles = requiredRunbookAgentIds.filter(
+        (id) => !catalogIds.has(id),
+      );
+      if (missingRequiredProfiles.length) {
+        throw new PlanError(
+          "runbook_specialist_missing",
+          "Selected NEXUS runbook refers to required specialists missing from the pinned catalog: " +
+            missingRequiredProfiles.join(", "),
+        );
+      }
       const maxCandidates = this.options.maxCandidates ?? 96;
       if (
         !Number.isInteger(maxCandidates) ||
@@ -348,9 +383,11 @@ export class PlanService {
         allProfiles,
         [goalMatches, researchMatches],
         runbookAgentIds,
+        new Set(requiredRunbookAgentIds),
         maxCandidates,
       );
     } catch (error) {
+      if (error instanceof PlanError) throw error;
       throw new PlanError(
         "catalog_unavailable",
         "The pinned Agency Agents catalog or NEXUS playbooks could not be loaded and validated.",
@@ -517,6 +554,16 @@ export class PlanService {
           keys.add(task.key);
         }
         assertAcyclic(payload.tasks);
+        const selectedAgentIds = new Set(payload.tasks.map((task) => task.agentId));
+        const missingRequiredAgents = requiredRunbookAgentIds.filter(
+          (id) => !selectedAgentIds.has(id),
+        );
+        if (missingRequiredAgents.length) {
+          throw new Error(
+            "Plan omitted required NEXUS specialists: " +
+              missingRequiredAgents.join(", "),
+          );
+        }
         const tasks: PlannedTask[] = payload.tasks.map((task) => ({
           ...task,
           approvalRequired:
