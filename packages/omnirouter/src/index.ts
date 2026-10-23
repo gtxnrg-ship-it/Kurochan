@@ -26,6 +26,16 @@ export interface OmniRouteResult extends ChatCompletionOutput {
   readonly providerErrors: readonly { providerId: ProviderId; code: string }[];
 }
 
+export interface OmniRouteStreamResult {
+  readonly providerId: ProviderId;
+  readonly model: string;
+  readonly routeProfile: RouteProfile;
+  readonly attempts: number;
+  readonly providerErrors: readonly { providerId: ProviderId; code: string }[];
+  readonly stream: AsyncIterable<ChatCompletionStreamChunk>;
+  close(): void;
+}
+
 export interface OmniRouterOptions {
   readonly providers: ReadonlyMap<ProviderId, ChatProvider>;
   readonly routeOrder?: Partial<Record<RouteProfile, readonly ProviderId[]>>;
@@ -210,6 +220,174 @@ export class OmniRouter {
     } finally {
       this.activeRequests -= 1;
     }
+  }
+
+  async stream(request: OmniRouteRequest): Promise<OmniRouteStreamResult> {
+    if (request.signal?.aborted) {
+      throw new OmniRouterError("cancelled", "The request was cancelled before routing.", 0);
+    }
+    if (this.activeRequests >= this.maxConcurrentRequests) {
+      throw new OmniRouterError("router_overloaded", "OmniRouter reached its concurrent request limit. Retry shortly.", 0, [], true);
+    }
+    this.activeRequests += 1;
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      this.activeRequests = Math.max(0, this.activeRequests - 1);
+    };
+    try {
+      const required: Capability[] = [...new Set<Capability>([
+        ...(request.requiredCapabilities?.length ? request.requiredCapabilities : ["text" as const]),
+        "streaming",
+      ])];
+      const configuredOrder = this.routeOrder[request.profile];
+      const orderedIds = request.preferredProvider
+        ? request.lockProvider
+          ? [request.preferredProvider]
+          : [request.preferredProvider, ...configuredOrder.filter((id) => id !== request.preferredProvider)]
+        : [...configuredOrder];
+      const configured = orderedIds
+        .map((id) => this.providers.get(id))
+        .filter((provider): provider is ChatProvider => Boolean(provider?.isConfigured));
+      const candidates = configured.filter((provider) =>
+        providerSupports(provider, required) && typeof provider.stream === "function",
+      );
+      if (candidates.length === 0) {
+        const message = configured.length === 0
+          ? "No configured provider is available for OmniRouter. Configure at least one supported provider and model."
+          : "No configured provider supports streaming for this request. Enable the streaming capability for a compatible provider.";
+        throw new OmniRouterError("no_provider_available", message, 0, [], true);
+      }
+
+      const providerErrors: Array<{ providerId: ProviderId; code: string }> = [];
+      let attempts = 0;
+      let lastError: unknown;
+      for (const provider of candidates) {
+        if (attempts >= this.maxAttempts) break;
+        if (request.signal?.aborted) {
+          throw new OmniRouterError("cancelled", "The request was cancelled.", attempts, providerErrors);
+        }
+        const health = this.health.get(provider.id) ?? {
+          consecutiveFailures: 0,
+          openUntil: 0,
+          successes: 0,
+          failures: 0,
+          lastErrorCode: undefined,
+        };
+        this.health.set(provider.id, health);
+        if (health.openUntil > this.now()) {
+          providerErrors.push({ providerId: provider.id, code: "circuit_open" });
+          continue;
+        }
+        attempts += 1;
+        try {
+          const chunks = await provider.stream!({
+            messages: request.messages,
+            ...(request.systemPrompt ? { systemPrompt: request.systemPrompt } : {}),
+            ...(request.maxTokens === undefined ? {} : { maxTokens: request.maxTokens }),
+            ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
+            ...(request.timeoutMs === undefined ? {} : { timeoutMs: request.timeoutMs }),
+            ...(request.signal ? { signal: request.signal } : {}),
+            requiredCapabilities: required,
+            ...((request.preferredProvider === provider.id && request.model) || !request.preferredProvider
+              ? request.model ? { model: request.model } : {}
+              : {}),
+          });
+          const startedAt = this.now();
+          const observed = this.observeStream(provider, chunks, startedAt, request.signal, release);
+          return {
+            providerId: provider.id,
+            model: request.model && (!request.preferredProvider || request.preferredProvider === provider.id)
+              ? request.model
+              : provider.defaultModel ?? "",
+            routeProfile: request.profile,
+            attempts,
+            providerErrors: [...providerErrors],
+            stream: observed,
+            close: release,
+          };
+        } catch (error) {
+          lastError = error;
+          const providerError = error instanceof ProviderError ? error : undefined;
+          const code = providerError?.code ?? "provider_error";
+          health.lastErrorCode = code;
+          health.failures += 1;
+          providerErrors.push({ providerId: provider.id, code });
+          if (providerError?.code === "cancelled" || request.signal?.aborted) {
+            throw new OmniRouterError("cancelled", "The request was cancelled.", attempts, providerErrors);
+          }
+          if (providerError?.retryable) {
+            health.consecutiveFailures += 1;
+            if (health.consecutiveFailures >= this.failureThreshold) health.openUntil = this.now() + this.circuitCooldownMs;
+            continue;
+          }
+          throw new OmniRouterError(code, providerError?.message ?? "A model provider failed with an unexpected error.", attempts, providerErrors, false);
+        }
+      }
+      const finalCode = lastError instanceof ProviderError ? lastError.code : "upstream_unavailable";
+      throw new OmniRouterError(finalCode, "All streaming-capable providers failed before the stream could start.", attempts, providerErrors, true);
+    } catch (error) {
+      release();
+      throw error;
+    }
+  }
+
+  private observeStream(
+    provider: ChatProvider,
+    source: AsyncIterable<ChatCompletionStreamChunk>,
+    startedAt: number,
+    signal: AbortSignal | undefined,
+    release: () => void,
+  ): AsyncIterable<ChatCompletionStreamChunk> {
+    const health = this.health.get(provider.id)!;
+    const now = this.now;
+    const failureThreshold = this.failureThreshold;
+    const cooldownMs = this.circuitCooldownMs;
+    return (async function* () {
+      let finished = false;
+      try {
+        for await (const chunk of source) {
+          if (signal?.aborted) {
+            throw new OmniRouterError("cancelled", "The stream was cancelled.", 1);
+          }
+          yield chunk;
+        }
+        finished = true;
+        health.consecutiveFailures = 0;
+        health.openUntil = 0;
+        health.lastLatencyMs = now() - startedAt;
+        health.lastErrorCode = undefined;
+        health.successes += 1;
+      } catch (error) {
+        const providerError = error instanceof ProviderError ? error : undefined;
+        if (providerError?.code !== "cancelled" && !signal?.aborted) {
+          const code = providerError?.code ?? (error instanceof OmniRouterError ? error.code : "provider_error");
+          health.lastErrorCode = code;
+          health.failures += 1;
+          if (providerError?.retryable || (error instanceof OmniRouterError && error.retryable)) {
+            health.consecutiveFailures += 1;
+            if (health.consecutiveFailures >= failureThreshold) health.openUntil = now() + cooldownMs;
+          }
+        }
+        if (signal?.aborted || providerError?.code === "cancelled" || (error instanceof OmniRouterError && error.code === "cancelled")) {
+          throw new OmniRouterError("cancelled", "The stream was cancelled.", 1);
+        }
+        if (error instanceof OmniRouterError) throw error;
+        throw new OmniRouterError(
+          providerError?.code ?? "upstream_unavailable",
+          providerError?.message ?? "The provider stream ended unexpectedly.",
+          1,
+          [{ providerId: provider.id, code: providerError?.code ?? "provider_error" }],
+          providerError?.retryable ?? true,
+        );
+      } finally {
+        if (!finished) {
+          // A downstream disconnect closes the iterator without turning it into a success.
+        }
+        release();
+      }
+    })();
   }
 
   private async route(request: OmniRouteRequest): Promise<OmniRouteResult> {
