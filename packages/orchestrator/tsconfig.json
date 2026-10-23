@@ -4,18 +4,16 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
     "composite": true,
     "rootDir": "src",
     "outDir": "dist"
   },
   "references": [
     {
-      "path": "../contracts"
+      "path": "../agent-catalog"
     },
     {
-      "path": "../agent-catalog"
+      "path": "../contracts"
     },
     {
       "path": "../model-gateway"

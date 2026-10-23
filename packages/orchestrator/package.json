@@ -16,8 +16,8 @@
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
-    "@kurochan/contracts": "workspace:*",
     "@kurochan/agent-catalog": "workspace:*",
+    "@kurochan/contracts": "workspace:*",
     "@kurochan/model-gateway": "workspace:*",
     "@kurochan/omnirouter": "workspace:*",
     "@kurochan/storage": "workspace:*",

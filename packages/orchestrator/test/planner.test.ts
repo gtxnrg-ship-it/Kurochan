@@ -1,95 +1,71 @@
-import { describe, expect, it } from "vitest";
-import { AgentCatalog } from "@kurochan/agent-catalog";
+import { describe, expect, it, vi } from "vitest";
+import { PlanService } from "../src/planner.js";
+import type { AgentCatalog, AgentProfile } from "@kurochan/agent-catalog";
 import type { RouteProfile } from "@kurochan/contracts";
-import type { PlanRouter } from "../src/planner.js";
-import { PlanningError, RunPlanner } from "../src/planner.js";
 
-function fakeRouter(content: string): PlanRouter {
+const candidates: AgentProfile[] = [
+  { id: "engineering/backend-architect", name: "Backend Architect", description: "Scalable API architecture", division: "engineering", sourcePath: "engineering/backend-architect.md", sourceSha256: "a".repeat(64), tools: [] },
+  { id: "testing/api-tester", name: "API Tester", description: "Test APIs and contracts", division: "testing", sourcePath: "testing/api-tester.md", sourceSha256: "b".repeat(64), tools: [] },
+  { id: "research/research-analyst", name: "Research Analyst", description: "Collect and evaluate evidence", division: "research", sourcePath: "research/research-analyst.md", sourceSha256: "c".repeat(64), tools: [] },
+];
+
+function fakeCatalog(): AgentCatalog {
   return {
-    complete: async (request: {
-      profile: RouteProfile;
-      messages: readonly { role: "user" | "assistant"; content: string }[];
-      systemPrompt: string;
-      maxTokens: number;
-      temperature: number;
-      timeoutMs: number;
-      requiredCapabilities: readonly ["text"];
-    }) => {
-      expect(request.systemPrompt).toContain("candidate id");
-      return { content, providerId: "test", model: "test-model" };
-    },
+    search: vi.fn(async () => candidates),
+    list: vi.fn(async () => candidates),
+    get: vi.fn(async (id: string) => candidates.find((candidate) => candidate.id === id)),
+  } as unknown as AgentCatalog;
+}
+
+function fakeRouter(content: string, options: { providerId?: string; model?: string } = {}) {
+  return {
+    complete: vi.fn(async () => ({
+      content,
+      providerId: options.providerId ?? "openrouter",
+      model: options.model ?? "test-model",
+      latencyMs: 12,
+      attempts: 1,
+      routeProfile: "balanced" as RouteProfile,
+      providerErrors: [],
+    })),
   };
 }
 
-describe("RunPlanner", () => {
-  it("builds a minimal, validated task DAG from the pinned specialist catalog", async () => {
-    const catalog = new AgentCatalog();
-    const matching = (await catalog.search("Unreal Engine gameplay world building", { limit: 10 }))[0];
-    expect(matching).toBeDefined();
-    const json = JSON.stringify({
-      summary: "Research and implement a bounded prototype.",
-      selectedRunbook: null,
-      assumptions: ["The target engine version will be confirmed."],
-      verificationCriteria: ["Review the generated project and run applicable tests."],
+describe("PlanService", () => {
+  it("only accepts selected catalog agents and produces an acyclic dependency graph", async () => {
+    const router = fakeRouter(JSON.stringify({
+      summary: "Research, implement and verify the service.",
       tasks: [
-        { key: "research", agentId: matching!.id, objective: "Research requirements and produce a cited implementation brief.", dependsOn: [], maxAttempts: 2, input: {}, requiresApproval: false },
-        { key: "implement", agentId: matching!.id, objective: "Implement the prototype after the brief is available.", dependsOn: ["research"], maxAttempts: 2, input: {}, requiresApproval: false },
+        { key: "research", agentId: "research/research-analyst", objective: "Research the API requirements.", dependsOn: [] },
+        { key: "build", agentId: "engineering/backend-architect", objective: "Implement the API.", dependsOn: ["research"] },
+        { key: "qa", agentId: "testing/api-tester", objective: "Test the API.", dependsOn: ["build"] },
       ],
-    });
-    const planner = new RunPlanner({ catalog, router: fakeRouter(json) });
-    const plan = await planner.plan("Build an Unreal Engine gameplay prototype");
-    expect(plan.tasks).toHaveLength(2);
-    expect(plan.tasks[1]?.dependsOn).toEqual(["research"]);
-    expect(plan.catalogCommit).toMatch(/^[a-f0-9]{40}$/);
+    }));
+    const planner = new PlanService({ catalog: fakeCatalog(), router });
+    const plan = await planner.createPlan({ goal: "Build a service", profile: "balanced" });
+    expect(plan.tasks).toHaveLength(3);
+    expect(plan.tasks[2]?.dependsOn).toEqual(["build"]);
+    expect(plan.selectedAgents).toHaveLength(3);
+    expect(router.complete).toHaveBeenCalledOnce();
   });
 
-  it("forces approval for high-impact tasks regardless of model preference", async () => {
-    const catalog = new AgentCatalog();
-    const selected = (await catalog.search("DevOps release deployment", { limit: 1 }))[0]!;
-    const json = JSON.stringify({
-      summary: "Release plan.",
-      selectedRunbook: null,
-      assumptions: [],
-      verificationCriteria: ["Deployment rehearsal passes."],
-      tasks: [{ key: "deploy", agentId: selected.id, objective: "Deploy this service to production and publish the release.", dependsOn: [], maxAttempts: 1, input: {}, requiresApproval: false }],
-    });
-    const plan = await new RunPlanner({ catalog, router: fakeRouter(json) }).plan("Deploy service to production");
-    expect(plan.tasks[0]?.approvalRequired).toBe(true);
+  it("refuses model-invented agent IDs", async () => {
+    const router = fakeRouter(JSON.stringify({
+      summary: "bad plan",
+      tasks: [{ key: "build", agentId: "made-up-agent", objective: "Build it", dependsOn: [] }],
+    }));
+    const planner = new PlanService({ catalog: fakeCatalog(), router });
+    await expect(planner.createPlan({ goal: "Build it", profile: "balanced" })).rejects.toMatchObject({ code: "invalid_model_plan" });
   });
 
-  it("rejects hallucinated specialist IDs", async () => {
-    const catalog = new AgentCatalog();
-    const json = JSON.stringify({
-      summary: "Plan.",
-      selectedRunbook: null,
-      assumptions: [],
-      verificationCriteria: ["A check succeeds."],
-      tasks: [{ key: "one", agentId: "not/a-real-agent", objective: "Do work.", dependsOn: [], maxAttempts: 1, requiresApproval: false }],
-    });
-    await expect(new RunPlanner({ catalog, router: fakeRouter(json) }).plan("Plan a small API"))
-      .rejects.toMatchObject({ code: "invalid_plan" });
-  });
-
-  it("rejects dependency cycles", async () => {
-    const catalog = new AgentCatalog();
-    const selected = (await catalog.search("backend engineer API service", { limit: 1 }))[0]!;
-    const json = JSON.stringify({
-      summary: "Plan.",
-      selectedRunbook: null,
-      assumptions: [],
-      verificationCriteria: ["A check succeeds."],
-      tasks: [
-        { key: "a", agentId: selected.id, objective: "First.", dependsOn: ["b"], maxAttempts: 1, requiresApproval: false },
-        { key: "b", agentId: selected.id, objective: "Second.", dependsOn: ["a"], maxAttempts: 1, requiresApproval: false },
-      ],
-    });
-    await expect(new RunPlanner({ catalog, router: fakeRouter(json) }).plan("Plan a small API"))
-      .rejects.toMatchObject({ code: "invalid_plan" });
-  });
-
-  it("rejects malformed planner JSON", async () => {
-    const catalog = new AgentCatalog();
-    await expect(new RunPlanner({ catalog, router: fakeRouter("not json") }).plan("Plan a small API"))
-      .rejects.toBeInstanceOf(PlanningError);
+  it("retries malformed plan JSON once, then rejects it", async () => {
+    const router = {
+      complete: vi.fn()
+        .mockResolvedValueOnce({ content: "not json", providerId: "openrouter", model: "test", latencyMs: 2, attempts: 1, routeProfile: "balanced", providerErrors: [] })
+        .mockResolvedValueOnce({ content: "still not json", providerId: "openrouter", model: "test", latencyMs: 2, attempts: 1, routeProfile: "balanced", providerErrors: [] }),
+    };
+    const planner = new PlanService({ catalog: fakeCatalog(), router });
+    await expect(planner.createPlan({ goal: "Plan something", profile: "balanced" })).rejects.toMatchObject({ code: "invalid_model_plan" });
+    expect(router.complete).toHaveBeenCalledTimes(2);
   });
 });
