@@ -7,6 +7,7 @@ import type {
 import type {
   ChatCompletionInput,
   ChatCompletionOutput,
+  ChatCompletionStreamChunk,
   ChatProvider,
 } from "@kurochan/model-gateway";
 import { ProviderError } from "@kurochan/model-gateway";
