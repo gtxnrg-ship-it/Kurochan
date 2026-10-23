@@ -507,6 +507,16 @@ describe("Kuro-chan API", () => {
     ).toBe(282);
     expect(searched.json().data.length).toBeGreaterThan(0);
     expect(JSON.stringify(searched.json())).not.toContain("Core Mission");
+
+    const deeplyNestedAgent = await app.inject({
+      method: "GET",
+      url: "/v1/agents/game-development/unreal-engine/unreal-world-builder",
+    });
+    expect(deeplyNestedAgent.statusCode).toBe(200);
+    expect(deeplyNestedAgent.json().id).toBe(
+      "game-development/unreal-engine/unreal-world-builder",
+    );
+    expect(deeplyNestedAgent.body).not.toContain("Core Mission");
   });
 
   it("rejects invalid pagination values with 400 rather than an internal error", async () => {
