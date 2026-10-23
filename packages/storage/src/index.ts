@@ -541,6 +541,27 @@ export class RunStore {
     return tx.immediate();
   }
 
+  renewTaskLease(
+    runId: string,
+    taskId: string,
+    workerId: string,
+    leaseMs = 60_000,
+    now = Date.now(),
+  ): number {
+    assertText(workerId, "workerId", 200);
+    if (!Number.isInteger(leaseMs) || leaseMs < 1000 || leaseMs > 600_000) {
+      throw new Error("leaseMs must be between 1000 and 600000.");
+    }
+    const leaseExpiresAt = now + leaseMs;
+    const updated = this.db.prepare(
+      "UPDATE tasks SET lease_expires_at=?,updated_at=? WHERE id=? AND run_id=? AND status='running' AND lease_owner=? AND lease_expires_at > ?",
+    ).run(leaseExpiresAt, now, taskId, runId, workerId, now);
+    if (updated.changes !== 1) {
+      throw new Error("Task lease is no longer valid for this worker.");
+    }
+    return leaseExpiresAt;
+  }
+
   completeTask(
     runId: string,
     taskId: string,
@@ -557,8 +578,14 @@ export class RunStore {
         .prepare("SELECT * FROM tasks WHERE id=? AND run_id=?")
         .get(taskId, runId) as TaskRow | undefined;
       if (!task) throw new Error("Task was not found in this run.");
-      if (task.status !== "running" || task.lease_owner !== workerId)
-        throw new Error("Task lease is not owned by this worker.");
+      if (
+        task.status !== "running" ||
+        task.lease_owner !== workerId ||
+        task.lease_expires_at === null ||
+        task.lease_expires_at <= now
+      ) {
+        throw new Error("Task lease is not owned by this worker or has expired.");
+      }
       this.db
         .prepare(
           "UPDATE tasks SET status='succeeded',output_json=?,evidence_json=?,error_code=NULL,error_message=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=? WHERE id=?",
