@@ -17,6 +17,7 @@ import {
 import { OmniRouter, routeOrdersFromEnvironment } from "@kurochan/omnirouter";
 import { AgentCatalog } from "@kurochan/agent-catalog";
 import { RunStore, type CreateRunInput } from "@kurochan/storage";
+import { PlanError, PlanService } from "@kurochan/orchestrator";
 
 export interface ServerOptions {
   readonly env?: Environment;
@@ -24,6 +25,7 @@ export interface ServerOptions {
   readonly providers?: ReturnType<typeof createProviderRegistry>;
   readonly store?: RunStore;
   readonly catalog?: AgentCatalog;
+  readonly planner?: PlanService;
 }
 
 function safeEqual(a: string, b: string): boolean {
@@ -104,6 +106,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       10,
     ),
   });
+  const planner = options.planner ?? new PlanService({ catalog, router });
 
   const app = Fastify({
     logger: options.logger ?? {
@@ -231,6 +234,47 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     profiles: routeOrdersFromEnvironment(env),
     providers: router.getProviderHealth(registry.statuses),
   }));
+
+  app.get("/v1/nexus/runbooks", async (_request, reply) => {
+    try {
+      const runbooks = await catalog.listRunbooks();
+      return {
+        source: "Agency Agents NEXUS strategy/runbooks.json",
+        pinnedCommit: (await catalog.metadata()).pinnedCommit,
+        data: runbooks.map(({ slug, title, mode, duration, summary, doc, roster }) => ({
+          slug, title, mode, duration, summary, doc, roster,
+        })),
+      };
+    } catch (error) {
+      requestWarning(app, error, "nexus_runbooks_unavailable");
+      return reply.code(503).send({
+        error: {
+          code: "nexus_runbooks_unavailable",
+          message: "Pinned NEXUS runbooks could not be loaded or validated.",
+          retryable: true,
+        },
+      });
+    }
+  });
+
+  app.get("/v1/nexus/strategy", async (_request, reply) => {
+    try {
+      return {
+        source: "Agency Agents NEXUS strategy/nexus-strategy.md",
+        pinnedCommit: (await catalog.metadata()).pinnedCommit,
+        content: await catalog.readNexusStrategy(24_000),
+      };
+    } catch (error) {
+      requestWarning(app, error, "nexus_strategy_unavailable");
+      return reply.code(503).send({
+        error: {
+          code: "nexus_strategy_unavailable",
+          message: "Pinned NEXUS strategy could not be loaded.",
+          retryable: true,
+        },
+      });
+    }
+  });
 
   app.get("/v1/agents/catalog", async (_request, reply) => {
     try {
@@ -377,6 +421,78 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
             requestId: request.id,
           },
         });
+    }
+  });
+
+  const PlanRequestSchema = z.object({
+    goal: z.string().trim().min(1).max(20_000),
+    profile: z.enum(["fast", "balanced", "quality"]).default("balanced"),
+    createdBy: z.string().trim().min(1).max(200).optional(),
+  }).strict();
+
+  app.post("/v1/runs/plan", async (request, reply) => {
+    const parsed = PlanRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: {
+          code: "invalid_plan_request",
+          message: "Request must include a goal and an optional valid OmniRouter profile.",
+          retryable: false,
+          requestId: request.id,
+        },
+      });
+    }
+    const abort = new AbortController();
+    request.raw.on("aborted", () => abort.abort());
+    try {
+      const plan = await planner.createPlan({
+        goal: parsed.data.goal,
+        profile: parsed.data.profile,
+        signal: abort.signal,
+      });
+      const input: CreateRunInput = {
+        goal: parsed.data.goal,
+        profile: parsed.data.profile,
+        tasks: plan.tasks,
+        ...(parsed.data.createdBy ? { createdBy: parsed.data.createdBy } : {}),
+      };
+      const run = store.createRun(input);
+      return reply.code(201).send({
+        run,
+        plan: {
+          summary: plan.summary,
+          selectedAgents: plan.selectedAgents,
+          provider: { id: plan.providerId, model: plan.model, latencyMs: plan.latencyMs },
+          planningAttempts: plan.attempts,
+        },
+        tasks: store.listTasks(run.id),
+        events: store.listEvents(run.id),
+      });
+    } catch (error) {
+      if (error instanceof PlanError) {
+        const status = error.code === "catalog_unavailable" ? 503
+          : error.code === "no_provider_available" || error.code === "no_specialists_found" ? 503
+          : error.code === "cancelled" ? 499
+          : error.retryable ? 502 : 422;
+        request.log.warn({ code: error.code, requestId: request.id }, "Run planning failed");
+        return reply.code(status).send({
+          error: {
+            code: error.code,
+            message: error.message,
+            retryable: error.retryable,
+            requestId: request.id,
+          },
+        });
+      }
+      requestWarning(app, error, "run_planning_failed");
+      return reply.code(500).send({
+        error: {
+          code: "run_planning_failed",
+          message: "The backend could not create the planned run.",
+          retryable: true,
+          requestId: request.id,
+        },
+      });
     }
   });
 
