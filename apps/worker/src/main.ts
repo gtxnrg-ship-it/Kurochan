@@ -19,7 +19,13 @@ function integerEnv(
   min: number,
   max: number,
 ): number {
-  return parseIntegerEnvironmentValue(name, process.env[name], fallback, min, max);
+  return parseIntegerEnvironmentValue(
+    name,
+    process.env[name],
+    fallback,
+    min,
+    max,
+  );
 }
 
 const registry = createProviderRegistry(process.env);
