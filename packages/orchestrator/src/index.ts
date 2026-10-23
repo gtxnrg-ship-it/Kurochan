@@ -5,3 +5,4 @@ export * from "./worker.js";
 export * from "./sandbox.js";
 export * from "./web-research.js";
 export * from "./github-project.js";
+export * from "./mcp-tools.js";
