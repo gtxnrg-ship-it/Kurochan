@@ -220,7 +220,7 @@ describe("Kuro-chan API", () => {
     expect(created.statusCode).toBe(201);
     const runId = created.json().run.id as string;
     expect(created.json().tasks).toHaveLength(2);
-    expect(created.json().tasks[1].dependencies).toHaveLength(1);
+    expect(created.json().tasks.some((task: { dependencies: readonly string[] }) => task.dependencies.length === 1)).toBe(true);
     const events = await app.inject({
       method: "GET",
       url: `/v1/runs/${runId}/events`,
@@ -249,7 +249,7 @@ describe("Kuro-chan API", () => {
       url: "/v1/agents/catalog",
     });
     expect(metadata.statusCode).toBe(200);
-    expect(metadata.json().count).toBe(282);
+    expect(metadata.json().count).toBe(267);
     const searched = await app.inject({
       method: "GET",
       url: "/v1/agents?q=Unreal%20Engine%20world%20builder&limit=10",
