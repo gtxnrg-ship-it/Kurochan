@@ -96,6 +96,8 @@ export function createProviderRegistry(
           baseUrl: spec.baseUrl,
           apiKey: spec.key,
           defaultModel: spec.model,
+          includeStreamUsage:
+            env[`${spec.capabilityPrefix}_STREAM_USAGE`]?.trim().toLowerCase() === "true",
           capabilities: capabilitiesFromEnvironment(
             env,
             spec.capabilityPrefix,
