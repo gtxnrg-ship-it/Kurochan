@@ -84,6 +84,18 @@ export interface ClaimOptions {
   readonly leaseMs?: number;
 }
 
+export type WorkerState = "idle" | "busy" | "waiting_for_approval" | "stopping";
+
+export interface WorkerHeartbeatRecord {
+  readonly workerId: string;
+  readonly state: WorkerState;
+  readonly currentTaskId?: string;
+  readonly metadata: unknown;
+  readonly startedAt: number;
+  readonly lastSeenAt: number;
+  readonly stale: boolean;
+}
+
 export interface FinishFailureInput {
   readonly runId: string;
   readonly taskId: string;
@@ -258,6 +270,14 @@ export class RunStore {
         task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
         type TEXT NOT NULL, payload_json TEXT NOT NULL, created_at INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS worker_heartbeats (
+        worker_id TEXT PRIMARY KEY,
+        state TEXT NOT NULL CHECK(state IN ('idle','busy','waiting_for_approval','stopping')),
+        current_task_id TEXT,
+        metadata_json TEXT NOT NULL,
+        started_at INTEGER NOT NULL,
+        last_seen_at INTEGER NOT NULL
+      );
       CREATE INDEX IF NOT EXISTS idx_runs_status_updated ON runs(status, updated_at);
       CREATE INDEX IF NOT EXISTS idx_tasks_claim ON tasks(status, available_at, created_at);
       CREATE INDEX IF NOT EXISTS idx_tasks_run_status ON tasks(run_id, status);
@@ -268,6 +288,51 @@ export class RunStore {
 
   close(): void {
     this.db.close();
+  }
+
+  recordWorkerHeartbeat(
+    workerId: string,
+    state: WorkerState,
+    currentTaskId?: string,
+    metadata: unknown = {},
+    now = Date.now(),
+  ): void {
+    assertText(workerId, "workerId", 200);
+    if (!["idle", "busy", "waiting_for_approval", "stopping"].includes(state)) {
+      throw new Error("Unknown worker state.");
+    }
+    if (currentTaskId !== undefined) assertText(currentTaskId, "currentTaskId", 200);
+    const metadataJson = encodeJson(metadata);
+    this.db.prepare(`
+      INSERT INTO worker_heartbeats(worker_id,state,current_task_id,metadata_json,started_at,last_seen_at)
+      VALUES(?,?,?,?,?,?)
+      ON CONFLICT(worker_id) DO UPDATE SET
+        state=excluded.state,
+        current_task_id=excluded.current_task_id,
+        metadata_json=excluded.metadata_json,
+        last_seen_at=excluded.last_seen_at
+    `).run(workerId, state, currentTaskId ?? null, metadataJson, now, now);
+  }
+
+  listWorkerHeartbeats(now = Date.now(), staleAfterMs = 30_000): readonly WorkerHeartbeatRecord[] {
+    if (!Number.isInteger(staleAfterMs) || staleAfterMs < 1000 || staleAfterMs > 600_000) {
+      throw new Error("staleAfterMs must be between 1000 and 600000.");
+    }
+    const rows = this.db.prepare(
+      "SELECT worker_id,state,current_task_id,metadata_json,started_at,last_seen_at FROM worker_heartbeats ORDER BY last_seen_at DESC",
+    ).all() as Array<{
+      worker_id: string; state: WorkerState; current_task_id: string | null;
+      metadata_json: string; started_at: number; last_seen_at: number;
+    }>;
+    return rows.map((row) => ({
+      workerId: row.worker_id,
+      state: row.state,
+      ...(row.current_task_id ? { currentTaskId: row.current_task_id } : {}),
+      metadata: JSON.parse(row.metadata_json) as unknown,
+      startedAt: row.started_at,
+      lastSeenAt: row.last_seen_at,
+      stale: now - row.last_seen_at > staleAfterMs,
+    }));
   }
 
   createRun(input: CreateRunInput, now = Date.now()): RunRecord {
