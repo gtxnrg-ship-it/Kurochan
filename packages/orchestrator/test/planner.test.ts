@@ -67,6 +67,32 @@ describe("PlanService", () => {
     expect(router.complete.mock.calls[0]![0].systemPrompt).toContain("NEXUS strategy excerpt");
   });
 
+  it("supports larger plans when a goal genuinely needs coordinated specialists", async () => {
+    const tasks = Array.from({ length: 16 }, (_, index) => ({
+      key: `task-${index + 1}`,
+      agentId: "engineering/backend-architect",
+      objective: `Deliver and verify workstream ${index + 1}.`,
+      dependsOn: [],
+    }));
+    const router = fakeRouter(JSON.stringify({
+      summary: "Coordinate a complex, multi-workstream delivery.",
+      tasks,
+    }));
+    const catalog = fakeCatalog();
+    const planner = new PlanService({ catalog, router });
+    const plan = await planner.createPlan({
+      goal: "Coordinate a complex platform build with parallel workstreams",
+      profile: "balanced",
+    });
+
+    expect(plan.tasks).toHaveLength(16);
+    expect(catalog.search).toHaveBeenCalledWith(
+      "Coordinate a complex platform build with parallel workstreams",
+      { limit: 100 },
+    );
+    expect(router.complete.mock.calls[0]![0].maxTokens).toBe(6000);
+  });
+
   it("refuses model-invented agent IDs", async () => {
     const router = fakeRouter(JSON.stringify({
       summary: "bad plan",
