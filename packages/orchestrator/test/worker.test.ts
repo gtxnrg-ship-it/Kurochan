@@ -201,7 +201,9 @@ describe("TaskWorker", () => {
     created.push(workspaceRoot);
     const runId = "6b8d4614-f06f-4b1f-a3bb-6c0f132ab847";
     const store = new RunStore(":memory:");
+    let worker: TaskWorker | undefined;
     let workStarted = 0;
+    let reviewerCalls = 0;
     let activeWork = 0;
     let maxConcurrentWork = 0;
     let markBothStarted: (() => void) | undefined;
@@ -240,7 +242,8 @@ describe("TaskWorker", () => {
               "independent consistency reviewer",
             )
           ) {
-            return {
+            reviewerCalls += 1;
+          return {
               providerId: "openrouter",
               model: "test-model",
               content: JSON.stringify({
@@ -286,7 +289,7 @@ describe("TaskWorker", () => {
           ["openrouter", fakeProvider],
         ]),
       });
-      const worker = new TaskWorker({
+      worker = = new TaskWorker({
         store,
         catalog: new AgentCatalog(catalogRoot),
         router,
@@ -317,8 +320,10 @@ describe("TaskWorker", () => {
       expect(
         store.listTasks(runId).every((task) => task.status === "succeeded"),
       ).toBe(true);
+      expect(reviewerCalls).toBe(1);
     } finally {
       releaseGate?.();
+      await worker?.stop();
       store.close();
     }
   });
