@@ -346,6 +346,84 @@ describe("RunStore", () => {
     }
   });
 
+  it("persists ordered conversation history with idempotent client message IDs", () => {
+    const store = makeStore();
+    try {
+      const conversation = store.createConversation(
+        { title: "New chat", createdBy: "local" },
+        100,
+      );
+      const user = store.appendConversationMessage(
+        conversation.id,
+        {
+          role: "user",
+          content: "Build a small API",
+          clientMessageId: "client-turn-1",
+        },
+        101,
+      );
+      const assistant = store.appendConversationMessage(
+        conversation.id,
+        {
+          role: "assistant",
+          content: "I'll plan the API and tests.",
+          providerId: "freellmapi",
+          model: "auto",
+          usage: { promptTokens: 30, completionTokens: 12 },
+          metadata: { routeProfile: "balanced" },
+        },
+        102,
+      );
+      const duplicate = store.appendConversationMessage(
+        conversation.id,
+        {
+          role: "user",
+          content: "Build a small API",
+          clientMessageId: "client-turn-1",
+        },
+        103,
+      );
+
+      expect(user.inserted).toBe(true);
+      expect(assistant.inserted).toBe(true);
+      expect(duplicate.inserted).toBe(false);
+      expect(duplicate.message.id).toBe(user.message.id);
+      expect(assistant.message.sequence).toBe(2);
+      expect(assistant.message.usage).toEqual({
+        promptTokens: 30,
+        completionTokens: 12,
+        totalTokens: 42,
+      });
+      expect(store.getConversation(conversation.id)).toMatchObject({
+        title: "Build a small API",
+        messageCount: 2,
+        version: 3,
+        updatedAt: 102,
+      });
+      expect(store.listConversationMessages(conversation.id).map((message) => message.role)).toEqual([
+        "user",
+        "assistant",
+      ]);
+      expect(
+        store.listConversationMessages(conversation.id, { beforeSequence: 2 }).map((message) => message.content),
+      ).toEqual(["Build a small API"]);
+      expect(() =>
+        store.appendConversationMessage(conversation.id, {
+          role: "user",
+          content: "Different content",
+          clientMessageId: "client-turn-1",
+        }),
+      ).toThrow(/different message content/);
+      expect(store.listConversations({ createdBy: "local" })).toHaveLength(1);
+      expect(store.listConversations({ createdBy: "someone-else" })).toHaveLength(0);
+      expect(store.deleteConversation(conversation.id)).toBe(true);
+      expect(store.listConversationMessages(conversation.id)).toEqual([]);
+      expect(store.deleteConversation(conversation.id)).toBe(false);
+    } finally {
+      store.close();
+    }
+  });
+
   it("supports approvals and cancellation", () => {
     const store = makeStore();
     try {
