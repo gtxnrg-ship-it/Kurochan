@@ -107,10 +107,10 @@ function streamDeltaFrom(value: unknown): string | undefined {
 }
 
 function parseStreamEvent(event: string): { done: boolean; chunks: ChatCompletionStreamChunk[] } {
-  const data = event.split(/\\r?\\n/)
+  const data = event.split(/\r?\n/)
     .filter((line) => line.startsWith("data:"))
     .map((line) => line.slice(5).replace(/^ /, ""))
-    .join("\\n")
+    .join("\n")
     .trim();
   if (!data) return { done: false, chunks: [] };
   if (data === "[DONE]") return { done: true, chunks: [] };
@@ -324,7 +324,7 @@ export class OpenAICompatibleChatProvider implements ChatProvider {
           throw new ProviderError("invalid_response", "Provider stream exceeded the configured size limit.");
         }
         buffer += decoder.decode(item.value, { stream: true });
-        const events = buffer.split(/\\r?\\n\\r?\\n/);
+        const events = buffer.split(/\r?\n\r?\n/);
         buffer = events.pop() ?? "";
         for (const event of events) {
           const parsed = parseStreamEvent(event);
