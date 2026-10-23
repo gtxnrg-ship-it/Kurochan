@@ -49,7 +49,7 @@ interface MutableProviderHealth {
   consecutiveFailures: number;
   openUntil: number;
   lastLatencyMs?: number;
-  lastErrorCode?: string;
+  lastErrorCode: string | undefined;
   successes: number;
   failures: number;
 }
@@ -176,6 +176,7 @@ export class OmniRouter {
         openUntil: 0,
         successes: 0,
         failures: 0,
+        lastErrorCode: undefined,
       });
     }
   }
@@ -254,6 +255,7 @@ export class OmniRouter {
         openUntil: 0,
         successes: 0,
         failures: 0,
+        lastErrorCode: undefined,
       };
       this.health.set(provider.id, health);
       if (health.openUntil > this.now()) {
