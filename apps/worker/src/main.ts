@@ -3,7 +3,11 @@ import { resolve } from "node:path";
 import { AgentCatalog } from "@kurochan/agent-catalog";
 import { createProviderRegistry } from "@kurochan/model-gateway";
 import { OmniRouter, routeOrdersFromEnvironment } from "@kurochan/omnirouter";
-import { DockerSandboxRuntime, TaskWorker, WebResearchRuntime } from "@kurochan/orchestrator";
+import {
+  DockerSandboxRuntime,
+  TaskWorker,
+  WebResearchRuntime,
+} from "@kurochan/orchestrator";
 import { RunStore } from "@kurochan/storage";
 
 function integerEnv(

@@ -663,22 +663,25 @@ export class TaskWorker {
                   signal,
                 )
               : call.name === "sandbox.run"
-              ? this.options.sandbox
-                ? await this.options.sandbox.execute(
+                ? this.options.sandbox
+                  ? await this.options.sandbox.execute(
+                      task.runId,
+                      call.arguments,
+                      signal,
+                    )
+                  : {
+                      name: "sandbox.run" as const,
+                      ok: false,
+                      error: {
+                        code: "sandbox_unavailable",
+                        message:
+                          "Command execution is disabled. Configure the isolated Docker sandbox before requesting shell commands.",
+                      },
+                    }
+                : await this.tools.execute(
                     task.runId,
-                    call.arguments,
-                    signal,
-                  )
-                : {
-                    name: "sandbox.run" as const,
-                    ok: false,
-                    error: {
-                      code: "sandbox_unavailable",
-                      message:
-                        "Command execution is disabled. Configure the isolated Docker sandbox before requesting shell commands.",
-                    },
-                  }
-              : await this.tools.execute(task.runId, call as WorkspaceToolCall);
+                    call as WorkspaceToolCall,
+                  );
           results.push(outcome);
           if (
             outcome.ok &&

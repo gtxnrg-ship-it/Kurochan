@@ -204,11 +204,19 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           ),
         })
       : undefined);
-  const webResearch = options.webResearch ?? new WebResearchRuntime({
-    ...(env.BRAVE_SEARCH_API_KEY?.trim() ? { apiKey: env.BRAVE_SEARCH_API_KEY.trim() } : {}),
-    ...(env.BRAVE_SEARCH_COUNTRY?.trim() ? { country: env.BRAVE_SEARCH_COUNTRY.trim() } : {}),
-    ...(env.BRAVE_SEARCH_LANG?.trim() ? { searchLang: env.BRAVE_SEARCH_LANG.trim() } : {}),
-  });
+  const webResearch =
+    options.webResearch ??
+    new WebResearchRuntime({
+      ...(env.BRAVE_SEARCH_API_KEY?.trim()
+        ? { apiKey: env.BRAVE_SEARCH_API_KEY.trim() }
+        : {}),
+      ...(env.BRAVE_SEARCH_COUNTRY?.trim()
+        ? { country: env.BRAVE_SEARCH_COUNTRY.trim() }
+        : {}),
+      ...(env.BRAVE_SEARCH_LANG?.trim()
+        ? { searchLang: env.BRAVE_SEARCH_LANG.trim() }
+        : {}),
+    });
   const worker = new TaskWorker({
     store,
     catalog,
