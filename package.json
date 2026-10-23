@@ -1,0 +1,29 @@
+{
+  "name": "kurochan",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.9.0",
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=10.0.0"
+  },
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c blue,green \"pnpm --filter @kurochan/server dev\" \"pnpm --filter @kurochan/web dev\"",
+    "dev:web": "pnpm --filter @kurochan/web dev",
+    "dev:api": "pnpm --filter @kurochan/server dev",
+    "build": "pnpm -r --if-present build",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "vitest run",
+    "lint": "prettier --check \"apps/**/*.{ts,tsx,js,json,css,html}\" \"packages/**/*.{ts,js,json}\" \"scripts/**/*.mjs\" \"*.{json,yaml,yml}\"",
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "format": "prettier --write \"apps/**/*.{ts,tsx,js,json,css,html}\" \"packages/**/*.{ts,js,json}\" \"scripts/**/*.mjs\" \"*.{json,yaml,yml}\""
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.30",
+    "concurrently": "^9.1.2",
+    "prettier": "^3.5.3",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.3"
+  }
+}
