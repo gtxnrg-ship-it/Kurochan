@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { parseIntegerEnvironmentValue } from "./config.js";
 import { resolve } from "node:path";
 import { AgentCatalog } from "@kurochan/agent-catalog";
 import { createProviderRegistry } from "@kurochan/model-gateway";
@@ -18,15 +19,7 @@ function integerEnv(
   min: number,
   max: number,
 ): number {
-  const raw = process.env[name];
-  if (raw === undefined || raw.trim() === "") return fallback;
-  const value = raw.split("").every((char) => char >= "0" && char <= "9")
-    ? Number(raw)
-    : Number.NaN;
-  if (!Number.isInteger(value) || value < min || value > max) {
-    throw new Error(`${name} must be an integer between ${min} and ${max}.`);
-  }
-  return value;
+  return parseIntegerEnvironmentValue(name, process.env[name], fallback, min, max);
 }
 
 const registry = createProviderRegistry(process.env);
