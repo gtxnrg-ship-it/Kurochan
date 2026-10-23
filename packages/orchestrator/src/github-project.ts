@@ -2,10 +2,11 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   lstat,
   mkdir,
+  open,
   readFile,
+  readdir,
   rename,
   rm,
-  writeFile,
 } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { z } from "zod";
@@ -290,24 +291,54 @@ export class GitHubProjectRuntime {
       }
       if (signal?.aborted) throw new ProjectIntegrationError("cancelled", "GitHub project operation was cancelled.", true);
       switch (call.name) {
-        case "github.checkout_repository":
+        case "github.checkout_repository": {
+          const result = await this.checkoutRepository(
+            runId,
+            CheckoutArgsSchema.parse(call.arguments),
+            signal,
+          );
           return {
             name: call.name,
             ok: true,
-            result: await this.checkoutRepository(runId, CheckoutArgsSchema.parse(call.arguments), signal),
+            result,
+            evidence: [
+              sourceEvidence(
+                String((result as { sourceUrl: string }).sourceUrl),
+                "Checked out " + String((result as { repository: string }).repository) +
+                  " at commit " + String((result as { baseCommit: string }).baseCommit),
+              ),
+            ],
           };
-        case "github.create_pull_request":
+        }
+        case "github.create_pull_request": {
           if (!this.canPublish) {
             throw new ProjectIntegrationError(
               "github_writes_disabled",
               "Publishing is disabled. Set KUROCHAN_GITHUB_WRITE_ENABLED=true after authorizing the repository and token.",
             );
           }
+          const result = await this.createPullRequest(
+            runId,
+            PullRequestArgsSchema.parse(call.arguments),
+            signal,
+          );
+          const payload = result as {
+            pullRequest: { url: string; number: number };
+            repository: string;
+          };
           return {
             name: call.name,
             ok: true,
-            result: await this.createPullRequest(runId, PullRequestArgsSchema.parse(call.arguments), signal),
+            result,
+            evidence: [
+              sourceEvidence(
+                payload.pullRequest.url,
+                "Created pull request #" + payload.pullRequest.number +
+                  " for " + payload.repository,
+              ),
+            ],
           };
+        }
       }
     } catch (error) {
       const typed = error as { code?: unknown; message?: unknown; retryable?: unknown };
@@ -354,7 +385,7 @@ export class GitHubProjectRuntime {
     if (directoryInfo.isSymbolicLink() || !directoryInfo.isDirectory()) {
       throw new ProjectIntegrationError("unsafe_workspace_path", "Run workspace must be a real directory.");
     }
-    if ((await (await import("node:fs/promises")).readdir(runDirectory)).length > 0) {
+    if ((await readdir(runDirectory)).length > 0) {
       throw new ProjectIntegrationError("workspace_not_empty", "Repository checkout requires an empty run workspace. Plan checkout as a prerequisite to file edits.");
     }
 
@@ -632,7 +663,7 @@ export class GitHubProjectRuntime {
     const directory = await this.metadataDirectory();
     const target = join(directory, runId + ".json");
     const temp = join(directory, runId + "." + randomUUID() + ".tmp");
-    const handle = await (await import("node:fs/promises")).open(temp, "wx", 0o600);
+    const handle = await open(temp, "wx", 0o600);
     try {
       await handle.writeFile(JSON.stringify(value), "utf8");
       await handle.sync();
