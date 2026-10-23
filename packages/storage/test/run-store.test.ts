@@ -248,6 +248,86 @@ describe("RunStore", () => {
     }
   });
 
+  it("persists provider request outcomes and aggregates only reported token usage", () => {
+    const store = makeStore();
+    try {
+      const run = store.createRun({
+        goal: "Track provider usage",
+        profile: "balanced",
+        tasks: [{
+          key: "task",
+          agentId: "engineering/backend-architect",
+          objective: "Complete a provider-backed task",
+        }],
+      }, 100);
+      const task = store.listTasks(run.id)[0]!;
+
+      store.recordProviderUsage({
+        providerId: "openrouter",
+        model: "test-model",
+        profile: "balanced",
+        operation: "task",
+        runId: run.id,
+        taskId: task.id,
+        latencyMs: 50,
+        outcome: "success",
+        usage: { promptTokens: 12, completionTokens: 8 },
+      }, 110);
+      store.recordProviderUsage({
+        providerId: "openrouter",
+        model: "test-model",
+        profile: "balanced",
+        operation: "task",
+        runId: run.id,
+        taskId: task.id,
+        latencyMs: 100,
+        outcome: "failure",
+        errorCode: "rate_limited",
+      }, 120);
+      store.recordProviderUsage({
+        providerId: "freellmapi",
+        model: "auto",
+        profile: "fast",
+        operation: "chat",
+        latencyMs: 20,
+        outcome: "success",
+      }, 130);
+
+      expect(store.summarizeProviderUsage(100, 120)).toEqual([{
+        providerId: "openrouter",
+        model: "test-model",
+        operation: "task",
+        requests: 2,
+        successfulRequests: 1,
+        failedRequests: 1,
+        requestsWithTokenUsage: 1,
+        requestsWithoutTokenUsage: 1,
+        promptTokens: 12,
+        completionTokens: 8,
+        totalTokens: 20,
+        averageLatencyMs: 75,
+        lastUsedAt: 120,
+      }]);
+      expect(store.summarizeProviderUsage(121, 200)).toEqual([{
+        providerId: "freellmapi",
+        model: "auto",
+        operation: "chat",
+        requests: 1,
+        successfulRequests: 1,
+        failedRequests: 0,
+        requestsWithTokenUsage: 0,
+        requestsWithoutTokenUsage: 1,
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+        averageLatencyMs: 20,
+        lastUsedAt: 130,
+      }]);
+    } finally {
+      store.close();
+    }
+  });
+
   it("supports approvals and cancellation", () => {
     const store = makeStore();
     try {
