@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import Database from "better-sqlite3";
 import type { ProviderId, RouteProfile, RunStatus, TaskStatus } from "@kurochan/contracts";
 
@@ -337,6 +339,17 @@ export class RunStore {
       this.db.prepare("UPDATE tasks SET status='succeeded',output_json=?,evidence_json=?,error_code=NULL,error_message=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=? WHERE id=?")
         .run(outputJson, evidenceJson, now, taskId);
       this.addEvent(runId, taskId, "task.succeeded", { evidenceCount: evidence.length }, now);
+      // Newly unblocked tasks become claimable in the same transaction as their dependency's success.
+      this.db.prepare(`
+        UPDATE tasks SET status='ready', available_at=?, updated_at=?
+        WHERE run_id=? AND status='pending'
+          AND id IN (SELECT task_id FROM task_dependencies WHERE depends_on_task_id=?)
+          AND NOT EXISTS (
+            SELECT 1 FROM task_dependencies d
+            JOIN tasks dep ON dep.id=d.depends_on_task_id
+            WHERE d.task_id=tasks.id AND dep.status <> 'succeeded'
+          )
+      `).run(now, now, runId, taskId);
       const tasks = this.db.prepare("SELECT status FROM tasks WHERE run_id=?").all(runId) as Array<{ status: TaskStatus }>;
       const nextStatus: RunStatus = tasks.every((t) => t.status === "succeeded") ? "verifying" : "running";
       this.db.prepare("UPDATE runs SET status=?,updated_at=?,version=version+1 WHERE id=?").run(nextStatus, now, runId);
@@ -469,7 +482,3 @@ export class RunStore {
   }
 }
 
-function requireFilesystem(): typeof import("node:fs") {
-  // Static require is not available in ESM; use createRequire to keep constructor synchronous.
-  return require("node:fs") as typeof import("node:fs");
-}
