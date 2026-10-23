@@ -3,6 +3,7 @@ import { z } from "zod";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 
 const ServerIdSchema = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/);
 const EnvironmentNameSchema = z.string().regex(/^[A-Z_][A-Z0-9_]{0,127}$/);
@@ -252,7 +253,8 @@ function createSdkAdapter(config: McpServerConfig, environment: McpEnvironment):
 
   const client = new Client({ name: "kurochan-agent-runtime", version: "0.1.0" }, { capabilities: {} });
   return {
-    connect: () => client.connect(transport),
+    // The SDK v1 HTTP transport types `sessionId` as string | undefined, while Transport omits undefined under exactOptionalPropertyTypes.
+    connect: () => client.connect(transport as unknown as Transport),
     listTools: async () => {
       const response = await client.listTools();
       return { tools: response.tools as RawMcpTool[] };
