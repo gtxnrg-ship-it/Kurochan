@@ -37,6 +37,7 @@ jobs:
           packages/orchestrator/src/web-research.ts
           packages/orchestrator/src/worker.ts
           packages/orchestrator/test/web-research.test.ts
+          packages/orchestrator/test/worker.test.ts
       - name: Run complete repository checks before publishing formatting
         run: pnpm check
       - name: Commit formatting and dispatch canonical CI
