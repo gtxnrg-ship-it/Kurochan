@@ -332,12 +332,12 @@ describe("Kuro-chan API", () => {
         tasks: [
           {
             key: "research",
-            agentId: "research/research-analyst",
+            agentId: "game-development/unreal-engine/unreal-world-builder",
             objective: "Gather evidence",
           },
           {
             key: "build",
-            agentId: "engineering/engineering-backend-architect",
+            agentId: "game-development/unreal-engine/unreal-world-builder",
             objective: "Build from evidence",
             dependsOn: ["research"],
           },
