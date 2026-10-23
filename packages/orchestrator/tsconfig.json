@@ -1,0 +1,33 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "composite": true,
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "references": [
+    {
+      "path": "../contracts"
+    },
+    {
+      "path": "../agent-catalog"
+    },
+    {
+      "path": "../model-gateway"
+    },
+    {
+      "path": "../omnirouter"
+    },
+    {
+      "path": "../storage"
+    }
+  ],
+  "include": [
+    "src/**/*.ts"
+  ]
+}
