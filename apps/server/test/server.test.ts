@@ -277,6 +277,94 @@ describe("Kuro-chan API", () => {
     expect(missing.statusCode).toBe(404);
   });
 
+  it("streams conversation replies, persists only completed output, and replays the saved reply", async () => {
+    const store = new RunStore(":memory:");
+    const stream = vi.fn(async () =>
+      (async function* () {
+        yield { content: "Hello" };
+        yield {
+          content: " from Kuro-chan.",
+          usage: { promptTokens: 8, completionTokens: 5, totalTokens: 13 },
+        };
+      })(),
+    );
+    const freellmapi: ChatProvider = {
+      id: "freellmapi",
+      displayName: "FreeLLMAPI",
+      defaultModel: "auto",
+      isConfigured: true,
+      capabilities: { text: true, streaming: true },
+      complete: async (): Promise<ChatCompletionOutput> => ({
+        providerId: "freellmapi",
+        model: "auto",
+        content: "non-streaming fallback",
+        latencyMs: 1,
+      }),
+      stream,
+    };
+    app = buildServer({
+      env: {},
+      providers: {
+        providers: new Map<ProviderId, ChatProvider>([["freellmapi", freellmapi]]),
+        statuses: [{
+          id: "freellmapi",
+          name: "FreeLLMAPI",
+          configured: true,
+          defaultModel: "auto",
+          capabilityNotes: [],
+          capabilities: {
+            text: true,
+            vision: false,
+            tools: false,
+            json: false,
+            streaming: true,
+            reasoning: false,
+          },
+        }],
+      },
+      logger: false,
+      store,
+    });
+    const created = await app.inject({
+      method: "POST",
+      url: "/v1/conversations",
+      payload: {},
+    });
+    const conversationId = created.json().conversation.id as string;
+    const url = `/v1/conversations/${conversationId}/messages`;
+    const payload = {
+      content: "Say hello",
+      clientMessageId: "streaming-turn-001",
+      model: "freellmapi/auto",
+      stream: true,
+    };
+
+    const response = await app.inject({ method: "POST", url, payload });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toContain("text/event-stream");
+    expect(response.body).toContain('"content":"Hello"');
+    expect(response.body).toContain('"content":" from Kuro-chan."');
+    expect(response.body).toContain("data: [DONE]");
+    expect(stream).toHaveBeenCalledOnce();
+
+    const history = store.listConversationMessages(conversationId);
+    expect(history.map((message) => message.role)).toEqual(["user", "assistant"]);
+    expect(history[1]).toMatchObject({
+      content: "Hello from Kuro-chan.",
+      providerId: "freellmapi",
+      model: "auto",
+      usage: { promptTokens: 8, completionTokens: 5, totalTokens: 13 },
+    });
+
+    const replay = await app.inject({ method: "POST", url, payload });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.headers["content-type"]).toContain("text/event-stream");
+    expect(replay.body).toContain('"content":"Hello from Kuro-chan."');
+    expect(replay.body).toContain("data: [DONE]");
+    expect(stream).toHaveBeenCalledOnce();
+    expect(store.listConversationMessages(conversationId)).toHaveLength(2);
+  });
+
   it("starts a coordinated agent run from a conversation and links the run back into chat history", async () => {
     const store = new RunStore(":memory:");
     const plan = {
