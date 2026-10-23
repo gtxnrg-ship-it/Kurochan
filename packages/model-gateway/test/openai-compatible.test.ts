@@ -97,6 +97,8 @@ describe("OpenAICompatibleChatProvider", () => {
             "",
             'data: {"choices":[{"delta":{"content":" world"}}]}',
             "",
+            'data: {"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}',
+            "",
             "data: [DONE]",
             "",
           ].join("\n"),
@@ -113,20 +115,26 @@ describe("OpenAICompatibleChatProvider", () => {
       apiKey: "secret-test-key",
       defaultModel: "test-model",
       capabilities: { streaming: true },
+      includeStreamUsage: true,
       fetchImpl,
     });
     const stream = await provider.stream({
       messages: [{ role: "user", content: "hi" }],
       requiredCapabilities: ["text", "streaming"],
     });
-    const chunks: string[] = [];
-    for await (const chunk of stream) chunks.push(chunk.content);
-    expect(chunks).toEqual(["hello", " world"]);
+    const chunks: Array<{ content: string; usage?: { promptTokens?: number; completionTokens?: number; totalTokens?: number } }> = [];
+    for await (const chunk of stream) chunks.push(chunk);
+    expect(chunks).toEqual([
+      { content: "hello" },
+      { content: " world" },
+      { content: "", usage: { promptTokens: 3, completionTokens: 2, totalTokens: 5 } },
+    ]);
     expect(
       JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body)),
     ).toMatchObject({
       model: "test-model",
       stream: true,
+      stream_options: { include_usage: true },
     });
     expect(
       String(
