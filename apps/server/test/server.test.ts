@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { buildServer, validateServerConfiguration } from "../src/server.js";
+import type { PlanService } from "@kurochan/orchestrator";
 import { RunStore } from "@kurochan/storage";
 import type { ProviderId } from "@kurochan/contracts";
 import type {
@@ -135,6 +136,194 @@ describe("Kuro-chan API", () => {
     expect(response.json()).toMatchObject({
       error: { code: "invalid_usage_period" },
     });
+  });
+
+  it("persists conversational replies, replays idempotent messages, and deletes a thread cleanly", async () => {
+    const store = new RunStore(":memory:");
+    const calls: ChatCompletionInput[] = [];
+    const complete = vi.fn(async (input: ChatCompletionInput): Promise<ChatCompletionOutput> => {
+      calls.push(input);
+      return {
+        providerId: "freellmapi",
+        model: input.model ?? "auto",
+        content: "Assistant reply " + calls.length,
+        latencyMs: 7,
+        usage: { promptTokens: 15, completionTokens: 4, totalTokens: 19 },
+      };
+    });
+    const freellmapi: ChatProvider = {
+      id: "freellmapi",
+      displayName: "FreeLLMAPI",
+      defaultModel: "auto",
+      isConfigured: true,
+      capabilities: { text: true, streaming: true },
+      complete,
+    };
+    app = buildServer({
+      env: {},
+      providers: {
+        providers: new Map<ProviderId, ChatProvider>([["freellmapi", freellmapi]]),
+        statuses: [{
+          id: "freellmapi",
+          name: "FreeLLMAPI",
+          configured: true,
+          defaultModel: "auto",
+          capabilityNotes: [],
+          capabilities: {
+            text: true,
+            vision: false,
+            tools: false,
+            json: false,
+            streaming: true,
+            reasoning: false,
+          },
+        }],
+      },
+      logger: false,
+      store,
+    });
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/v1/conversations",
+      payload: { title: "API helper chat" },
+    });
+    expect(created.statusCode).toBe(201);
+    const conversationId = created.json().conversation.id as string;
+
+    const first = await app.inject({
+      method: "POST",
+      url: `/v1/conversations/${conversationId}/messages`,
+      payload: {
+        content: "Can you outline a tiny API?",
+        clientMessageId: "mobile-turn-001",
+        model: "freellmapi/auto",
+      },
+    });
+    expect(first.statusCode).toBe(200);
+    expect(first.json()).toMatchObject({
+      userMessage: { role: "user", sequence: 1 },
+      assistantMessage: {
+        role: "assistant",
+        sequence: 2,
+        providerId: "freellmapi",
+        model: "auto",
+        usage: { promptTokens: 15, completionTokens: 4, totalTokens: 19 },
+      },
+    });
+
+    const replay = await app.inject({
+      method: "POST",
+      url: `/v1/conversations/${conversationId}/messages`,
+      payload: {
+        content: "Can you outline a tiny API?",
+        clientMessageId: "mobile-turn-001",
+        model: "freellmapi/auto",
+      },
+    });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json().idempotentReplay).toBe(true);
+    expect(replay.json().assistantMessage.id).toBe(first.json().assistantMessage.id);
+    expect(complete).toHaveBeenCalledOnce();
+
+    const second = await app.inject({
+      method: "POST",
+      url: `/v1/conversations/${conversationId}/messages`,
+      payload: {
+        content: "Now add tests.",
+        clientMessageId: "mobile-turn-002",
+        model: "freellmapi/auto",
+      },
+    });
+    expect(second.statusCode).toBe(200);
+    expect(calls[1]?.messages.map((message) => message.role)).toEqual([
+      "user",
+      "assistant",
+      "user",
+    ]);
+
+    const detail = await app.inject({
+      method: "GET",
+      url: `/v1/conversations/${conversationId}?messageLimit=20`,
+    });
+    expect(detail.statusCode).toBe(200);
+    expect(detail.json().conversation.messageCount).toBe(4);
+    expect(detail.json().messages).toHaveLength(4);
+
+    const list = await app.inject({ method: "GET", url: "/v1/conversations?limit=10" });
+    expect(list.statusCode).toBe(200);
+    expect(list.json().data).toHaveLength(1);
+
+    const removed = await app.inject({
+      method: "DELETE",
+      url: `/v1/conversations/${conversationId}`,
+    });
+    expect(removed.statusCode).toBe(200);
+    const missing = await app.inject({
+      method: "GET",
+      url: `/v1/conversations/${conversationId}`,
+    });
+    expect(missing.statusCode).toBe(404);
+  });
+
+  it("starts a coordinated agent run from a conversation and links the run back into chat history", async () => {
+    const store = new RunStore(":memory:");
+    const plan = {
+      createPlan: vi.fn(async () => ({
+        summary: "Implement, test, and review the API.",
+        tasks: [{
+          key: "implementation",
+          agentId: "game-development/unreal-engine/unreal-world-builder",
+          objective: "Implement the requested project changes.",
+          dependsOn: [],
+        }],
+        selectedAgents: [{
+          id: "game-development/unreal-engine/unreal-world-builder",
+          name: "Unreal World Builder",
+          division: "game-development",
+        }],
+        providerId: "freellmapi",
+        model: "auto",
+        latencyMs: 5,
+        attempts: 1,
+      })),
+    };
+    app = buildServer({
+      env: {},
+      planner: plan as unknown as PlanService,
+      logger: false,
+      store,
+    });
+    const created = await app.inject({
+      method: "POST",
+      url: "/v1/conversations",
+      payload: {},
+    });
+    const conversationId = created.json().conversation.id as string;
+    const response = await app.inject({
+      method: "POST",
+      url: `/v1/conversations/${conversationId}/runs`,
+      payload: {
+        goal: "Build and verify the requested API",
+        profile: "balanced",
+      },
+    });
+    expect(response.statusCode).toBe(201);
+    expect(response.json().run.status).toBe("queued");
+    expect(response.json().plan.selectedAgents).toHaveLength(1);
+    expect(response.json().message).toMatchObject({
+      role: "assistant",
+      runId: response.json().run.id,
+    });
+    expect(response.json().message.metadata).toMatchObject({
+      kind: "run_started",
+      selectedAgents: [{
+        id: "game-development/unreal-engine/unreal-world-builder",
+      }],
+    });
+    expect(store.getConversation(conversationId)?.messageCount).toBe(1);
+    expect(store.getRun(response.json().run.id)?.createdBy).toBe("local");
+    expect(plan.createPlan).toHaveBeenCalledOnce();
   });
 
   it("reports missing FreeLLMAPI configuration without trying to invent a key", async () => {
