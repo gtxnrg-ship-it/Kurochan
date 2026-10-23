@@ -18,6 +18,8 @@ export interface ServerOptions {
   readonly env?: Environment;
   readonly logger?: boolean;
   readonly providers?: ReturnType<typeof createProviderRegistry>;
+  readonly store?: RunStore;
+  readonly catalog?: AgentCatalog;
 }
 
 function safeEqual(a: string, b: string): boolean {
@@ -177,7 +179,9 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     const query = request.query as Record<string, unknown>;
     const q = typeof query.q === "string" ? query.q : "";
     const division = typeof query.division === "string" ? query.division : undefined;
-    const limit = parseBoundedInteger(query.limit, 50, 1, 100);
+    let limit: number;
+    try { limit = parseBoundedInteger(query.limit, 50, 1, 100); }
+    catch { return reply.code(400).send({ error: { code: "invalid_query", message: "limit must be an integer from 1 to 100.", retryable: false } }); }
     try {
       if (q.trim()) return { data: await catalog.search(q, { ...(division ? { division } : {}), limit }) };
       return { data: await catalog.list({ ...(division ? { division } : {}), limit }) };
@@ -230,7 +234,9 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
 
   app.get("/v1/runs", async (request, reply) => {
     const query = request.query as Record<string, unknown>;
-    const limit = parseBoundedInteger(query.limit, 50, 1, 200);
+    let limit: number;
+    try { limit = parseBoundedInteger(query.limit, 50, 1, 200); }
+    catch { return reply.code(400).send({ error: { code: "invalid_query", message: "limit must be an integer from 1 to 200.", retryable: false } }); }
     const beforeRaw = query.before;
     const before = typeof beforeRaw === "string" && /^\\d+$/.test(beforeRaw) ? Number(beforeRaw) : undefined;
     if (beforeRaw !== undefined && before === undefined) return reply.code(400).send({ error: { code: "invalid_cursor", message: "The before cursor must be a positive integer timestamp.", retryable: false } });
@@ -249,8 +255,12 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     const { runId } = request.params as { runId: string };
     if (!store.getRun(runId)) return reply.code(404).send({ error: { code: "run_not_found", message: "Run not found.", retryable: false } });
     const query = request.query as Record<string, unknown>;
-    const afterId = parseBoundedInteger(query.afterId, 0, 0, Number.MAX_SAFE_INTEGER);
-    const limit = parseBoundedInteger(query.limit, 200, 1, 1000);
+    let afterId: number;
+    let limit: number;
+    try {
+      afterId = parseBoundedInteger(query.afterId, 0, 0, Number.MAX_SAFE_INTEGER);
+      limit = parseBoundedInteger(query.limit, 200, 1, 1000);
+    } catch { return reply.code(400).send({ error: { code: "invalid_query", message: "Event cursor or limit is outside the allowed range.", retryable: false } }); }
     return { data: store.listEvents(runId, afterId, limit) };
   });
 

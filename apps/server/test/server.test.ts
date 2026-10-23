@@ -68,7 +68,7 @@ describe("Kuro-chan API", () => {
         { id: "freellmapi" as const, name: "FreeLLMAPI", configured: true, defaultModel: "free-default", capabilityNotes: [] },
       ],
     };
-    app = buildServer({ env: {}, providers, logger: false });
+    app = buildServer({ env: {}, providers, logger: false, store: new RunStore(":memory:") });
     const response = await app.inject({
       method: "POST",
       url: "/v1/chat/completions",
@@ -91,7 +91,7 @@ describe("Kuro-chan API", () => {
   });
 
   it("validates malformed inference requests before contacting a provider", async () => {
-    app = buildServer({ env: {}, logger: false });
+    app = buildServer({ env: {}, logger: false, store: new RunStore(":memory:") });
     const response = await app.inject({
       method: "POST", url: "/v1/chat/completions",
       payload: { model: "omni/balanced", messages: [] },
@@ -99,4 +99,46 @@ describe("Kuro-chan API", () => {
     expect(response.statusCode).toBe(400);
     expect(response.json()).toMatchObject({ error: { code: "invalid_request" } });
   });
+  it("creates a run graph, exposes its events, and supports cancellation", async () => {
+    app = buildServer({ env: {}, logger: false, store: new RunStore(":memory:") });
+    const created = await app.inject({
+      method: "POST", url: "/v1/runs",
+      payload: {
+        goal: "Build a verified project",
+        profile: "balanced",
+        tasks: [
+          { key: "research", agentId: "research/research-analyst", objective: "Gather evidence" },
+          { key: "build", agentId: "engineering/engineering-backend-architect", objective: "Build from evidence", dependsOn: ["research"] },
+        ],
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const runId = created.json().run.id as string;
+    expect(created.json().tasks).toHaveLength(2);
+    expect(created.json().tasks[1].dependencies).toHaveLength(1);
+    const events = await app.inject({ method: "GET", url: `/v1/runs/${runId}/events` });
+    expect(events.statusCode).toBe(200);
+    expect(events.json().data.map((event: { type: string }) => event.type)).toContain("run.plan_created");
+    const cancelled = await app.inject({ method: "POST", url: `/v1/runs/${runId}/cancel`, payload: { reason: "user requested stop" } });
+    expect(cancelled.statusCode).toBe(200);
+    expect(cancelled.json().run.status).toBe("cancelled");
+  });
+
+  it("exposes catalog metadata and searches agents without exposing full prompts", async () => {
+    app = buildServer({ env: {}, logger: false, store: new RunStore(":memory:") });
+    const metadata = await app.inject({ method: "GET", url: "/v1/agents/catalog" });
+    expect(metadata.statusCode).toBe(200);
+    expect(metadata.json().count).toBe(298);
+    const searched = await app.inject({ method: "GET", url: "/v1/agents?q=Unreal%20Engine%20world%20builder&limit=10" });
+    expect(searched.statusCode).toBe(200);
+    expect(searched.json().data.length).toBeGreaterThan(0);
+    expect(JSON.stringify(searched.json())).not.toContain("Core Mission");
+  });
+
+  it("rejects invalid pagination values with 400 rather than an internal error", async () => {
+    app = buildServer({ env: {}, logger: false, store: new RunStore(":memory:") });
+    const response = await app.inject({ method: "GET", url: "/v1/runs?limit=9999" });
+    expect(response.statusCode).toBe(400);
+  });
+
 });
