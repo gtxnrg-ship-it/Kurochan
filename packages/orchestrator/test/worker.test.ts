@@ -195,6 +195,109 @@ describe("TaskWorker", () => {
       store.close();
     }
   });
+  it("runs independent specialist tasks concurrently up to the configured worker limit", async () => {
+    const catalogRoot = await fakeCatalogRoot();
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "kuro-workspaces-"));
+    created.push(workspaceRoot);
+    const runId = "6b8d4614-f06f-4b1f-a3bb-6c0f132ab847";
+    const store = new RunStore(":memory:");
+    let workStarted = 0;
+    let activeWork = 0;
+    let maxConcurrentWork = 0;
+    let markBothStarted: (() => void) | undefined;
+    const bothStarted = new Promise<void>((resolveBoth) => {
+      markBothStarted = resolveBoth;
+    });
+    let releaseGate: (() => void) | undefined;
+    const gate = new Promise<void>((resolveGate) => {
+      releaseGate = resolveGate;
+    });
+
+    try {
+      store.createRun({
+        id: runId,
+        goal: "Run two independent specialist tasks in parallel",
+        profile: "balanced",
+        tasks: [
+          {
+            key: "research",
+            agentId: "engineering/engineering-test-agent",
+            objective: "Independently summarize the requested project structure.",
+          },
+          {
+            key: "implementation",
+            agentId: "engineering/engineering-test-agent",
+            objective: "Independently outline the implementation approach.",
+          },
+        ],
+      });
+
+      const fakeProvider = provider(async (input: ChatCompletionInput): Promise<ChatCompletionOutput> => {
+        if ((input.systemPrompt ?? "").includes("independent consistency reviewer")) {
+          return {
+            providerId: "openrouter",
+            model: "test-model",
+            content: JSON.stringify({
+              passed: true,
+              summary: "Both independent specialist outputs are present.",
+              checks: [{ name: "Both tasks completed", passed: true, notes: "Both task records reached succeeded before review." }],
+              blockers: [],
+            }),
+            latencyMs: 1,
+          };
+        }
+
+        workStarted += 1;
+        activeWork += 1;
+        maxConcurrentWork = Math.max(maxConcurrentWork, activeWork);
+        if (workStarted === 2) markBothStarted?.();
+        try {
+          await gate;
+        } finally {
+          activeWork -= 1;
+        }
+        return {
+          providerId: "openrouter",
+          model: "test-model",
+          content: JSON.stringify({
+            status: "completed",
+            summary: "Produced an independent workstream result.",
+            toolCalls: [],
+            evidence: [],
+          }),
+          latencyMs: 1,
+        };
+      });
+      const router = new OmniRouter({
+        providers: new Map<ProviderId, ChatProvider>([["openrouter", fakeProvider]]),
+      });
+      const worker = new TaskWorker({
+        store,
+        catalog: new AgentCatalog(catalogRoot),
+        router,
+        workspaceRoot: resolve(workspaceRoot),
+        concurrency: 2,
+        pollIntervalMs: 100,
+      });
+
+      worker.start();
+      await Promise.race([
+        bothStarted,
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Second independent task did not start.")), 3_000)),
+      ]);
+      expect(workStarted).toBe(2);
+      expect(maxConcurrentWork).toBe(2);
+      releaseGate?.();
+      await vi.waitFor(() => {
+        expect(store.getRun(runId)?.status).toBe("completed");
+      }, { timeout: 5_000 });
+      expect(store.listTasks(runId).every((task) => task.status === "succeeded")).toBe(true);
+    } finally {
+      releaseGate?.();
+      store.close();
+    }
+  });
+
   it("cancels an in-flight model request when the run is cancelled", async () => {
     const catalogRoot = await fakeCatalogRoot();
     const workspaceRoot = await mkdtemp(join(tmpdir(), "kuro-workspaces-"));
