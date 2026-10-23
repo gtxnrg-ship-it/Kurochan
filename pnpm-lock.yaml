@@ -47,6 +47,9 @@ importers:
       '@kurochan/omnirouter':
         specifier: workspace:*
         version: link:../../packages/omnirouter
+      '@kurochan/orchestrator':
+        specifier: workspace:*
+        version: link:../../packages/orchestrator
       '@kurochan/storage':
         specifier: workspace:*
         version: link:../../packages/storage
@@ -59,6 +62,31 @@ importers:
       zod:
         specifier: ^3.24.2
         version: 3.25.76
+    devDependencies:
+      tsx:
+        specifier: ^4.19.3
+        version: 4.23.15
+
+  apps/worker:
+    dependencies:
+      '@kurochan/agent-catalog':
+        specifier: workspace:*
+        version: link:../../packages/agent-catalog
+      '@kurochan/model-gateway':
+        specifier: workspace:*
+        version: link:../../packages/model-gateway
+      '@kurochan/omnirouter':
+        specifier: workspace:*
+        version: link:../../packages/omnirouter
+      '@kurochan/orchestrator':
+        specifier: workspace:*
+        version: link:../../packages/orchestrator
+      '@kurochan/storage':
+        specifier: workspace:*
+        version: link:../../packages/storage
+      dotenv:
+        specifier: ^16.5.0
+        version: 16.6.1
     devDependencies:
       tsx:
         specifier: ^4.19.3
@@ -90,6 +118,27 @@ importers:
       '@kurochan/model-gateway':
         specifier: workspace:*
         version: link:../model-gateway
+
+  packages/orchestrator:
+    dependencies:
+      '@kurochan/agent-catalog':
+        specifier: workspace:*
+        version: link:../agent-catalog
+      '@kurochan/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@kurochan/model-gateway':
+        specifier: workspace:*
+        version: link:../model-gateway
+      '@kurochan/omnirouter':
+        specifier: workspace:*
+        version: link:../omnirouter
+      '@kurochan/storage':
+        specifier: workspace:*
+        version: link:../storage
+      zod:
+        specifier: ^3.24.2
+        version: 3.25.76
 
   packages/storage:
     dependencies:
