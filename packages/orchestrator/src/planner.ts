@@ -90,18 +90,75 @@ function assertAcyclic(tasks: readonly z.infer<typeof PlannedTaskSchema>[]): voi
   for (const task of tasks) visit(task.key);
 }
 
-function uniqueAgents(groups: readonly (readonly AgentProfile[])[], max = 24): AgentProfile[] {
-  const seen = new Set<string>();
-  const result: AgentProfile[] = [];
-  for (const group of groups) {
+const COMMON_GOAL_WORDS = new Set([
+  "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "how",
+  "i", "in", "into", "is", "it", "of", "on", "or", "our", "that", "the",
+  "their", "this", "to", "us", "we", "with", "you", "your",
+]);
+
+function goalTerms(value: string): string[] {
+  return [...new Set(
+    value.toLowerCase()
+      .replace(/[^\p{L}\p{N}\s-]/gu, " ")
+      .split(/\s+/)
+      .filter((term) => term.length > 1 && !COMMON_GOAL_WORDS.has(term)),
+  )];
+}
+
+function scoreAgentForGoal(goal: string, profile: AgentProfile): number {
+  const terms = goalTerms(goal);
+  const name = profile.name.toLowerCase();
+  const id = profile.id.toLowerCase().replaceAll("/", " ");
+  const division = profile.division.toLowerCase();
+  const description = profile.description.toLowerCase();
+  const vibe = (profile.vibe ?? "").toLowerCase();
+  const tools = profile.tools.join(" ").toLowerCase();
+  const corpus = `${name} ${id} ${division} ${description} ${vibe} ${tools}`;
+  let score = 0;
+  for (const term of terms) {
+    if (name === term) score += 14;
+    else if (name.includes(term)) score += 7;
+    if (id.includes(term)) score += 5;
+    if (description.includes(term)) score += 3;
+    if (division.includes(term)) score += 2;
+    if (vibe.includes(term) || tools.includes(term)) score += 1;
+    if (!corpus.includes(term)) score -= 0.25;
+  }
+  if (terms.length && terms.every((term) => corpus.includes(term))) score += 3;
+  return score;
+}
+
+function rankCatalogAgents(
+  goal: string,
+  allProfiles: readonly AgentProfile[],
+  retrievalGroups: readonly (readonly (AgentProfile & { readonly score?: number })[])[],
+  runbookAgentIds: ReadonlySet<string>,
+  max: number,
+): AgentProfile[] {
+  const retrievalScores = new Map<string, number>();
+  for (const group of retrievalGroups) {
     for (const profile of group) {
-      if (seen.has(profile.id)) continue;
-      seen.add(profile.id);
-      result.push(profile);
-      if (result.length >= max) return result;
+      const candidateScore = typeof profile.score === "number" ? profile.score : 0;
+      retrievalScores.set(profile.id, Math.max(retrievalScores.get(profile.id) ?? 0, candidateScore));
     }
   }
-  return result;
+  const ranked = allProfiles.map((profile, index) => ({
+    profile,
+    index,
+    score:
+      scoreAgentForGoal(goal, profile) +
+      Math.min(4, (retrievalScores.get(profile.id) ?? 0) * 0.1) +
+      (runbookAgentIds.has(profile.id) ? 10 : 0),
+  })).sort((a, b) =>
+    b.score - a.score ||
+    a.profile.name.localeCompare(b.profile.name) ||
+    a.index - b.index,
+  );
+  const useful = ranked.filter((entry) => entry.score > 0 || runbookAgentIds.has(entry.profile.id));
+  const ordered = useful.length >= Math.min(5, max)
+    ? useful
+    : [...useful, ...ranked.filter((entry) => !useful.includes(entry))];
+  return ordered.slice(0, max).map((entry) => entry.profile);
 }
 
 function safeAgentDescription(profile: AgentProfile): string {
@@ -150,37 +207,34 @@ export class PlanService {
     let nexusStrategy: string;
     try {
       const searchResults = await Promise.all([
+        this.options.catalog.list({ limit: 1000 }),
         this.options.catalog.search(goal, { limit: 100 }),
         this.options.catalog.search("research planning requirements " + goal, { limit: 100 }),
         this.options.catalog.listRunbooks(),
         this.options.catalog.readNexusStrategy(8_000),
       ]);
-      const goalMatches = searchResults[0] as readonly AgentProfile[];
-      const researchMatches = searchResults[1] as readonly AgentProfile[];
-      const runbooks = searchResults[2] as readonly AgentRunbook[];
-      nexusStrategy = searchResults[3] as string;
-      candidates = uniqueAgents([goalMatches, researchMatches], this.options.maxCandidates ?? 64);
+      const allProfiles = searchResults[0] as readonly AgentProfile[];
+      const goalMatches = searchResults[1] as readonly (AgentProfile & { readonly score?: number })[];
+      const researchMatches = searchResults[2] as readonly (AgentProfile & { readonly score?: number })[];
+      const runbooks = searchResults[3] as readonly AgentRunbook[];
+      nexusStrategy = searchResults[4] as string;
       relevantRunbooks = selectRelevantRunbooks(goal, runbooks);
-      for (const runbook of relevantRunbooks) {
-        for (const group of runbook.roster) {
-          for (const id of group.agents) {
-            if (candidates.some((candidate) => candidate.id === id)) continue;
-            if (candidates.length >= (this.options.maxCandidates ?? 64)) break;
-            const specialist = await this.options.catalog.get(id);
-            if (specialist) candidates.push(specialist);
-          }
-        }
+      const runbookAgentIds = new Set(
+        relevantRunbooks.flatMap((runbook) =>
+          runbook.roster.flatMap((group) => group.agents),
+        ),
+      );
+      const maxCandidates = this.options.maxCandidates ?? 96;
+      if (!Number.isInteger(maxCandidates) || maxCandidates < 16 || maxCandidates > 1000) {
+        throw new PlanError("invalid_planner_configuration", "Planner candidate limit must be between 16 and 1000.");
       }
-      if (candidates.length < 5) {
-        const divisions = await Promise.all([
-          this.options.catalog.list({ division: "engineering", limit: 5 }),
-          this.options.catalog.list({ division: "product", limit: 3 }),
-          this.options.catalog.list({ division: "research", limit: 3 }),
-          this.options.catalog.list({ division: "testing", limit: 3 }),
-          this.options.catalog.list({ division: "project-management", limit: 3 }),
-        ]);
-        candidates = uniqueAgents([candidates, ...divisions], this.options.maxCandidates ?? 24);
-      }
+      candidates = rankCatalogAgents(
+        goal,
+        allProfiles,
+        [goalMatches, researchMatches],
+        runbookAgentIds,
+        maxCandidates,
+      );
     } catch (error) {
       throw new PlanError("catalog_unavailable", "The pinned Agency Agents catalog or NEXUS playbooks could not be loaded and validated.", true, { cause: error });
     }
