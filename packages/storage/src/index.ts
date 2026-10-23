@@ -133,6 +133,53 @@ export interface WorkerHeartbeatRecord {
   readonly stale: boolean;
 }
 
+export type ConversationMessageRole = "system" | "user" | "assistant";
+
+export interface ConversationRecord {
+  readonly id: string;
+  readonly title: string;
+  readonly createdBy: string;
+  readonly createdAt: number;
+  readonly updatedAt: number;
+  readonly messageCount: number;
+  readonly version: number;
+}
+
+export interface ConversationMessageInput {
+  readonly id?: string;
+  readonly clientMessageId?: string;
+  readonly role: ConversationMessageRole;
+  readonly content: string;
+  readonly providerId?: ProviderId;
+  readonly model?: string;
+  readonly usage?: {
+    readonly promptTokens?: number;
+    readonly completionTokens?: number;
+    readonly totalTokens?: number;
+  };
+  readonly metadata?: unknown;
+  readonly runId?: string;
+}
+
+export interface ConversationMessageRecord extends ConversationMessageInput {
+  readonly id: string;
+  readonly conversationId: string;
+  readonly sequence: number;
+  readonly createdAt: number;
+}
+
+export interface CreateConversationInput {
+  readonly id?: string;
+  readonly title?: string;
+  readonly createdBy?: string;
+}
+
+export interface ListConversationOptions {
+  readonly limit?: number;
+  readonly offset?: number;
+  readonly createdBy?: string;
+}
+
 export interface FinishFailureInput {
   readonly runId: string;
   readonly taskId: string;
@@ -186,6 +233,33 @@ interface EventRow {
   created_at: number;
 }
 
+interface ConversationRow {
+  id: string;
+  title: string;
+  created_by: string;
+  created_at: number;
+  updated_at: number;
+  message_count: number;
+  version: number;
+}
+
+interface ConversationMessageRow {
+  id: string;
+  conversation_id: string;
+  sequence: number;
+  client_message_id: string | null;
+  role: ConversationMessageRole;
+  content: string;
+  provider_id: ProviderId | null;
+  model: string | null;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  total_tokens: number | null;
+  metadata_json: string | null;
+  run_id: string | null;
+  created_at: number;
+}
+
 const MAX_JSON_BYTES = 1_000_000;
 const VALID_PROFILES = new Set<RouteProfile>(["fast", "balanced", "quality"]);
 
@@ -217,6 +291,41 @@ function assertText(value: string, field: string, max = 20_000): void {
     );
   }
 }
+function asConversation(row: ConversationRow | undefined): ConversationRecord | undefined {
+  if (!row) return undefined;
+  return {
+    id: row.id,
+    title: row.title,
+    createdBy: row.created_by,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    messageCount: row.message_count,
+    version: row.version,
+  };
+}
+
+function asConversationMessage(row: ConversationMessageRow | undefined): ConversationMessageRecord | undefined {
+  if (!row) return undefined;
+  return {
+    id: row.id,
+    conversationId: row.conversation_id,
+    sequence: row.sequence,
+    ...(row.client_message_id ? { clientMessageId: row.client_message_id } : {}),
+    role: row.role,
+    content: row.content,
+    ...(row.provider_id ? { providerId: row.provider_id } : {}),
+    ...(row.model ? { model: row.model } : {}),
+    ...(row.prompt_tokens === null ? {} : { usage: {
+      ...(row.prompt_tokens === null ? {} : { promptTokens: row.prompt_tokens }),
+      ...(row.completion_tokens === null ? {} : { completionTokens: row.completion_tokens }),
+      ...(row.total_tokens === null ? {} : { totalTokens: row.total_tokens }),
+    } }),
+    ...(row.metadata_json === null ? {} : { metadata: decodeJson(row.metadata_json) }),
+    ...(row.run_id ? { runId: row.run_id } : {}),
+    createdAt: row.created_at,
+  };
+}
+
 function asRun(row: RunRow | undefined): RunRecord | undefined {
   if (!row) return undefined;
   return {
@@ -315,6 +424,39 @@ export class RunStore {
         started_at INTEGER NOT NULL,
         last_seen_at INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS conversations (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        created_by TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        message_count INTEGER NOT NULL DEFAULT 0 CHECK(message_count >= 0),
+        version INTEGER NOT NULL DEFAULT 1
+      );
+      CREATE TABLE IF NOT EXISTS conversation_messages (
+        id TEXT PRIMARY KEY,
+        conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        sequence INTEGER NOT NULL CHECK(sequence >= 1),
+        client_message_id TEXT,
+        role TEXT NOT NULL CHECK(role IN ('system','user','assistant')),
+        content TEXT NOT NULL,
+        provider_id TEXT CHECK(provider_id IS NULL OR provider_id IN ('openrouter','freellmapi')),
+        model TEXT,
+        prompt_tokens INTEGER CHECK(prompt_tokens IS NULL OR prompt_tokens >= 0),
+        completion_tokens INTEGER CHECK(completion_tokens IS NULL OR completion_tokens >= 0),
+        total_tokens INTEGER CHECK(total_tokens IS NULL OR total_tokens >= 0),
+        metadata_json TEXT,
+        run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
+        created_at INTEGER NOT NULL,
+        UNIQUE(conversation_id, sequence)
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_conversation_client_message
+        ON conversation_messages(conversation_id, client_message_id)
+        WHERE client_message_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_conversations_updated
+        ON conversations(updated_at DESC, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_conversation_messages_sequence
+        ON conversation_messages(conversation_id, sequence);
       CREATE TABLE IF NOT EXISTS provider_usage (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         provider_id TEXT NOT NULL CHECK(provider_id IN ('openrouter','freellmapi')),
@@ -337,12 +479,173 @@ export class RunStore {
       CREATE INDEX IF NOT EXISTS idx_tasks_claim ON tasks(status, available_at, created_at);
       CREATE INDEX IF NOT EXISTS idx_tasks_run_status ON tasks(run_id, status);
       CREATE INDEX IF NOT EXISTS idx_events_run_id ON run_events(run_id, id);
-      PRAGMA user_version = 2;
+      PRAGMA user_version = 3;
     `);
   }
 
   close(): void {
     this.db.close();
+  }
+
+  createConversation(input: CreateConversationInput = {}, now = Date.now()): ConversationRecord {
+    const id = input.id ?? randomUUID();
+    const title = (input.title?.trim() || "New chat").slice(0, 160);
+    const createdBy = input.createdBy?.trim() || "local";
+    assertText(id, "conversation id", 200);
+    assertText(title, "conversation title", 160);
+    assertText(createdBy, "createdBy", 200);
+    try {
+      this.db.prepare(
+        "INSERT INTO conversations(id,title,created_by,created_at,updated_at,message_count,version) VALUES(?,?,?,?,?,0,1)",
+      ).run(id, title, createdBy, now, now);
+    } catch (error) {
+      throw new Error("Could not create conversation. The conversation ID may already exist.", { cause: error });
+    }
+    return this.getConversation(id)!;
+  }
+
+  getConversation(id: string): ConversationRecord | undefined {
+    assertText(id, "conversation id", 200);
+    return asConversation(this.db.prepare(
+      "SELECT id,title,created_by,created_at,updated_at,message_count,version FROM conversations WHERE id=?",
+    ).get(id) as ConversationRow | undefined);
+  }
+
+  listConversations(options: ListConversationOptions = {}): readonly ConversationRecord[] {
+    const limit = options.limit ?? 50;
+    const offset = options.offset ?? 0;
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100)
+      throw new Error("Conversation limit must be between 1 and 100.");
+    if (!Number.isInteger(offset) || offset < 0 || offset > 100_000)
+      throw new Error("Conversation offset must be between 0 and 100000.");
+    if (options.createdBy !== undefined) assertText(options.createdBy, "createdBy", 200);
+    const rows = options.createdBy
+      ? this.db.prepare(
+          "SELECT id,title,created_by,created_at,updated_at,message_count,version FROM conversations WHERE created_by=? ORDER BY updated_at DESC,created_at DESC,id DESC LIMIT ? OFFSET ?",
+        ).all(options.createdBy, limit, offset) as ConversationRow[]
+      : this.db.prepare(
+          "SELECT id,title,created_by,created_at,updated_at,message_count,version FROM conversations ORDER BY updated_at DESC,created_at DESC,id DESC LIMIT ? OFFSET ?",
+        ).all(limit, offset) as ConversationRow[];
+    return rows.map((row) => asConversation(row)!);
+  }
+
+  deleteConversation(id: string): boolean {
+    assertText(id, "conversation id", 200);
+    return this.db.prepare("DELETE FROM conversations WHERE id=?").run(id).changes > 0;
+  }
+
+  findConversationMessageByClientId(
+    conversationId: string,
+    clientMessageId: string,
+  ): ConversationMessageRecord | undefined {
+    assertText(conversationId, "conversationId", 200);
+    assertText(clientMessageId, "clientMessageId", 200);
+    return asConversationMessage(this.db.prepare(
+      "SELECT * FROM conversation_messages WHERE conversation_id=? AND client_message_id=?",
+    ).get(conversationId, clientMessageId) as ConversationMessageRow | undefined);
+  }
+
+  appendConversationMessage(
+    conversationId: string,
+    input: ConversationMessageInput,
+    now = Date.now(),
+  ): { readonly message: ConversationMessageRecord; readonly inserted: boolean } {
+    assertText(conversationId, "conversationId", 200);
+    assertText(input.content, "message content", 200_000);
+    if (!["system", "user", "assistant"].includes(input.role))
+      throw new Error("Unsupported conversation message role.");
+    if (input.providerId !== undefined && input.providerId !== "openrouter" && input.providerId !== "freellmapi")
+      throw new Error("Unknown message provider ID.");
+    if (input.model !== undefined) assertText(input.model, "model", 400);
+    if (input.clientMessageId !== undefined) assertText(input.clientMessageId, "clientMessageId", 200);
+    if (input.runId !== undefined) assertText(input.runId, "runId", 200);
+
+    const validateTokens = (value: number | undefined, label: string) => {
+      if (value !== undefined && (!Number.isSafeInteger(value) || value < 0))
+        throw new Error(label + " must be a non-negative safe integer.");
+      return value ?? null;
+    };
+    const promptTokens = validateTokens(input.usage?.promptTokens, "promptTokens");
+    const completionTokens = validateTokens(input.usage?.completionTokens, "completionTokens");
+    const totalTokens = validateTokens(
+      input.usage?.totalTokens ??
+        (promptTokens !== null && completionTokens !== null ? promptTokens + completionTokens : undefined),
+      "totalTokens",
+    );
+    const metadataJson = input.metadata === undefined ? null : encodeJson(input.metadata);
+    const id = input.id ?? randomUUID();
+
+    const transaction = this.db.transaction(() => {
+      const conversation = this.db.prepare(
+        "SELECT id,title,created_by,created_at,updated_at,message_count,version FROM conversations WHERE id=?",
+      ).get(conversationId) as ConversationRow | undefined;
+      if (!conversation) throw new Error("Conversation was not found.");
+      if (input.clientMessageId) {
+        const existing = this.db.prepare(
+          "SELECT * FROM conversation_messages WHERE conversation_id=? AND client_message_id=?",
+        ).get(conversationId, input.clientMessageId) as ConversationMessageRow | undefined;
+        if (existing) {
+          if (existing.role !== input.role || existing.content !== input.content)
+            throw new Error("clientMessageId was already used for different message content.");
+          return { message: asConversationMessage(existing)!, inserted: false };
+        }
+      }
+      if (conversation.message_count >= 1000)
+        throw new Error("Conversation has reached its 1000-message limit.");
+      const sequenceRow = this.db.prepare(
+        "SELECT COALESCE(MAX(sequence),0)+1 AS sequence FROM conversation_messages WHERE conversation_id=?",
+      ).get(conversationId) as { sequence: number };
+      const sequence = sequenceRow.sequence;
+      this.db.prepare(
+        "INSERT INTO conversation_messages(id,conversation_id,sequence,client_message_id,role,content,provider_id,model,prompt_tokens,completion_tokens,total_tokens,metadata_json,run_id,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      ).run(
+        id,
+        conversationId,
+        sequence,
+        input.clientMessageId ?? null,
+        input.role,
+        input.content,
+        input.providerId ?? null,
+        input.model ?? null,
+        promptTokens,
+        completionTokens,
+        totalTokens,
+        metadataJson,
+        input.runId ?? null,
+        now,
+      );
+      const firstTitle = input.role === "user" && conversation.message_count === 0 && conversation.title === "New chat"
+        ? input.content.replace(/\s+/g, " ").trim().slice(0, 80)
+        : conversation.title;
+      this.db.prepare(
+        "UPDATE conversations SET title=?,message_count=message_count+1,updated_at=?,version=version+1 WHERE id=?",
+      ).run(firstTitle || "New chat", now, conversationId);
+      const row = this.db.prepare(
+        "SELECT * FROM conversation_messages WHERE id=?",
+      ).get(id) as ConversationMessageRow;
+      return { message: asConversationMessage(row)!, inserted: true };
+    });
+    return transaction.immediate();
+  }
+
+  listConversationMessages(
+    conversationId: string,
+    options: { readonly limit?: number; readonly beforeSequence?: number } = {},
+  ): readonly ConversationMessageRecord[] {
+    assertText(conversationId, "conversationId", 200);
+    const limit = options.limit ?? 100;
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000)
+      throw new Error("Message limit must be between 1 and 1000.");
+    if (options.beforeSequence !== undefined && (!Number.isInteger(options.beforeSequence) || options.beforeSequence < 1))
+      throw new Error("beforeSequence must be a positive integer.");
+    const rows = options.beforeSequence === undefined
+      ? this.db.prepare(
+          "SELECT * FROM (SELECT * FROM conversation_messages WHERE conversation_id=? ORDER BY sequence DESC LIMIT ?) ORDER BY sequence ASC",
+        ).all(conversationId, limit) as ConversationMessageRow[]
+      : this.db.prepare(
+          "SELECT * FROM (SELECT * FROM conversation_messages WHERE conversation_id=? AND sequence<? ORDER BY sequence DESC LIMIT ?) ORDER BY sequence ASC",
+        ).all(conversationId, options.beforeSequence, limit) as ConversationMessageRow[];
+    return rows.map((row) => asConversationMessage(row)!);
   }
 
   recordProviderUsage(input: ProviderUsageInput, now = Date.now()): void {
