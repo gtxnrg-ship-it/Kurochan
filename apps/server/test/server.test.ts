@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { buildServer, validateServerConfiguration } from "../src/server.js";
-import type { PlanService } from "@kurochan/orchestrator";
+import { McpToolRuntime, type McpClientAdapter, type McpServerConfig, type PlanService } from "@kurochan/orchestrator";
 import { RunStore } from "@kurochan/storage";
 import type { ProviderId } from "@kurochan/contracts";
 import type {
@@ -429,6 +429,86 @@ describe("Kuro-chan API", () => {
     expect(store.getConversation(conversationId)?.messageCount).toBe(1);
     expect(store.getRun(response.json().run.id)?.createdBy).toBe("local");
     expect(plan.createPlan).toHaveBeenCalledOnce();
+  });
+
+  it("reports MCP configuration and can explicitly probe discovered tools", async () => {
+    const serverConfig: McpServerConfig = {
+      id: "local-utilities",
+      name: "Local utilities",
+      transport: "stdio",
+      command: "node",
+      args: ["/opt/trusted-mcp.js"],
+    };
+    const mcpClient: McpClientAdapter = {
+      connect: vi.fn(async () => undefined),
+      listTools: vi.fn(async () => ({
+        tools: [{
+          name: "search_notes",
+          description: "Search notes without changing them",
+          inputSchema: {
+            type: "object",
+            properties: { query: { type: "string" } },
+            required: ["query"],
+          },
+          annotations: { readOnlyHint: true },
+        }],
+      })),
+      callTool: vi.fn(async () => ({ content: [] })),
+      close: vi.fn(async () => undefined),
+    };
+    const mcpTools = new McpToolRuntime({
+      servers: [serverConfig],
+      connectorFactory: () => mcpClient,
+    });
+    app = buildServer({
+      env: {},
+      logger: false,
+      store: new RunStore(":memory:"),
+      mcpTools,
+    });
+
+    const status = await app.inject({ method: "GET", url: "/v1/mcp/status" });
+    expect(status.statusCode).toBe(200);
+    expect(status.json()).toMatchObject({
+      enabled: true,
+      configuredServerCount: 1,
+      probed: false,
+      security: {
+        credentialsInModelContext: false,
+        callsWithNoExplicitReadOnlyAnnotationRequireApproval: true,
+        serverConfigurationIsModelControlled: false,
+      },
+      servers: [{
+        id: "local-utilities",
+        transport: "stdio",
+        connected: false,
+      }],
+    });
+    expect(mcpClient.connect).not.toHaveBeenCalled();
+
+    const probe = await app.inject({
+      method: "GET",
+      url: "/v1/mcp/status?probe=true",
+    });
+    expect(probe.statusCode).toBe(200);
+    expect(probe.json()).toMatchObject({
+      probed: true,
+      discoveredToolCount: 1,
+      tools: [{
+        serverId: "local-utilities",
+        name: "search_notes",
+        readOnly: true,
+      }],
+      servers: [{ id: "local-utilities", connected: true, toolCount: 1 }],
+    });
+    expect(mcpClient.connect).toHaveBeenCalledOnce();
+    expect(mcpClient.listTools).toHaveBeenCalledOnce();
+
+    const invalid = await app.inject({
+      method: "GET",
+      url: "/v1/mcp/status?probe=yes",
+    });
+    expect(invalid.statusCode).toBe(400);
   });
 
   it("reports missing FreeLLMAPI configuration without trying to invent a key", async () => {
