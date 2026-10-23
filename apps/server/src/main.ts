@@ -2,7 +2,7 @@ import "dotenv/config";
 import { buildServer, validateServerConfiguration } from "./server.js";
 
 const { host, port } = validateServerConfiguration();
-const server = buildServer({ workerEnabled: process.env.KUROCHAN_WORKER_ENABLED?.trim().toLowerCase() !== "false" });
+const server = buildServer({ workerEnabled: process.env.KUROCHAN_WORKER_ENABLED?.trim().toLowerCase() === "true" });
 
 try {
   await server.listen({ host, port });
