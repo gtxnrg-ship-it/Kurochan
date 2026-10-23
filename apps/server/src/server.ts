@@ -267,6 +267,76 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     };
   });
 
+  app.post("/v1/providers/:providerId/test", async (request, reply) => {
+    const parsed = z.object({
+      providerId: z.enum(["openrouter", "freellmapi"]),
+    }).safeParse(request.params);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: {
+          code: "invalid_provider",
+          message: "Provider ID must be openrouter or freellmapi.",
+          retryable: false,
+          requestId: request.id,
+        },
+      });
+    }
+
+    const provider = registry.providers.get(parsed.data.providerId);
+    if (!provider?.isConfigured || !provider.defaultModel) {
+      return reply.code(503).send({
+        error: {
+          code: "provider_not_configured",
+          message: parsed.data.providerId === "freellmapi"
+            ? "Configure FREELLMAPI_BASE_URL, FREELLMAPI_MODEL, and the unified key from your own FreeLLMAPI instance."
+            : "Configure OPENROUTER_BASE_URL, OPENROUTER_MODEL, and OPENROUTER_API_KEY.",
+          retryable: false,
+          requestId: request.id,
+        },
+      });
+    }
+
+    const abort = new AbortController();
+    request.raw.on("aborted", () => abort.abort());
+    try {
+      const result = await router.complete({
+        profile: "balanced",
+        preferredProvider: parsed.data.providerId,
+        lockProvider: true,
+        model: provider.defaultModel,
+        messages: [{ role: "user", content: "Reply with the single word connected." }],
+        maxTokens: 12,
+        temperature: 0,
+        timeoutMs: 15_000,
+        signal: abort.signal,
+        requiredCapabilities: ["text"],
+      });
+      return {
+        ok: true,
+        provider: result.providerId,
+        model: result.model,
+        latencyMs: result.latencyMs,
+        testedAt: new Date().toISOString(),
+      };
+    } catch (error) {
+      const failure = error as { code?: string; message?: string; retryable?: boolean };
+      const code = failure.code ?? "provider_test_failed";
+      const status = code === "cancelled" ? 499
+        : code === "router_overloaded" ? 429
+        : code === "no_provider_available" ? 503
+        : 502;
+      request.log.warn({ provider: parsed.data.providerId, code, requestId: request.id }, "Provider connection test failed");
+      return reply.code(status).send({
+        error: {
+          code,
+          message: failure.message ?? "Provider connection test failed. Check the server-side configuration and provider availability.",
+          retryable: failure.retryable ?? status >= 500,
+          requestId: request.id,
+        },
+      });
+    }
+  });
+
   app.get("/v1/config", async () => ({
     appName: "Kuro-chan",
     version: env.npm_package_version ?? "0.1.0",
