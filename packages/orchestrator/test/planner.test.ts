@@ -142,6 +142,9 @@ describe("PlanService", () => {
     };
     const catalog = fakeCatalog();
     vi.mocked(catalog.list).mockResolvedValue([...candidates, unseen]);
+    vi.mocked(catalog.get).mockImplementation(async (id: string) =>
+      [...candidates, unseen].find((candidate) => candidate.id === id),
+    );
     vi.mocked(catalog.listRunbooks).mockResolvedValue([
       {
         slug: "startup-mvp",
