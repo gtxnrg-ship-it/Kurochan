@@ -20,7 +20,9 @@ function integerEnv(
 ): number {
   const raw = process.env[name];
   if (raw === undefined || raw.trim() === "") return fallback;
-  const value = Number.parseInt(raw, 10);
+  const value = raw.split("").every((char) => char >= "0" && char <= "9")
+    ? Number(raw)
+    : Number.NaN;
   if (!Number.isInteger(value) || value < min || value > max) {
     throw new Error(`${name} must be an integer between ${min} and ${max}.`);
   }
