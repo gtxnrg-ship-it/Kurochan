@@ -102,6 +102,10 @@ function modelSelection(
 export function buildServer(options: ServerOptions = {}): FastifyInstance {
   const env = options.env ?? process.env;
   const registry = options.providers ?? createProviderRegistry(env);
+  const githubAllowedRepositories = (env.KUROCHAN_GITHUB_ALLOWED_REPOSITORIES ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
   const store =
     options.store ??
     new RunStore(env.KUROCHAN_DB_PATH?.trim() || "data/kurochan.sqlite");
@@ -134,6 +138,17 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         16,
         1000,
       ),
+      githubProjectRepositories:
+        env.KUROCHAN_GITHUB_TOKEN?.trim()
+          ? githubAllowedRepositories
+          : [],
+      githubProjectPublishingEnabled:
+        Boolean(env.KUROCHAN_GITHUB_TOKEN?.trim()) &&
+        githubAllowedRepositories.length > 0 &&
+        env.KUROCHAN_GITHUB_WRITE_ENABLED?.trim().toLowerCase() === "true",
+      webResearchEnabled: Boolean(env.BRAVE_SEARCH_API_KEY?.trim()),
+      sandboxEnabled:
+        env.KUROCHAN_SANDBOX_ENABLED?.trim().toLowerCase() === "true",
     });
 
   const app = Fastify({
@@ -220,10 +235,6 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         ? { searchLang: env.BRAVE_SEARCH_LANG.trim() }
         : {}),
     });
-  const githubAllowedRepositories = (env.KUROCHAN_GITHUB_ALLOWED_REPOSITORIES ?? "")
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean);
   const githubProjectMaxFileBytes = parseBoundedInteger(
     env.KUROCHAN_GITHUB_MAX_FILE_BYTES,
     250_000,
