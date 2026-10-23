@@ -1,10 +1,14 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, mkdir, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { DockerSandboxRuntime, type SandboxProcessRunner } from "../src/sandbox.js";
 
 const roots: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+});
 
 async function makeRoot(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "kuro-sandbox-"));
@@ -19,7 +23,7 @@ describe("DockerSandboxRuntime", () => {
     let executable = "";
     let args: readonly string[] = [];
     const runner: SandboxProcessRunner = {
-      run: vi.fn(async (program, argv) => {
+      run: vi.fn(async (program: string, argv: readonly string[]) => {
         executable = program;
         args = argv;
         return {
