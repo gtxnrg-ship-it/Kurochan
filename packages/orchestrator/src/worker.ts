@@ -130,7 +130,7 @@ function jsonCharacterLimit(value: unknown, limit = 60_000): string {
 
 type ApprovalType = "task-level" | "external-write";
 
-function approvalGranted(
+export function approvalGranted(
   store: RunStore,
   task: TaskRecord,
   approvalType: ApprovalType = "task-level",
