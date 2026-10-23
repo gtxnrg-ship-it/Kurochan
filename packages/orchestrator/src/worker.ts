@@ -117,6 +117,10 @@ export class TaskWorker {
     if (!Number.isInteger(this.maxToolRounds) || this.maxToolRounds < 1 || this.maxToolRounds > 12) throw new Error("maxToolRounds must be between 1 and 12.");
   }
 
+  get isRunning(): boolean {
+    return Boolean(this.loopPromise) && !this.stopping;
+  }
+
   start(): void {
     if (this.loopPromise) return;
     this.stopping = false;
