@@ -16,7 +16,7 @@
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm build && vitest run",
     "lint": "prettier --check \"apps/**/*.{ts,tsx,js,json,css,html}\" \"packages/**/*.{ts,js,json}\" \"scripts/**/*.mjs\" \"*.{json,yaml,yml}\"",
-    "check": "pnpm check:agency && pnpm lint && pnpm typecheck && pnpm test",
+    "check": "pnpm check:agency && pnpm typecheck && pnpm test && pnpm lint",
     "format": "prettier --write \"apps/**/*.{ts,tsx,js,json,css,html}\" \"packages/**/*.{ts,js,json}\" \"scripts/**/*.mjs\" \"*.{json,yaml,yml}\"",
     "check:agency": "node scripts/check-agency-submodule.mjs"
   },
