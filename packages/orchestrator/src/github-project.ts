@@ -536,10 +536,11 @@ export class GitHubProjectRuntime {
       parentCommit = existingCommit.sha;
       parentTree = existingCommit.tree.sha;
     } catch (error) {
-      if (!(error instanceof ProjectIntegrationError) && !(error && typeof error === "object" && "code" in error && (error as { code?: unknown }).code === "not_found")) {
+      if (error instanceof ProjectIntegrationError && error.code === "not_found") {
+        branchExists = false;
+      } else {
         throw error;
       }
-      if (error instanceof ProjectIntegrationError) throw error;
     }
 
     const newTree = z.object({ sha: z.string().regex(/^[0-9a-f]{40}$/i) }).parse(await this.requestJson(
