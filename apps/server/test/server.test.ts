@@ -856,6 +856,32 @@ describe("Kuro-chan API", () => {
     expect(invalid.statusCode).toBe(400);
   });
 
+  it("reports allowlisted GitHub project capabilities without exposing credentials", async () => {
+    app = buildServer({
+      env: {
+        KUROCHAN_GITHUB_TOKEN: "github-secret-must-not-leak",
+        KUROCHAN_GITHUB_ALLOWED_REPOSITORIES: "acme/demo",
+        KUROCHAN_GITHUB_WRITE_ENABLED: "true",
+      },
+      logger: false,
+      store: new RunStore(":memory:"),
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/v1/research/status",
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().githubProject).toMatchObject({
+      configured: true,
+      publishingEnabled: true,
+      repositoryAllowlistConfigured: true,
+      requiresExplicitApproval: true,
+    });
+    expect(response.body).not.toContain("github-secret-must-not-leak");
+  });
+
   it("reports missing FreeLLMAPI configuration without trying to invent a key", async () => {
     app = buildServer({
       env: {},
