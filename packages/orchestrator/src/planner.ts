@@ -15,7 +15,7 @@ const PlannedTaskSchema = z.object({
 
 const PlanPayloadSchema = z.object({
   summary: z.string().trim().min(1).max(6000),
-  tasks: z.array(PlannedTaskSchema).min(1).max(12),
+  tasks: z.array(PlannedTaskSchema).min(1).max(32),
 }).strict();
 
 export interface CreatePlanRequest {
@@ -150,8 +150,8 @@ export class PlanService {
     let nexusStrategy: string;
     try {
       const searchResults = await Promise.all([
-        this.options.catalog.search(goal, { limit: 18 }),
-        this.options.catalog.search("research planning requirements " + goal, { limit: 10 }),
+        this.options.catalog.search(goal, { limit: 100 }),
+        this.options.catalog.search("research planning requirements " + goal, { limit: 100 }),
         this.options.catalog.listRunbooks(),
         this.options.catalog.readNexusStrategy(8_000),
       ]);
@@ -159,13 +159,13 @@ export class PlanService {
       const researchMatches = searchResults[1] as readonly AgentProfile[];
       const runbooks = searchResults[2] as readonly AgentRunbook[];
       nexusStrategy = searchResults[3] as string;
-      candidates = uniqueAgents([goalMatches, researchMatches], this.options.maxCandidates ?? 24);
+      candidates = uniqueAgents([goalMatches, researchMatches], this.options.maxCandidates ?? 64);
       relevantRunbooks = selectRelevantRunbooks(goal, runbooks);
       for (const runbook of relevantRunbooks) {
         for (const group of runbook.roster) {
           for (const id of group.agents) {
             if (candidates.some((candidate) => candidate.id === id)) continue;
-            if (candidates.length >= (this.options.maxCandidates ?? 24)) break;
+            if (candidates.length >= (this.options.maxCandidates ?? 64)) break;
             const specialist = await this.options.catalog.get(id);
             if (specialist) candidates.push(specialist);
           }
@@ -201,7 +201,7 @@ export class PlanService {
       "You are Kuro-chan's planning engine.",
       "Build a concise, executable task graph for the user's goal using only the provided specialist IDs.",
       "Return only one JSON object matching: {summary:string,tasks:[{key,agentId,objective,dependsOn,maxAttempts,approvalRequired}]}",
-      "Use 3 to 8 tasks for typical goals, fewer for simple work, and never more than 12.",
+      "Use 3 to 8 tasks for typical goals, fewer for simple work, and up to 32 tasks for genuinely complex goals. Do not add specialists merely to inflate the roster.",
       "Use stable kebab-case unique task keys. Add dependencies only when one task genuinely needs another's output.",
       "Parallelize independent research, design, or implementation work rather than inventing serial dependencies.",
       "Assign each task one appropriate specialist. Include independent QA/review tasks where useful.",
@@ -231,7 +231,7 @@ export class PlanService {
         })),
       })),
       rules: {
-        maxTasks: 12,
+        maxTasks: 32,
         everyDependencyMustReferenceAKey: true,
         forbidden: ["inventing agent IDs", "cyclic dependencies", "claiming unperformed work"],
       },
@@ -249,7 +249,7 @@ export class PlanService {
           profile: request.profile,
           messages: [{ role: "user", content: message }],
           systemPrompt,
-          maxTokens: 3000,
+          maxTokens: 6000,
           temperature: 0.1,
           timeoutMs: this.options.timeoutMs ?? 45_000,
           ...(request.signal ? { signal: request.signal } : {}),
