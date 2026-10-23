@@ -104,7 +104,7 @@ async function listProfilePaths(root: string): Promise<string[]> {
 
 export class AgentCatalog {
   readonly root: string;
-  private loadPromise?: Promise<AgentDefinition[]>;
+  private loadPromise: Promise<AgentDefinition[]> | undefined;
 
   constructor(root = DEFAULT_ROOT) {
     if (!isAbsolute(root)) throw new Error("Agent catalog root must be an absolute path.");
