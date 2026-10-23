@@ -168,6 +168,27 @@ export interface ConversationMessageRecord extends ConversationMessageInput {
   readonly createdAt: number;
 }
 
+export interface ConversationAudioInput {
+  readonly conversationId: string;
+  readonly messageId: string;
+  readonly contentType: string;
+  readonly format: "mp3" | "opus" | "aac" | "flac" | "wav" | "pcm";
+  readonly audio: Uint8Array;
+}
+
+export interface ConversationAudioRecord {
+  readonly conversationId: string;
+  readonly messageId: string;
+  readonly contentType: string;
+  readonly format: "mp3" | "opus" | "aac" | "flac" | "wav" | "pcm";
+  readonly bytes: number;
+  readonly createdAt: number;
+}
+
+export interface ConversationAudioContent extends ConversationAudioRecord {
+  readonly audio: Uint8Array;
+}
+
 export interface CreateConversationInput {
   readonly id?: string;
   readonly title?: string;
@@ -241,6 +262,16 @@ interface ConversationRow {
   updated_at: number;
   message_count: number;
   version: number;
+}
+
+interface ConversationAudioRow {
+  conversation_id: string;
+  message_id: string;
+  content_type: string;
+  format: "mp3" | "opus" | "aac" | "flac" | "wav" | "pcm";
+  data: Uint8Array;
+  bytes: number;
+  created_at: number;
 }
 
 interface ConversationMessageRow {
@@ -468,6 +499,17 @@ export class RunStore {
         created_at INTEGER NOT NULL,
         UNIQUE(conversation_id, sequence)
       );
+      CREATE TABLE IF NOT EXISTS conversation_audio (
+        message_id TEXT PRIMARY KEY REFERENCES conversation_messages(id) ON DELETE CASCADE,
+        conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        content_type TEXT NOT NULL,
+        format TEXT NOT NULL CHECK(format IN ('mp3','opus','aac','flac','wav','pcm')),
+        data BLOB NOT NULL,
+        bytes INTEGER NOT NULL CHECK(bytes > 0 AND bytes <= 52428800),
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_conversation_audio_conversation
+        ON conversation_audio(conversation_id, created_at);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_conversation_client_message
         ON conversation_messages(conversation_id, client_message_id)
         WHERE client_message_id IS NOT NULL;
@@ -497,7 +539,7 @@ export class RunStore {
       CREATE INDEX IF NOT EXISTS idx_tasks_claim ON tasks(status, available_at, created_at);
       CREATE INDEX IF NOT EXISTS idx_tasks_run_status ON tasks(run_id, status);
       CREATE INDEX IF NOT EXISTS idx_events_run_id ON run_events(run_id, id);
-      PRAGMA user_version = 3;
+      PRAGMA user_version = 4;
     `);
   }
 
@@ -739,6 +781,81 @@ export class RunStore {
               limit,
             ) as ConversationMessageRow[]);
     return rows.map((row) => asConversationMessage(row)!);
+  }
+
+  saveConversationAudio(
+    input: ConversationAudioInput,
+    now = Date.now(),
+  ): ConversationAudioRecord {
+    assertText(input.conversationId, "conversationId", 200);
+    assertText(input.messageId, "messageId", 200);
+    assertText(input.contentType, "contentType", 120);
+    if (!["mp3", "opus", "aac", "flac", "wav", "pcm"].includes(input.format)) {
+      throw new Error("Unsupported conversation audio format.");
+    }
+    if (!(input.audio instanceof Uint8Array) || input.audio.byteLength === 0) {
+      throw new Error("Conversation audio must contain non-empty bytes.");
+    }
+    if (input.audio.byteLength > 50 * 1024 * 1024) {
+      throw new Error("Conversation audio exceeds the 50 MiB storage limit.");
+    }
+    if (!/^audio\//i.test(input.contentType) && input.contentType !== "application/octet-stream") {
+      throw new Error("Conversation audio content type must be an audio media type.");
+    }
+    const audio = Buffer.from(input.audio);
+    const transaction = this.db.transaction(() => {
+      const message = this.db.prepare(
+        "SELECT role FROM conversation_messages WHERE id=? AND conversation_id=?",
+      ).get(input.messageId, input.conversationId) as { role: ConversationMessageRole } | undefined;
+      if (!message || message.role !== "assistant") {
+        throw new Error("Audio can only be attached to an assistant message in the same conversation.");
+      }
+      this.db.prepare(
+        "INSERT INTO conversation_audio(message_id,conversation_id,content_type,format,data,bytes,created_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(message_id) DO NOTHING",
+      ).run(
+        input.messageId,
+        input.conversationId,
+        input.contentType,
+        input.format,
+        audio,
+        audio.byteLength,
+        now,
+      );
+      const row = this.db.prepare(
+        "SELECT conversation_id,message_id,content_type,format,bytes,created_at FROM conversation_audio WHERE message_id=? AND conversation_id=?",
+      ).get(input.messageId, input.conversationId) as Omit<ConversationAudioRow, "data"> | undefined;
+      if (!row) throw new Error("Audio artifact could not be persisted.");
+      return {
+        conversationId: row.conversation_id,
+        messageId: row.message_id,
+        contentType: row.content_type,
+        format: row.format,
+        bytes: row.bytes,
+        createdAt: row.created_at,
+      };
+    });
+    return transaction.immediate();
+  }
+
+  getConversationAudio(
+    conversationId: string,
+    messageId: string,
+  ): ConversationAudioContent | undefined {
+    assertText(conversationId, "conversationId", 200);
+    assertText(messageId, "messageId", 200);
+    const row = this.db.prepare(
+      "SELECT conversation_id,message_id,content_type,format,data,bytes,created_at FROM conversation_audio WHERE conversation_id=? AND message_id=?",
+    ).get(conversationId, messageId) as ConversationAudioRow | undefined;
+    if (!row) return undefined;
+    return {
+      conversationId: row.conversation_id,
+      messageId: row.message_id,
+      contentType: row.content_type,
+      format: row.format,
+      audio: new Uint8Array(row.data),
+      bytes: row.bytes,
+      createdAt: row.created_at,
+    };
   }
 
   recordProviderUsage(input: ProviderUsageInput, now = Date.now()): void {
