@@ -1,0 +1,214 @@
+import { describe, expect, it, vi } from "vitest";
+import {
+  McpToolRuntime,
+  type McpClientAdapter,
+  type McpServerConfig,
+} from "../src/mcp-tools.js";
+
+const readonlyTool = {
+  name: "search_records",
+  description: "Search read-only records by query",
+  inputSchema: {
+    type: "object",
+    properties: { query: { type: "string" } },
+    required: ["query"],
+  },
+  annotations: { readOnlyHint: true },
+};
+
+function adapter(
+  tools: readonly {
+    name: string;
+    description?: string;
+    inputSchema?: unknown;
+    annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean };
+  }[],
+  callTool: (name: string, args: Record<string, unknown>) => Promise<unknown> = async (name, args) => ({
+    isError: false,
+    content: [{ type: "text", text: name + ":" + JSON.stringify(args) }],
+  }),
+): McpClientAdapter {
+  return {
+    connect: vi.fn(async () => undefined),
+    listTools: vi.fn(async () => ({ tools })),
+    callTool: vi.fn(callTool),
+    close: vi.fn(async () => undefined),
+  };
+}
+
+const serverConfig: McpServerConfig = {
+  id: "records",
+  name: "Records MCP",
+  transport: "stdio",
+  command: "node",
+  args: ["/opt/trusted-mcp-server.js"],
+  env: { SERVICE_TOKEN: "SERVICE_TOKEN" },
+};
+
+describe("McpToolRuntime", () => {
+  it("stays disabled when no MCP servers are configured", async () => {
+    const runtime = new McpToolRuntime({ servers: [] });
+    expect(runtime.isConfigured).toBe(false);
+    expect(runtime.configuredServers()).toEqual([]);
+    expect(await runtime.listTools()).toEqual([]);
+    expect(runtime.status()).toEqual([]);
+    await runtime.close();
+  });
+
+  it("rejects unsafe remote endpoints, embedded credentials, duplicate IDs, and invalid stdio paths", () => {
+    expect(() => new McpToolRuntime({
+      servers: [{
+        id: "remote",
+        name: "Remote",
+        transport: "streamable-http",
+        url: "http://mcp.example.com/mcp",
+      }],
+    })).toThrow(/HTTPS/);
+
+    expect(() => new McpToolRuntime({
+      servers: [{
+        id: "remote",
+        name: "Remote",
+        transport: "streamable-http",
+        url: "https://user:secret@mcp.example.com/mcp",
+      }],
+    })).toThrow(/credentials/);
+
+    expect(() => new McpToolRuntime({
+      servers: [serverConfig, serverConfig],
+    })).toThrow(/unique/);
+
+    expect(() => new McpToolRuntime({
+      servers: [{
+        ...serverConfig,
+        cwd: "relative/path",
+      }],
+    })).toThrow(/absolute path/);
+  });
+
+  it("discovers schemas, reports explicit read-only annotations, and dispatches a selected tool", async () => {
+    const client = adapter([
+      readonlyTool,
+      {
+        name: "create_record",
+        description: "Create a record",
+        inputSchema: { type: "object", properties: { title: { type: "string" } } },
+      },
+    ]);
+    const factory = vi.fn((_config: McpServerConfig, _environment: NodeJS.ProcessEnv) => client);
+    const runtime = new McpToolRuntime({
+      servers: [serverConfig],
+      environment: { SERVICE_TOKEN: "a-secret-value" },
+      connectorFactory: factory,
+    });
+
+    const tools = await runtime.listTools();
+    expect(tools).toHaveLength(2);
+    expect(tools[0]).toMatchObject({
+      serverId: "records",
+      serverName: "Records MCP",
+      name: "create_record",
+      readOnly: false,
+    });
+    expect(tools.find((tool) => tool.name === "search_records")).toMatchObject({
+      readOnly: true,
+      inputSchema: {
+        type: "object",
+        required: ["query"],
+      },
+    });
+    expect(JSON.stringify(tools)).not.toContain("a-secret-value");
+    expect(runtime.status()).toContainEqual(expect.objectContaining({
+      id: "records",
+      connected: true,
+      toolCount: 2,
+    }));
+
+    const result = await runtime.execute({
+      serverId: "records",
+      toolName: "search_records",
+      arguments: { query: "billing" },
+    });
+    expect(result).toMatchObject({
+      name: "mcp.call",
+      ok: true,
+      tool: { serverId: "records", name: "search_records", readOnly: true },
+      result: {
+        isError: false,
+        content: [{ text: 'search_records:{"query":"billing"}' }],
+      },
+    });
+    expect(client.callTool).toHaveBeenCalledWith("search_records", { query: "billing" });
+    await runtime.close();
+    expect(client.close).toHaveBeenCalledOnce();
+  });
+
+  it("coalesces simultaneous server connections and caches discovery", async () => {
+    const client = adapter([readonlyTool]);
+    const runtime = new McpToolRuntime({
+      servers: [serverConfig],
+      connectorFactory: () => client,
+    });
+
+    const [first, second, third] = await Promise.all([
+      runtime.listTools(),
+      runtime.listTools(),
+      runtime.listTools(),
+    ]);
+    expect(first).toHaveLength(1);
+    expect(second).toHaveLength(1);
+    expect(third).toHaveLength(1);
+    expect(client.connect).toHaveBeenCalledOnce();
+    expect(client.listTools).toHaveBeenCalledOnce();
+    await runtime.close();
+  });
+
+  it("rejects unknown tools and bounds MCP results", async () => {
+    const client = adapter([readonlyTool], async () => ({
+      isError: false,
+      content: [{ type: "text", text: "x".repeat(5_000) }],
+    }));
+    const runtime = new McpToolRuntime({
+      servers: [serverConfig],
+      connectorFactory: () => client,
+      maxResultCharacters: 1_000,
+    });
+
+    const unknown = await runtime.execute({
+      serverId: "records",
+      toolName: "arbitrary_unknown_tool",
+      arguments: {},
+    });
+    expect(unknown).toMatchObject({
+      ok: false,
+      error: { code: "unknown_tool" },
+    });
+    expect(client.callTool).not.toHaveBeenCalled();
+
+    const oversized = await runtime.execute({
+      serverId: "records",
+      toolName: "search_records",
+      arguments: { query: "large" },
+    });
+    expect(oversized).toMatchObject({
+      ok: false,
+      error: { code: "result_too_large" },
+    });
+    await runtime.close();
+  });
+
+  it("loads an operator-owned server list from environment JSON and enforces the config byte limit", () => {
+    const raw = JSON.stringify([serverConfig]);
+    const runtime = McpToolRuntime.fromEnvironment({ KUROCHAN_MCP_SERVERS: raw });
+    expect(runtime.isConfigured).toBe(true);
+    expect(runtime.configuredServers()).toEqual([{
+      id: "records",
+      name: "Records MCP",
+      transport: "stdio",
+    }]);
+
+    expect(() => McpToolRuntime.fromEnvironment({
+      KUROCHAN_MCP_SERVERS: "x".repeat(128_001),
+    })).toThrow(/128 KB/);
+  });
+});
