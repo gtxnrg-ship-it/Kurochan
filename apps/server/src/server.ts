@@ -347,10 +347,37 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     providers: registry.statuses,
   }));
 
+  app.get("/v1/workers", async (request, reply) => {
+    const query = request.query as Record<string, unknown>;
+    let staleAfterMs: number;
+    try {
+      staleAfterMs = parseBoundedInteger(query.staleAfterMs, 30_000, 1_000, 600_000);
+    } catch {
+      return reply.code(400).send({
+        error: {
+          code: "invalid_query",
+          message: "staleAfterMs must be an integer between 1000 and 600000.",
+          retryable: false,
+        },
+      });
+    }
+    const workers = store.listWorkerHeartbeats(Date.now(), staleAfterMs);
+    return {
+      data: workers,
+      summary: {
+        total: workers.length,
+        active: workers.filter((worker) => !worker.stale && worker.state !== "stopping").length,
+        stale: workers.filter((worker) => worker.stale).length,
+      },
+      staleAfterMs,
+    };
+  });
+
   app.get("/v1/worker/status", async () => ({
     enabled: workerEnabled,
     running: worker.isRunning,
     workerId: worker.workerId,
+    workers: store.listWorkerHeartbeats(),
     workspaceTools: [
       "workspace.list_files",
       "workspace.read_file",
