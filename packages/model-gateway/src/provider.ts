@@ -24,6 +24,7 @@ export interface ChatCompletionUsage {
 
 export interface ChatCompletionStreamChunk {
   readonly content: string;
+  readonly usage?: ChatCompletionUsage;
 }
 
 export interface ChatCompletionOutput {
