@@ -270,5 +270,69 @@ describe("Kuro-chan API", () => {
       url: "/v1/runs?limit=9999",
     });
     expect(response.statusCode).toBe(400);
+  });  it("streams chat completions through the API using provider SSE chunks", async () => {
+    const streamingProvider: ChatProvider = {
+      id: "openrouter",
+      displayName: "Streaming test provider",
+      defaultModel: "test-model",
+      isConfigured: true,
+      capabilities: { text: true, streaming: true },
+      complete: async (): Promise<ChatCompletionOutput> => ({
+        providerId: "openrouter", model: "test-model", content: "unused", latencyMs: 1,
+      }),
+      stream: async () => (async function* () {
+        yield { content: "hello" };
+        yield { content: " mobile" };
+      })(),
+    };
+    app = buildServer({
+      env: {},
+      providers: {
+        providers: new Map<ProviderId, ChatProvider>([["openrouter", streamingProvider]]),
+        statuses: [{ id: "openrouter", name: "OpenRouter", configured: true, defaultModel: "test-model", capabilityNotes: [], capabilities: { text: true, vision: false, tools: false, json: false, streaming: true, reasoning: false } }],
+      },
+      logger: false,
+      store: new RunStore(":memory:"),
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      payload: { model: "openrouter/test-model", messages: [{ role: "user", content: "hello" }], stream: true },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toContain("text/event-stream");
+    expect(response.headers["x-omnirouter-provider"]).toBe("openrouter");
+    expect(response.body).toContain("hello");
+    expect(response.body).toContain(" mobile");
+    expect(response.body).toContain("[DONE]");
+  });
+
+  it("rejects streaming when no configured provider advertises streaming", async () => {
+    const ordinaryProvider: ChatProvider = {
+      id: "openrouter",
+      displayName: "Non-streaming test provider",
+      defaultModel: "test-model",
+      isConfigured: true,
+      capabilities: { text: true, streaming: false },
+      complete: async (): Promise<ChatCompletionOutput> => ({
+        providerId: "openrouter", model: "test-model", content: "unused", latencyMs: 1,
+      }),
+    };
+    app = buildServer({
+      env: {},
+      providers: {
+        providers: new Map<ProviderId, ChatProvider>([["openrouter", ordinaryProvider]]),
+        statuses: [{ id: "openrouter", name: "OpenRouter", configured: true, defaultModel: "test-model", capabilityNotes: [], capabilities: { text: true, vision: false, tools: false, json: false, streaming: false, reasoning: false } }],
+      },
+      logger: false,
+      store: new RunStore(":memory:"),
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      payload: { model: "openrouter/test-model", messages: [{ role: "user", content: "hello" }], stream: true },
+    });
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toMatchObject({ error: { code: "no_provider_available" } });
   });
 });
