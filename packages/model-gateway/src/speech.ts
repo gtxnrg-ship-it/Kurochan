@@ -78,7 +78,10 @@ export class SpeechProviderError extends Error {
     message: string,
     options: { retryable?: boolean; statusCode?: number; cause?: unknown } = {},
   ) {
-    super(message, options.cause === undefined ? undefined : { cause: options.cause });
+    super(
+      message,
+      options.cause === undefined ? undefined : { cause: options.cause },
+    );
     this.name = "SpeechProviderError";
     this.code = code;
     this.retryable = options.retryable ?? false;
@@ -111,7 +114,9 @@ const AUDIO_EXTENSION_TO_TYPE: Readonly<Record<string, string>> = {
   mpeg: "audio/mpeg",
 };
 
-const FORMAT_CONTENT_TYPES: Readonly<Record<NonNullable<SpeechSynthesisConfig["responseFormat"]>, string>> = {
+const FORMAT_CONTENT_TYPES: Readonly<
+  Record<NonNullable<SpeechSynthesisConfig["responseFormat"]>, string>
+> = {
   mp3: "audio/mpeg",
   opus: "audio/opus",
   aac: "audio/aac",
@@ -120,30 +125,53 @@ const FORMAT_CONTENT_TYPES: Readonly<Record<NonNullable<SpeechSynthesisConfig["r
   pcm: "audio/pcm",
 };
 
-function boundedConfig(value: string | undefined, name: string, max: number): string | undefined {
+function boundedConfig(
+  value: string | undefined,
+  name: string,
+  max: number,
+): string | undefined {
   const normalized = value?.trim();
   if (!normalized) return undefined;
-  if (normalized.length > max || normalized.includes("\0") || /[\r\n]/.test(normalized)) {
-    throw new SpeechProviderError("invalid_configuration", name + " has an invalid value.");
+  if (
+    normalized.length > max ||
+    normalized.includes("\0") ||
+    /[\r\n]/.test(normalized)
+  ) {
+    throw new SpeechProviderError(
+      "invalid_configuration",
+      name + " has an invalid value.",
+    );
   }
   return normalized;
 }
 
-function safeBaseUrl(value: string | undefined, name: string): string | undefined {
+function safeBaseUrl(
+  value: string | undefined,
+  name: string,
+): string | undefined {
   const normalized = boundedConfig(value, name, 2048);
   if (!normalized) return undefined;
   let url: URL;
   try {
     url = new URL(normalized);
   } catch {
-    throw new SpeechProviderError("invalid_configuration", name + " must be an absolute URL.");
+    throw new SpeechProviderError(
+      "invalid_configuration",
+      name + " must be an absolute URL.",
+    );
   }
   const local = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
   if (url.protocol !== "https:" && !(url.protocol === "http:" && local)) {
-    throw new SpeechProviderError("invalid_configuration", name + " must use HTTPS (HTTP is allowed only for loopback development).");
+    throw new SpeechProviderError(
+      "invalid_configuration",
+      name + " must use HTTPS (HTTP is allowed only for loopback development).",
+    );
   }
   if (url.username || url.password || url.search || url.hash) {
-    throw new SpeechProviderError("invalid_configuration", name + " must not contain credentials, query parameters, or fragments.");
+    throw new SpeechProviderError(
+      "invalid_configuration",
+      name + " must not contain credentials, query parameters, or fragments.",
+    );
   }
   return url.toString().replace(/\/+$/, "");
 }
@@ -153,13 +181,22 @@ function endpoint(baseUrl: string, path: string): string {
 }
 
 function timeoutError(message: string, cause?: unknown): SpeechProviderError {
-  return new SpeechProviderError("timeout", message, { retryable: true, ...(cause === undefined ? {} : { cause }) });
+  return new SpeechProviderError("timeout", message, {
+    retryable: true,
+    ...(cause === undefined ? {} : { cause }),
+  });
 }
 
-async function readBoundedBytes(response: Response, maxBytes: number): Promise<Uint8Array> {
+async function readBoundedBytes(
+  response: Response,
+  maxBytes: number,
+): Promise<Uint8Array> {
   const declared = Number(response.headers.get("content-length") ?? 0);
   if (Number.isFinite(declared) && declared > maxBytes) {
-    throw new SpeechProviderError("response_too_large", "Speech service response exceeded the configured size limit.");
+    throw new SpeechProviderError(
+      "response_too_large",
+      "Speech service response exceeded the configured size limit.",
+    );
   }
   if (!response.body) return new Uint8Array();
   const reader = response.body.getReader();
@@ -171,8 +208,13 @@ async function readBoundedBytes(response: Response, maxBytes: number): Promise<U
       if (item.done) break;
       total += item.value.byteLength;
       if (total > maxBytes) {
-        await reader.cancel("response size limit exceeded").catch(() => undefined);
-        throw new SpeechProviderError("response_too_large", "Speech service response exceeded the configured size limit.");
+        await reader
+          .cancel("response size limit exceeded")
+          .catch(() => undefined);
+        throw new SpeechProviderError(
+          "response_too_large",
+          "Speech service response exceeded the configured size limit.",
+        );
       }
       chunks.push(item.value);
     }
@@ -188,17 +230,35 @@ async function readBoundedBytes(response: Response, maxBytes: number): Promise<U
   return output;
 }
 
-async function responseFailure(response: Response): Promise<SpeechProviderError> {
+async function responseFailure(
+  response: Response,
+): Promise<SpeechProviderError> {
   if (response.status === 401 || response.status === 403) {
-    return new SpeechProviderError("upstream_rejected", "Speech service did not accept the configured credentials.", { statusCode: response.status });
+    return new SpeechProviderError(
+      "upstream_rejected",
+      "Speech service did not accept the configured credentials.",
+      { statusCode: response.status },
+    );
   }
   if (response.status === 429) {
-    return new SpeechProviderError("rate_limited", "Speech service rate-limited the request.", { retryable: true, statusCode: 429 });
+    return new SpeechProviderError(
+      "rate_limited",
+      "Speech service rate-limited the request.",
+      { retryable: true, statusCode: 429 },
+    );
   }
   if (response.status === 408 || response.status >= 500) {
-    return new SpeechProviderError("upstream_unavailable", "Speech service is temporarily unavailable.", { retryable: true, statusCode: response.status });
+    return new SpeechProviderError(
+      "upstream_unavailable",
+      "Speech service is temporarily unavailable.",
+      { retryable: true, statusCode: response.status },
+    );
   }
-  return new SpeechProviderError("upstream_rejected", "Speech service rejected the request (HTTP " + response.status + ").", { statusCode: response.status });
+  return new SpeechProviderError(
+    "upstream_rejected",
+    "Speech service rejected the request (HTTP " + response.status + ").",
+    { statusCode: response.status },
+  );
 }
 
 /**
@@ -214,7 +274,9 @@ export class OpenAICompatibleSpeechRuntime {
   private readonly synthesisApiKey: string | undefined;
   private readonly synthesisModel: string | undefined;
   private readonly synthesisVoice: string;
-  private readonly synthesisFormat: NonNullable<SpeechSynthesisConfig["responseFormat"]>;
+  private readonly synthesisFormat: NonNullable<
+    SpeechSynthesisConfig["responseFormat"]
+  >;
   private readonly synthesisInstructions: string | undefined;
   private readonly defaultLanguage: string | undefined;
   private readonly fetchImpl: typeof fetch;
@@ -224,18 +286,54 @@ export class OpenAICompatibleSpeechRuntime {
   private readonly maxResponseBytes: number;
 
   constructor(options: SpeechRuntimeOptions = {}) {
-    this.transcriptionBaseUrl = safeBaseUrl(options.transcription?.baseUrl, "STT base URL");
-    this.transcriptionApiKey = boundedConfig(options.transcription?.apiKey, "STT API key", 4000);
-    this.transcriptionModel = boundedConfig(options.transcription?.model, "STT model", 200);
-    this.synthesisBaseUrl = safeBaseUrl(options.synthesis?.baseUrl, "TTS base URL");
-    this.synthesisApiKey = boundedConfig(options.synthesis?.apiKey, "TTS API key", 4000);
-    this.synthesisModel = boundedConfig(options.synthesis?.model, "TTS model", 200);
-    this.synthesisVoice = boundedConfig(options.synthesis?.voice, "TTS voice", 200) ?? "alloy";
+    this.transcriptionBaseUrl = safeBaseUrl(
+      options.transcription?.baseUrl,
+      "STT base URL",
+    );
+    this.transcriptionApiKey = boundedConfig(
+      options.transcription?.apiKey,
+      "STT API key",
+      4000,
+    );
+    this.transcriptionModel = boundedConfig(
+      options.transcription?.model,
+      "STT model",
+      200,
+    );
+    this.synthesisBaseUrl = safeBaseUrl(
+      options.synthesis?.baseUrl,
+      "TTS base URL",
+    );
+    this.synthesisApiKey = boundedConfig(
+      options.synthesis?.apiKey,
+      "TTS API key",
+      4000,
+    );
+    this.synthesisModel = boundedConfig(
+      options.synthesis?.model,
+      "TTS model",
+      200,
+    );
+    this.synthesisVoice =
+      boundedConfig(options.synthesis?.voice, "TTS voice", 200) ?? "alloy";
     this.synthesisFormat = options.synthesis?.responseFormat ?? "mp3";
-    this.synthesisInstructions = boundedConfig(options.synthesis?.instructions, "TTS instructions", 2000);
-    this.defaultLanguage = boundedConfig(options.defaultLanguage, "default transcription language", 24);
-    if (this.defaultLanguage && !/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$/.test(this.defaultLanguage)) {
-      throw new Error("Default speech transcription language must be a short language code such as en.");
+    this.synthesisInstructions = boundedConfig(
+      options.synthesis?.instructions,
+      "TTS instructions",
+      2000,
+    );
+    this.defaultLanguage = boundedConfig(
+      options.defaultLanguage,
+      "default transcription language",
+      24,
+    );
+    if (
+      this.defaultLanguage &&
+      !/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$/.test(this.defaultLanguage)
+    ) {
+      throw new Error(
+        "Default speech transcription language must be a short language code such as en.",
+      );
     }
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.timeoutMs = options.timeoutMs ?? 60_000;
@@ -243,34 +341,86 @@ export class OpenAICompatibleSpeechRuntime {
     this.maxSpeechTextCharacters = options.maxSpeechTextCharacters ?? 20_000;
     this.maxResponseBytes = options.maxResponseBytes ?? 20 * 1024 * 1024;
 
-    if (!Number.isInteger(this.timeoutMs) || this.timeoutMs < 1_000 || this.timeoutMs > 180_000) {
-      throw new Error("Speech request timeout must be between 1000 and 180000 ms.");
+    if (
+      !Number.isInteger(this.timeoutMs) ||
+      this.timeoutMs < 1_000 ||
+      this.timeoutMs > 180_000
+    ) {
+      throw new Error(
+        "Speech request timeout must be between 1000 and 180000 ms.",
+      );
     }
-    if (!Number.isInteger(this.maxAudioBytes) || this.maxAudioBytes < 1024 || this.maxAudioBytes > 25 * 1024 * 1024) {
-      throw new Error("Maximum audio upload size must be between 1024 bytes and 25 MiB.");
+    if (
+      !Number.isInteger(this.maxAudioBytes) ||
+      this.maxAudioBytes < 1024 ||
+      this.maxAudioBytes > 25 * 1024 * 1024
+    ) {
+      throw new Error(
+        "Maximum audio upload size must be between 1024 bytes and 25 MiB.",
+      );
     }
-    if (!Number.isInteger(this.maxSpeechTextCharacters) || this.maxSpeechTextCharacters < 1 || this.maxSpeechTextCharacters > 100_000) {
-      throw new Error("Maximum speech input text must be between 1 and 100000 characters.");
+    if (
+      !Number.isInteger(this.maxSpeechTextCharacters) ||
+      this.maxSpeechTextCharacters < 1 ||
+      this.maxSpeechTextCharacters > 100_000
+    ) {
+      throw new Error(
+        "Maximum speech input text must be between 1 and 100000 characters.",
+      );
     }
-    if (!Number.isInteger(this.maxResponseBytes) || this.maxResponseBytes < 1024 || this.maxResponseBytes > 50 * 1024 * 1024) {
-      throw new Error("Maximum speech response size must be between 1024 bytes and 50 MiB.");
+    if (
+      !Number.isInteger(this.maxResponseBytes) ||
+      this.maxResponseBytes < 1024 ||
+      this.maxResponseBytes > 50 * 1024 * 1024
+    ) {
+      throw new Error(
+        "Maximum speech response size must be between 1024 bytes and 50 MiB.",
+      );
     }
   }
 
-  static fromEnvironment(env: Environment = process.env, overrides: Partial<Pick<SpeechRuntimeOptions, "fetchImpl" | "timeoutMs" | "maxAudioBytes" | "maxSpeechTextCharacters" | "maxResponseBytes">> = {}): OpenAICompatibleSpeechRuntime {
+  static fromEnvironment(
+    env: Environment = process.env,
+    overrides: Partial<
+      Pick<
+        SpeechRuntimeOptions,
+        | "fetchImpl"
+        | "timeoutMs"
+        | "maxAudioBytes"
+        | "maxSpeechTextCharacters"
+        | "maxResponseBytes"
+      >
+    > = {},
+  ): OpenAICompatibleSpeechRuntime {
     return new OpenAICompatibleSpeechRuntime({
       transcription: {
-        ...(env.KUROCHAN_STT_BASE_URL === undefined ? {} : { baseUrl: env.KUROCHAN_STT_BASE_URL }),
-        ...(env.KUROCHAN_STT_API_KEY === undefined ? {} : { apiKey: env.KUROCHAN_STT_API_KEY }),
-        ...(env.KUROCHAN_STT_MODEL === undefined ? {} : { model: env.KUROCHAN_STT_MODEL }),
+        ...(env.KUROCHAN_STT_BASE_URL === undefined
+          ? {}
+          : { baseUrl: env.KUROCHAN_STT_BASE_URL }),
+        ...(env.KUROCHAN_STT_API_KEY === undefined
+          ? {}
+          : { apiKey: env.KUROCHAN_STT_API_KEY }),
+        ...(env.KUROCHAN_STT_MODEL === undefined
+          ? {}
+          : { model: env.KUROCHAN_STT_MODEL }),
       },
       synthesis: {
-        ...(env.KUROCHAN_TTS_BASE_URL === undefined ? {} : { baseUrl: env.KUROCHAN_TTS_BASE_URL }),
-        ...(env.KUROCHAN_TTS_API_KEY === undefined ? {} : { apiKey: env.KUROCHAN_TTS_API_KEY }),
-        ...(env.KUROCHAN_TTS_MODEL === undefined ? {} : { model: env.KUROCHAN_TTS_MODEL }),
-        ...(env.KUROCHAN_TTS_VOICE === undefined ? {} : { voice: env.KUROCHAN_TTS_VOICE }),
+        ...(env.KUROCHAN_TTS_BASE_URL === undefined
+          ? {}
+          : { baseUrl: env.KUROCHAN_TTS_BASE_URL }),
+        ...(env.KUROCHAN_TTS_API_KEY === undefined
+          ? {}
+          : { apiKey: env.KUROCHAN_TTS_API_KEY }),
+        ...(env.KUROCHAN_TTS_MODEL === undefined
+          ? {}
+          : { model: env.KUROCHAN_TTS_MODEL }),
+        ...(env.KUROCHAN_TTS_VOICE === undefined
+          ? {}
+          : { voice: env.KUROCHAN_TTS_VOICE }),
         responseFormat: parseSynthesisFormat(env.KUROCHAN_TTS_FORMAT) ?? "mp3",
-        ...(env.KUROCHAN_TTS_INSTRUCTIONS === undefined ? {} : { instructions: env.KUROCHAN_TTS_INSTRUCTIONS }),
+        ...(env.KUROCHAN_TTS_INSTRUCTIONS === undefined
+          ? {}
+          : { instructions: env.KUROCHAN_TTS_INSTRUCTIONS }),
       },
       defaultLanguage: env.KUROCHAN_STT_LANGUAGE?.trim() || "en",
       ...overrides,
@@ -309,39 +459,85 @@ export class OpenAICompatibleSpeechRuntime {
     };
   }
 
-  async transcribe(input: SpeechTranscriptionInput): Promise<SpeechTranscriptionResult> {
-    if (!this.isTranscriptionConfigured || !this.transcriptionBaseUrl || !this.transcriptionModel) {
-      throw new SpeechProviderError("not_configured", "Configure KUROCHAN_STT_BASE_URL, KUROCHAN_STT_MODEL and, when required, KUROCHAN_STT_API_KEY.");
+  async transcribe(
+    input: SpeechTranscriptionInput,
+  ): Promise<SpeechTranscriptionResult> {
+    if (
+      !this.isTranscriptionConfigured ||
+      !this.transcriptionBaseUrl ||
+      !this.transcriptionModel
+    ) {
+      throw new SpeechProviderError(
+        "not_configured",
+        "Configure KUROCHAN_STT_BASE_URL, KUROCHAN_STT_MODEL and, when required, KUROCHAN_STT_API_KEY.",
+      );
     }
     if (!(input.audio instanceof Uint8Array) || input.audio.byteLength === 0) {
-      throw new SpeechProviderError("invalid_audio", "Audio upload is empty or invalid.");
+      throw new SpeechProviderError(
+        "invalid_audio",
+        "Audio upload is empty or invalid.",
+      );
     }
     if (input.audio.byteLength > this.maxAudioBytes) {
-      throw new SpeechProviderError("audio_too_large", "Audio upload exceeds the configured size limit.");
+      throw new SpeechProviderError(
+        "audio_too_large",
+        "Audio upload exceeds the configured size limit.",
+      );
     }
-    const filename = input.filename.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 120);
+    const filename = input.filename
+      .replace(/[^A-Za-z0-9._-]/g, "_")
+      .slice(0, 120);
     const extension = filename.split(".").at(-1)?.toLowerCase() ?? "";
     const inferredType = AUDIO_EXTENSION_TO_TYPE[extension];
-    const contentType = (input.contentType?.split(";")[0]?.trim().toLowerCase() || inferredType || "").toLowerCase();
+    const contentType = (
+      input.contentType?.split(";")[0]?.trim().toLowerCase() ||
+      inferredType ||
+      ""
+    ).toLowerCase();
     if (contentType !== inferredType) {
-      throw new SpeechProviderError("invalid_audio", "The audio content type does not match its file extension.");
+      throw new SpeechProviderError(
+        "invalid_audio",
+        "The audio content type does not match its file extension.",
+      );
     }
-    if (!inferredType || !contentType || !ALLOWED_AUDIO_TYPES.has(contentType)) {
-      throw new SpeechProviderError("invalid_audio", "Audio must use a supported extension and an accepted audio content type.");
+    if (
+      !inferredType ||
+      !contentType ||
+      !ALLOWED_AUDIO_TYPES.has(contentType)
+    ) {
+      throw new SpeechProviderError(
+        "invalid_audio",
+        "Audio must use a supported extension and an accepted audio content type.",
+      );
     }
     const language = input.language?.trim() || this.defaultLanguage;
     if (language && !/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$/.test(language)) {
-      throw new SpeechProviderError("invalid_audio", "Language must be a valid short language code such as en or ja.");
+      throw new SpeechProviderError(
+        "invalid_audio",
+        "Language must be a valid short language code such as en or ja.",
+      );
     }
     if (input.prompt && input.prompt.length > 4_000) {
-      throw new SpeechProviderError("invalid_audio", "Transcription prompt cannot exceed 4000 characters.");
+      throw new SpeechProviderError(
+        "invalid_audio",
+        "Transcription prompt cannot exceed 4000 characters.",
+      );
     }
-    if (input.signal?.aborted) throw new SpeechProviderError("cancelled", "Audio transcription was cancelled.", { retryable: false });
+    if (input.signal?.aborted)
+      throw new SpeechProviderError(
+        "cancelled",
+        "Audio transcription was cancelled.",
+        { retryable: false },
+      );
 
     const form = new FormData();
     const copied = new Uint8Array(input.audio.byteLength);
     copied.set(input.audio);
-    form.append("file", new Blob([copied.buffer], { type: contentType }), filename);
+    form.append(
+      "file",
+      new Blob([copied.buffer], { type: contentType }),
+      filename,
+    );
     form.append("model", this.transcriptionModel);
     form.append("response_format", "json");
     if (language) form.append("language", language);
@@ -356,32 +552,82 @@ export class OpenAICompatibleSpeechRuntime {
       "Audio transcription",
     );
     if (!response.ok) throw await responseFailure(response);
-    const bytes = await readBoundedBytes(response, Math.min(this.maxResponseBytes, 2 * 1024 * 1024));
+    const bytes = await readBoundedBytes(
+      response,
+      Math.min(this.maxResponseBytes, 2 * 1024 * 1024),
+    );
     let json: unknown;
     try {
       json = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
     } catch (error) {
-      throw new SpeechProviderError("invalid_response", "Speech service returned invalid transcription JSON.", { cause: error });
+      throw new SpeechProviderError(
+        "invalid_response",
+        "Speech service returned invalid transcription JSON.",
+        { cause: error },
+      );
     }
-    if (!json || typeof json !== "object" || !("text" in json) || typeof (json as { text?: unknown }).text !== "string") {
-      throw new SpeechProviderError("invalid_response", "Speech service response did not contain transcription text.");
+    if (
+      !json ||
+      typeof json !== "object" ||
+      !("text" in json) ||
+      typeof (json as { text?: unknown }).text !== "string"
+    ) {
+      throw new SpeechProviderError(
+        "invalid_response",
+        "Speech service response did not contain transcription text.",
+      );
     }
     const text = (json as { text: string }).text.trim();
-    if (!text || text.length > 200_000) throw new SpeechProviderError("invalid_response", "Speech service returned an empty or oversized transcript.");
-    return { text, model: this.transcriptionModel, latencyMs: Date.now() - startedAt };
+    if (!text || text.length > 200_000)
+      throw new SpeechProviderError(
+        "invalid_response",
+        "Speech service returned an empty or oversized transcript.",
+      );
+    return {
+      text,
+      model: this.transcriptionModel,
+      latencyMs: Date.now() - startedAt,
+    };
   }
 
-  async synthesize(input: SpeechSynthesisInput): Promise<SpeechSynthesisResult> {
-    if (!this.isSynthesisConfigured || !this.synthesisBaseUrl || !this.synthesisModel) {
-      throw new SpeechProviderError("not_configured", "Configure KUROCHAN_TTS_BASE_URL, KUROCHAN_TTS_MODEL and, when required, KUROCHAN_TTS_API_KEY.");
+  async synthesize(
+    input: SpeechSynthesisInput,
+  ): Promise<SpeechSynthesisResult> {
+    if (
+      !this.isSynthesisConfigured ||
+      !this.synthesisBaseUrl ||
+      !this.synthesisModel
+    ) {
+      throw new SpeechProviderError(
+        "not_configured",
+        "Configure KUROCHAN_TTS_BASE_URL, KUROCHAN_TTS_MODEL and, when required, KUROCHAN_TTS_API_KEY.",
+      );
     }
     const text = input.text.trim();
-    if (!text) throw new SpeechProviderError("invalid_response", "Text for speech synthesis cannot be empty.");
-    if (text.length > this.maxSpeechTextCharacters) throw new SpeechProviderError("text_too_large", "Text for speech synthesis exceeds the configured size limit.");
-    if (input.instructions && input.instructions.length > 2_000) throw new SpeechProviderError("invalid_response", "Speech style instructions cannot exceed 2000 characters.");
-    if (input.signal?.aborted) throw new SpeechProviderError("cancelled", "Speech synthesis was cancelled.", { retryable: false });
+    if (!text)
+      throw new SpeechProviderError(
+        "invalid_response",
+        "Text for speech synthesis cannot be empty.",
+      );
+    if (text.length > this.maxSpeechTextCharacters)
+      throw new SpeechProviderError(
+        "text_too_large",
+        "Text for speech synthesis exceeds the configured size limit.",
+      );
+    if (input.instructions && input.instructions.length > 2_000)
+      throw new SpeechProviderError(
+        "invalid_response",
+        "Speech style instructions cannot exceed 2000 characters.",
+      );
+    if (input.signal?.aborted)
+      throw new SpeechProviderError(
+        "cancelled",
+        "Speech synthesis was cancelled.",
+        { retryable: false },
+      );
 
-    const voice = boundedConfig(input.voice, "TTS voice", 200) ?? this.synthesisVoice;
+    const voice =
+      boundedConfig(input.voice, "TTS voice", 200) ?? this.synthesisVoice;
     const format = input.responseFormat ?? this.synthesisFormat;
     const body: Record<string, unknown> = {
       model: this.synthesisModel,
@@ -389,7 +635,8 @@ export class OpenAICompatibleSpeechRuntime {
       voice,
       response_format: format,
     };
-    const instructions = input.instructions?.trim() || this.synthesisInstructions;
+    const instructions =
+      input.instructions?.trim() || this.synthesisInstructions;
     if (instructions) body.instructions = instructions;
     const startedAt = Date.now();
     const response = await this.request(
@@ -402,10 +649,25 @@ export class OpenAICompatibleSpeechRuntime {
     );
     if (!response.ok) throw await responseFailure(response);
     const audio = await readBoundedBytes(response, this.maxResponseBytes);
-    if (!audio.byteLength) throw new SpeechProviderError("invalid_response", "Speech service returned no audio data.");
-    const contentType = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() || FORMAT_CONTENT_TYPES[format];
-    if (!contentType.startsWith("audio/") && contentType !== "application/octet-stream") {
-      throw new SpeechProviderError("invalid_response", "Speech service returned an unexpected content type.");
+    if (!audio.byteLength)
+      throw new SpeechProviderError(
+        "invalid_response",
+        "Speech service returned no audio data.",
+      );
+    const contentType =
+      response.headers
+        .get("content-type")
+        ?.split(";")[0]
+        ?.trim()
+        .toLowerCase() || FORMAT_CONTENT_TYPES[format];
+    if (
+      !contentType.startsWith("audio/") &&
+      contentType !== "application/octet-stream"
+    ) {
+      throw new SpeechProviderError(
+        "invalid_response",
+        "Speech service returned an unexpected content type.",
+      );
     }
     return {
       audio,
@@ -425,7 +687,9 @@ export class OpenAICompatibleSpeechRuntime {
     extraHeaders: Record<string, string> = {},
   ): Promise<Response> {
     const timeoutSignal = AbortSignal.timeout(this.timeoutMs);
-    const requestSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+    const requestSignal = signal
+      ? AbortSignal.any([signal, timeoutSignal])
+      : timeoutSignal;
     try {
       const headers: Record<string, string> = { ...extraHeaders };
       if (apiKey) headers.authorization = "Bearer " + apiKey;
@@ -436,15 +700,35 @@ export class OpenAICompatibleSpeechRuntime {
         signal: requestSignal,
       });
     } catch (error) {
-      if (signal?.aborted) throw new SpeechProviderError("cancelled", operation + " was cancelled.", { cause: error });
-      if (timeoutSignal.aborted) throw timeoutError(operation + " exceeded its deadline.", error);
-      throw new SpeechProviderError("upstream_unavailable", operation + " service could not be reached.", { retryable: true, cause: error });
+      if (signal?.aborted)
+        throw new SpeechProviderError(
+          "cancelled",
+          operation + " was cancelled.",
+          { cause: error },
+        );
+      if (timeoutSignal.aborted)
+        throw timeoutError(operation + " exceeded its deadline.", error);
+      throw new SpeechProviderError(
+        "upstream_unavailable",
+        operation + " service could not be reached.",
+        { retryable: true, cause: error },
+      );
     }
   }
 }
 
-function parseSynthesisFormat(value: string | undefined): SpeechSynthesisConfig["responseFormat"] {
+function parseSynthesisFormat(
+  value: string | undefined,
+): SpeechSynthesisConfig["responseFormat"] {
   const normalized = value?.trim().toLowerCase();
-  if (normalized === "mp3" || normalized === "opus" || normalized === "aac" || normalized === "flac" || normalized === "wav" || normalized === "pcm") return normalized;
+  if (
+    normalized === "mp3" ||
+    normalized === "opus" ||
+    normalized === "aac" ||
+    normalized === "flac" ||
+    normalized === "wav" ||
+    normalized === "pcm"
+  )
+    return normalized;
   return "mp3";
 }

@@ -119,11 +119,28 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     new RunStore(env.KUROCHAN_DB_PATH?.trim() || "data/kurochan.sqlite");
   const catalog = options.catalog ?? new AgentCatalog();
   const mcpTools = options.mcpTools ?? McpToolRuntime.fromEnvironment(env);
-  const speech = options.speech ?? OpenAICompatibleSpeechRuntime.fromEnvironment(env, {
-    maxAudioBytes: parseBoundedInteger(env.KUROCHAN_SPEECH_MAX_AUDIO_BYTES, 25 * 1024 * 1024, 1024, 25 * 1024 * 1024),
-    maxSpeechTextCharacters: parseBoundedInteger(env.KUROCHAN_SPEECH_MAX_TEXT_CHARACTERS, 20_000, 1, 100_000),
-    maxResponseBytes: parseBoundedInteger(env.KUROCHAN_SPEECH_MAX_RESPONSE_BYTES, 20 * 1024 * 1024, 1024, 50 * 1024 * 1024),
-  });
+  const speech =
+    options.speech ??
+    OpenAICompatibleSpeechRuntime.fromEnvironment(env, {
+      maxAudioBytes: parseBoundedInteger(
+        env.KUROCHAN_SPEECH_MAX_AUDIO_BYTES,
+        25 * 1024 * 1024,
+        1024,
+        25 * 1024 * 1024,
+      ),
+      maxSpeechTextCharacters: parseBoundedInteger(
+        env.KUROCHAN_SPEECH_MAX_TEXT_CHARACTERS,
+        20_000,
+        1,
+        100_000,
+      ),
+      maxResponseBytes: parseBoundedInteger(
+        env.KUROCHAN_SPEECH_MAX_RESPONSE_BYTES,
+        20 * 1024 * 1024,
+        1024,
+        50 * 1024 * 1024,
+      ),
+    });
   const router = new OmniRouter({
     providers: registry.providers,
     routeOrder: routeOrdersFromEnvironment(env),
@@ -703,7 +720,12 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           if (part.type === "file") {
             if (audio) {
               return reply.code(400).send({
-                error: { code: "invalid_audio", message: "Exactly one audio file is allowed.", retryable: false, requestId: request.id },
+                error: {
+                  code: "invalid_audio",
+                  message: "Exactly one audio file is allowed.",
+                  retryable: false,
+                  requestId: request.id,
+                },
               });
             }
             filename = part.filename;
@@ -715,7 +737,12 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
             else if (part.fieldname === "prompt") prompt = value;
             else {
               return reply.code(400).send({
-                error: { code: "invalid_audio_field", message: "Only language and prompt fields are supported.", retryable: false, requestId: request.id },
+                error: {
+                  code: "invalid_audio_field",
+                  message: "Only language and prompt fields are supported.",
+                  retryable: false,
+                  requestId: request.id,
+                },
               });
             }
           }
@@ -727,7 +754,9 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         return reply.code(status).send({
           error: {
             code: tooLarge ? "audio_too_large" : "invalid_audio_upload",
-            message: tooLarge ? "Audio upload exceeds 25 MiB." : "Audio multipart upload could not be read.",
+            message: tooLarge
+              ? "Audio upload exceeds 25 MiB."
+              : "Audio multipart upload could not be read.",
             retryable: false,
             requestId: request.id,
           },
@@ -735,7 +764,12 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       }
       if (!audio) {
         return reply.code(400).send({
-          error: { code: "missing_audio", message: "Provide one audio file in the multipart field.", retryable: false, requestId: request.id },
+          error: {
+            code: "missing_audio",
+            message: "Provide one audio file in the multipart field.",
+            retryable: false,
+            requestId: request.id,
+          },
         });
       }
       const abort = new AbortController();
@@ -756,21 +790,46 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           language: language ?? speech.status.transcription.defaultLanguage,
         };
       } catch (error) {
-        const typed = error as { code?: unknown; message?: unknown; retryable?: unknown };
-        const code = error instanceof SpeechProviderError ? error.code : (typeof typed.code === "string" ? typed.code : "speech_transcription_failed");
-        const status = code === "not_configured" ? 503
-          : code === "cancelled" ? 499
-          : code === "rate_limited" ? 429
-          : code === "invalid_audio" ? 400
-          : code === "audio_too_large" ? 413
-          : code === "invalid_configuration" ? 500
-          : 502;
-        request.log.warn({ code, requestId: request.id }, "Speech transcription failed");
+        const typed = error as {
+          code?: unknown;
+          message?: unknown;
+          retryable?: unknown;
+        };
+        const code =
+          error instanceof SpeechProviderError
+            ? error.code
+            : typeof typed.code === "string"
+              ? typed.code
+              : "speech_transcription_failed";
+        const status =
+          code === "not_configured"
+            ? 503
+            : code === "cancelled"
+              ? 499
+              : code === "rate_limited"
+                ? 429
+                : code === "invalid_audio"
+                  ? 400
+                  : code === "audio_too_large"
+                    ? 413
+                    : code === "invalid_configuration"
+                      ? 500
+                      : 502;
+        request.log.warn(
+          { code, requestId: request.id },
+          "Speech transcription failed",
+        );
         return reply.code(status).send({
           error: {
             code,
-            message: error instanceof SpeechProviderError ? error.message : "Speech transcription failed. Check the server-side speech configuration.",
-            retryable: error instanceof SpeechProviderError ? error.retryable : status >= 500,
+            message:
+              error instanceof SpeechProviderError
+                ? error.message
+                : "Speech transcription failed. Check the server-side speech configuration.",
+            retryable:
+              error instanceof SpeechProviderError
+                ? error.retryable
+                : status >= 500,
             requestId: request.id,
           },
         });
@@ -784,16 +843,26 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       config: { rateLimit: { max: 12, timeWindow: "1 minute" } },
     },
     async (request, reply) => {
-      const schema = z.object({
-        input: z.string().trim().min(1).max(100_000),
-        voice: z.string().trim().min(1).max(200).optional(),
-        response_format: z.enum(["mp3", "opus", "aac", "flac", "wav", "pcm"]).optional(),
-        instructions: z.string().trim().max(2_000).optional(),
-      }).strict();
+      const schema = z
+        .object({
+          input: z.string().trim().min(1).max(100_000),
+          voice: z.string().trim().min(1).max(200).optional(),
+          response_format: z
+            .enum(["mp3", "opus", "aac", "flac", "wav", "pcm"])
+            .optional(),
+          instructions: z.string().trim().max(2_000).optional(),
+        })
+        .strict();
       const parsed = schema.safeParse(request.body);
       if (!parsed.success) {
         return reply.code(400).send({
-          error: { code: "invalid_speech_request", message: "input, voice, response_format, or instructions are invalid.", retryable: false, requestId: request.id },
+          error: {
+            code: "invalid_speech_request",
+            message:
+              "input, voice, response_format, or instructions are invalid.",
+            retryable: false,
+            requestId: request.id,
+          },
         });
       }
       const abort = new AbortController();
@@ -802,8 +871,12 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         const result = await speech.synthesize({
           text: parsed.data.input,
           ...(parsed.data.voice ? { voice: parsed.data.voice } : {}),
-          ...(parsed.data.response_format ? { responseFormat: parsed.data.response_format } : {}),
-          ...(parsed.data.instructions ? { instructions: parsed.data.instructions } : {}),
+          ...(parsed.data.response_format
+            ? { responseFormat: parsed.data.response_format }
+            : {}),
+          ...(parsed.data.instructions
+            ? { instructions: parsed.data.instructions }
+            : {}),
           signal: abort.signal,
         });
         return reply
@@ -814,21 +887,46 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           .type(result.contentType)
           .send(Buffer.from(result.audio));
       } catch (error) {
-        const typed = error as { code?: unknown; message?: unknown; retryable?: unknown };
-        const code = error instanceof SpeechProviderError ? error.code : (typeof typed.code === "string" ? typed.code : "speech_synthesis_failed");
-        const status = code === "not_configured" ? 503
-          : code === "cancelled" ? 499
-          : code === "rate_limited" ? 429
-          : code === "text_too_large" ? 413
-          : code === "invalid_response" ? 400
-          : code === "invalid_configuration" ? 500
-          : 502;
-        request.log.warn({ code, requestId: request.id }, "Speech synthesis failed");
+        const typed = error as {
+          code?: unknown;
+          message?: unknown;
+          retryable?: unknown;
+        };
+        const code =
+          error instanceof SpeechProviderError
+            ? error.code
+            : typeof typed.code === "string"
+              ? typed.code
+              : "speech_synthesis_failed";
+        const status =
+          code === "not_configured"
+            ? 503
+            : code === "cancelled"
+              ? 499
+              : code === "rate_limited"
+                ? 429
+                : code === "text_too_large"
+                  ? 413
+                  : code === "invalid_response"
+                    ? 400
+                    : code === "invalid_configuration"
+                      ? 500
+                      : 502;
+        request.log.warn(
+          { code, requestId: request.id },
+          "Speech synthesis failed",
+        );
         return reply.code(status).send({
           error: {
             code,
-            message: error instanceof SpeechProviderError ? error.message : "Speech synthesis failed. Check the server-side speech configuration.",
-            retryable: error instanceof SpeechProviderError ? error.retryable : status >= 500,
+            message:
+              error instanceof SpeechProviderError
+                ? error.message
+                : "Speech synthesis failed. Check the server-side speech configuration.",
+            retryable:
+              error instanceof SpeechProviderError
+                ? error.retryable
+                : status >= 500,
             requestId: request.id,
           },
         });
@@ -1675,40 +1773,43 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     },
   );
 
-  app.get("/v1/conversations/:conversationId/audio/:messageId", async (request, reply) => {
-    const { conversationId, messageId } = request.params as {
-      conversationId: string;
-      messageId: string;
-    };
-    const conversation = store.getConversation(conversationId);
-    if (!conversation || conversation.createdBy !== "local") {
-      return reply.code(404).send({
-        error: {
-          code: "conversation_not_found",
-          message: "Conversation was not found.",
-          retryable: false,
-          requestId: request.id,
-        },
-      });
-    }
-    const artifact = store.getConversationAudio(conversationId, messageId);
-    if (!artifact) {
-      return reply.code(404).send({
-        error: {
-          code: "audio_not_found",
-          message: "No saved audio reply exists for that assistant message.",
-          retryable: false,
-          requestId: request.id,
-        },
-      });
-    }
-    return reply
-      .header("cache-control", "no-store")
-      .header("x-content-type-options", "nosniff")
-      .header("content-length", String(artifact.bytes))
-      .type(artifact.contentType)
-      .send(Buffer.from(artifact.audio));
-  });
+  app.get(
+    "/v1/conversations/:conversationId/audio/:messageId",
+    async (request, reply) => {
+      const { conversationId, messageId } = request.params as {
+        conversationId: string;
+        messageId: string;
+      };
+      const conversation = store.getConversation(conversationId);
+      if (!conversation || conversation.createdBy !== "local") {
+        return reply.code(404).send({
+          error: {
+            code: "conversation_not_found",
+            message: "Conversation was not found.",
+            retryable: false,
+            requestId: request.id,
+          },
+        });
+      }
+      const artifact = store.getConversationAudio(conversationId, messageId);
+      if (!artifact) {
+        return reply.code(404).send({
+          error: {
+            code: "audio_not_found",
+            message: "No saved audio reply exists for that assistant message.",
+            retryable: false,
+            requestId: request.id,
+          },
+        });
+      }
+      return reply
+        .header("cache-control", "no-store")
+        .header("x-content-type-options", "nosniff")
+        .header("content-length", String(artifact.bytes))
+        .type(artifact.contentType)
+        .send(Buffer.from(artifact.audio));
+    },
+  );
 
   app.post(
     "/v1/conversations/:conversationId/voice-turn",
@@ -1730,7 +1831,8 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         return reply.code(503).send({
           error: {
             code: "speech_not_configured",
-            message: "Configure both KUROCHAN_STT_BASE_URL/KUROCHAN_STT_MODEL and KUROCHAN_TTS_BASE_URL/KUROCHAN_TTS_MODEL to use voice turns.",
+            message:
+              "Configure both KUROCHAN_STT_BASE_URL/KUROCHAN_STT_MODEL and KUROCHAN_TTS_BASE_URL/KUROCHAN_TTS_MODEL to use voice turns.",
             retryable: false,
             requestId: request.id,
           },
@@ -1767,11 +1869,21 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
             contentType = part.mimetype;
             audio = await part.toBuffer();
           } else {
-            if (!["clientMessageId", "model", "language", "voice", "response_format", "instructions"].includes(part.fieldname)) {
+            if (
+              ![
+                "clientMessageId",
+                "model",
+                "language",
+                "voice",
+                "response_format",
+                "instructions",
+              ].includes(part.fieldname)
+            ) {
               return reply.code(400).send({
                 error: {
                   code: "invalid_voice_field",
-                  message: "Voice turns accept only clientMessageId, model, language, voice, response_format, and instructions fields.",
+                  message:
+                    "Voice turns accept only clientMessageId, model, language, voice, response_format, and instructions fields.",
                   retryable: false,
                   requestId: request.id,
                 },
@@ -1796,7 +1908,9 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         return reply.code(tooLarge ? 413 : 400).send({
           error: {
             code: tooLarge ? "audio_too_large" : "invalid_audio_upload",
-            message: tooLarge ? "Audio upload exceeds 25 MiB." : "Voice-turn multipart upload could not be read.",
+            message: tooLarge
+              ? "Audio upload exceeds 25 MiB."
+              : "Voice-turn multipart upload could not be read.",
             retryable: false,
             requestId: request.id,
           },
@@ -1819,29 +1933,38 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         return reply.code(400).send({
           error: {
             code: "unknown_model",
-            message: "Use omni/fast, omni/balanced, omni/quality, or a provider-qualified model.",
+            message:
+              "Use omni/fast, omni/balanced, omni/quality, or a provider-qualified model.",
             retryable: false,
             requestId: request.id,
           },
         });
       }
       const clientMessageId = fields.clientMessageId?.trim();
-      if (clientMessageId && (clientMessageId.length > 200 || /[\r\n\0]/.test(clientMessageId))) {
+      if (
+        clientMessageId &&
+        (clientMessageId.length > 200 || /[\r\n\0]/.test(clientMessageId))
+      ) {
         return reply.code(400).send({
           error: {
             code: "invalid_client_message_id",
-            message: "clientMessageId must be a single line of at most 200 characters.",
+            message:
+              "clientMessageId must be a single line of at most 200 characters.",
             retryable: false,
             requestId: request.id,
           },
         });
       }
       const requestedFormat = fields.response_format?.trim();
-      if (requestedFormat && !["mp3", "opus", "aac", "flac", "wav", "pcm"].includes(requestedFormat)) {
+      if (
+        requestedFormat &&
+        !["mp3", "opus", "aac", "flac", "wav", "pcm"].includes(requestedFormat)
+      ) {
         return reply.code(400).send({
           error: {
             code: "invalid_speech_format",
-            message: "response_format must be mp3, opus, aac, flac, wav, or pcm.",
+            message:
+              "response_format must be mp3, opus, aac, flac, wav, or pcm.",
             retryable: false,
             requestId: request.id,
           },
@@ -1849,21 +1972,35 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       }
       const voice = fields.voice?.trim();
       const instructions = fields.instructions?.trim();
-      const language = fields.language?.trim() || speech.status.transcription.defaultLanguage || "en";
+      const language =
+        fields.language?.trim() ||
+        speech.status.transcription.defaultLanguage ||
+        "en";
       const audioSha256 = createHash("sha256").update(audio).digest("hex");
       const abort = new AbortController();
       request.raw.on("aborted", () => abort.abort());
 
       try {
-        let userMessage: ReturnType<RunStore["findConversationMessageByClientId"]>;
+        let userMessage: ReturnType<
+          RunStore["findConversationMessageByClientId"]
+        >;
         let transcription: { text: string; model: string; latencyMs: number };
         const previousInput = clientMessageId
-          ? store.findConversationMessageByClientId(conversationId, clientMessageId)
+          ? store.findConversationMessageByClientId(
+              conversationId,
+              clientMessageId,
+            )
           : undefined;
         if (previousInput) {
-          const metadata = previousInput.metadata as {
-            voiceInput?: { audioSha256?: unknown; model?: unknown; language?: unknown };
-          } | undefined;
+          const metadata = previousInput.metadata as
+            | {
+                voiceInput?: {
+                  audioSha256?: unknown;
+                  model?: unknown;
+                  language?: unknown;
+                };
+              }
+            | undefined;
           if (
             previousInput.role !== "user" ||
             metadata?.voiceInput?.audioSha256 !== audioSha256
@@ -1871,7 +2008,8 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
             return reply.code(409).send({
               error: {
                 code: "voice_idempotency_conflict",
-                message: "clientMessageId was already used for a different audio recording.",
+                message:
+                  "clientMessageId was already used for a different audio recording.",
                 retryable: false,
                 requestId: request.id,
               },
@@ -1880,7 +2018,10 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           userMessage = previousInput;
           transcription = {
             text: previousInput.content,
-            model: typeof metadata?.voiceInput?.model === "string" ? metadata.voiceInput.model : "replayed-transcript",
+            model:
+              typeof metadata?.voiceInput?.model === "string"
+                ? metadata.voiceInput.model
+                : "replayed-transcript",
             latencyMs: 0,
           };
         } else {
@@ -1895,7 +2036,8 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
             return reply.code(422).send({
               error: {
                 code: "empty_transcription",
-                message: "Speech recognition did not detect usable text. Try a clearer recording.",
+                message:
+                  "Speech recognition did not detect usable text. Try a clearer recording.",
                 retryable: false,
                 requestId: request.id,
               },
@@ -1919,14 +2061,17 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           });
           userMessage = appended.message;
           if (!appended.inserted) {
-            const metadata = appended.message.metadata as {
-              voiceInput?: { audioSha256?: unknown; model?: unknown };
-            } | undefined;
+            const metadata = appended.message.metadata as
+              | {
+                  voiceInput?: { audioSha256?: unknown; model?: unknown };
+                }
+              | undefined;
             if (metadata?.voiceInput?.audioSha256 !== audioSha256) {
               return reply.code(409).send({
                 error: {
                   code: "voice_idempotency_conflict",
-                  message: "clientMessageId was concurrently used for a different audio recording.",
+                  message:
+                    "clientMessageId was concurrently used for a different audio recording.",
                   retryable: false,
                   requestId: request.id,
                 },
@@ -1934,31 +2079,58 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
             }
             transcription = {
               text: appended.message.content,
-              model: typeof metadata?.voiceInput?.model === "string" ? metadata.voiceInput.model : result.model,
+              model:
+                typeof metadata?.voiceInput?.model === "string"
+                  ? metadata.voiceInput.model
+                  : result.model,
               latencyMs: 0,
             };
           }
         }
 
-        const allMessages = store.listConversationMessages(conversationId, { limit: 1000 });
+        const allMessages = store.listConversationMessages(conversationId, {
+          limit: 1000,
+        });
         const priorAssistant = allMessages.find((message) => {
-          if (message.sequence <= userMessage!.sequence || message.role !== "assistant") return false;
-          const metadata = message.metadata as { kind?: unknown; userMessageId?: unknown } | undefined;
-          return metadata?.kind === "voice_response" && metadata.userMessageId === userMessage!.id;
+          if (
+            message.sequence <= userMessage!.sequence ||
+            message.role !== "assistant"
+          )
+            return false;
+          const metadata = message.metadata as
+            { kind?: unknown; userMessageId?: unknown } | undefined;
+          return (
+            metadata?.kind === "voice_response" &&
+            metadata.userMessageId === userMessage!.id
+          );
         });
 
-        let assistantMessage: NonNullable<ReturnType<RunStore["listConversationMessages"]>[number]> | undefined = priorAssistant;
+        let assistantMessage:
+          | NonNullable<
+              ReturnType<RunStore["listConversationMessages"]>[number]
+            >
+          | undefined = priorAssistant;
         let provider: Record<string, unknown> | undefined;
         if (!assistantMessage) {
           const history = allMessages
             .filter((message) => message.sequence <= userMessage!.sequence)
             .slice(-40)
-            .map((message) => ({ role: message.role, content: message.content }));
+            .map((message) => ({
+              role: message.role,
+              content: message.content,
+            }));
           const result = await router.complete({
             profile: selection.profile,
             context: { operation: "chat" },
-            ...(selection.preferredProvider ? { preferredProvider: selection.preferredProvider, lockProvider: true } : {}),
-            ...(selection.providerModel ? { model: selection.providerModel } : {}),
+            ...(selection.preferredProvider
+              ? {
+                  preferredProvider: selection.preferredProvider,
+                  lockProvider: true,
+                }
+              : {}),
+            ...(selection.providerModel
+              ? { model: selection.providerModel }
+              : {}),
             messages: history,
             maxTokens: 1024,
             temperature: 0.2,
@@ -1970,7 +2142,8 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
             return reply.code(502).send({
               error: {
                 code: "invalid_provider_response",
-                message: "The chat model returned an empty or oversized voice-turn response.",
+                message:
+                  "The chat model returned an empty or oversized voice-turn response.",
                 retryable: true,
                 requestId: request.id,
               },
@@ -2011,11 +2184,17 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
               ...(result.usage ? { usage: result.usage } : {}),
             });
           } catch (usageError) {
-            request.log.warn({ requestId: request.id }, "Could not record voice-turn model usage");
+            request.log.warn(
+              { requestId: request.id },
+              "Could not record voice-turn model usage",
+            );
           }
         }
 
-        let savedAudio = store.getConversationAudio(conversationId, assistantMessage.id);
+        let savedAudio = store.getConversationAudio(
+          conversationId,
+          assistantMessage.id,
+        );
         let synthesis = {
           model: speech.status.synthesis.model ?? "configured-speech-model",
           format: requestedFormat ?? speech.status.synthesis.format,
@@ -2026,11 +2205,19 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           const audioResult = await speech.synthesize({
             text: assistantMessage.content,
             ...(voice ? { voice } : {}),
-            ...(requestedFormat ? { responseFormat: requestedFormat as "mp3" | "opus" | "aac" | "flac" | "wav" | "pcm" } : {}),
+            ...(requestedFormat
+              ? {
+                  responseFormat: requestedFormat as
+                    "mp3" | "opus" | "aac" | "flac" | "wav" | "pcm",
+                }
+              : {}),
             ...(instructions ? { instructions } : {}),
             signal: abort.signal,
           });
-          savedAudio = store.getConversationAudio(conversationId, assistantMessage.id);
+          savedAudio = store.getConversationAudio(
+            conversationId,
+            assistantMessage.id,
+          );
           if (!savedAudio) {
             savedAudio = undefined;
             const record = store.saveConversationAudio({
@@ -2042,7 +2229,10 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
             });
             // Read back the canonical persisted artifact so the returned URL,
             // byte count and metadata describe exactly what was saved.
-            savedAudio = store.getConversationAudio(conversationId, assistantMessage.id);
+            savedAudio = store.getConversationAudio(
+              conversationId,
+              assistantMessage.id,
+            );
             synthesis = {
               model: audioResult.model,
               format: record.format,
@@ -2058,9 +2248,13 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
             };
           }
         } else {
-          const metadata = assistantMessage.metadata as { synthesisModel?: unknown } | undefined;
+          const metadata = assistantMessage.metadata as
+            { synthesisModel?: unknown } | undefined;
           synthesis = {
-            model: typeof metadata?.synthesisModel === "string" ? metadata.synthesisModel : synthesis.model,
+            model:
+              typeof metadata?.synthesisModel === "string"
+                ? metadata.synthesisModel
+                : synthesis.model,
             format: savedAudio.format,
             contentType: savedAudio.contentType,
             latencyMs: 0,
@@ -2089,28 +2283,45 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           idempotentReplay: Boolean(previousInput),
         };
       } catch (error) {
-        const typed = error as { code?: unknown; message?: unknown; retryable?: unknown };
-        const code = error instanceof SpeechProviderError
-          ? error.code
-          : typeof typed.code === "string"
-            ? typed.code
-            : "voice_turn_failed";
-        const status = code === "not_configured" ? 503
-          : code === "cancelled" ? 499
-          : code === "rate_limited" ? 429
-          : code === "invalid_audio" ? 400
-          : code === "audio_too_large" ? 413
-          : code === "text_too_large" ? 413
-          : code === "invalid_configuration" ? 500
-          : 502;
+        const typed = error as {
+          code?: unknown;
+          message?: unknown;
+          retryable?: unknown;
+        };
+        const code =
+          error instanceof SpeechProviderError
+            ? error.code
+            : typeof typed.code === "string"
+              ? typed.code
+              : "voice_turn_failed";
+        const status =
+          code === "not_configured"
+            ? 503
+            : code === "cancelled"
+              ? 499
+              : code === "rate_limited"
+                ? 429
+                : code === "invalid_audio"
+                  ? 400
+                  : code === "audio_too_large"
+                    ? 413
+                    : code === "text_too_large"
+                      ? 413
+                      : code === "invalid_configuration"
+                        ? 500
+                        : 502;
         request.log.warn({ code, requestId: request.id }, "Voice turn failed");
         return reply.code(status).send({
           error: {
             code,
-            message: error instanceof SpeechProviderError
-              ? error.message
-              : "Voice turn failed. Retry with the same clientMessageId to resume from persisted transcript/reply state.",
-            retryable: error instanceof SpeechProviderError ? error.retryable : status >= 500,
+            message:
+              error instanceof SpeechProviderError
+                ? error.message
+                : "Voice turn failed. Retry with the same clientMessageId to resume from persisted transcript/reply state.",
+            retryable:
+              error instanceof SpeechProviderError
+                ? error.retryable
+                : status >= 500,
             requestId: request.id,
           },
         });

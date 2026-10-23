@@ -448,10 +448,13 @@ describe("Kuro-chan API", () => {
     const fetchImpl = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
       if (url.endsWith("/audio/transcriptions")) {
-        return new Response(JSON.stringify({ text: "Hello from the microphone." }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
+        return new Response(
+          JSON.stringify({ text: "Hello from the microphone." }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
       }
       if (url.endsWith("/audio/speech")) {
         return new Response(new Uint8Array([82, 73, 70, 70, 1, 2, 3, 4]), {
@@ -485,7 +488,10 @@ describe("Kuro-chan API", () => {
       speech,
     });
 
-    const status = await app.inject({ method: "GET", url: "/v1/speech/status" });
+    const status = await app.inject({
+      method: "GET",
+      url: "/v1/speech/status",
+    });
     expect(status.statusCode).toBe(200);
     expect(status.json()).toMatchObject({
       transcription: {
@@ -548,7 +554,9 @@ describe("Kuro-chan API", () => {
     });
     expect(synthesis.statusCode).toBe(200);
     expect(synthesis.headers["content-type"]).toContain("audio/wav");
-    expect([...Buffer.from(synthesis.rawPayload)]).toEqual([82, 73, 70, 70, 1, 2, 3, 4]);
+    expect([...Buffer.from(synthesis.rawPayload)]).toEqual([
+      82, 73, 70, 70, 1, 2, 3, 4,
+    ]);
     expect(synthesis.headers["x-speech-model"]).toBe("speech-compatible");
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
@@ -588,16 +596,22 @@ describe("Kuro-chan API", () => {
       defaultLanguage: "en",
       fetchImpl,
     });
-    const complete = vi.fn(async (input: ChatCompletionInput): Promise<ChatCompletionOutput> => {
-      expect(input.messages.some((message) => message.content === "What is two plus two?")).toBe(true);
-      return {
-        providerId: "freellmapi",
-        model: input.model ?? "auto",
-        content: "Four.",
-        latencyMs: 9,
-        usage: { promptTokens: 24, completionTokens: 2, totalTokens: 26 },
-      };
-    });
+    const complete = vi.fn(
+      async (input: ChatCompletionInput): Promise<ChatCompletionOutput> => {
+        expect(
+          input.messages.some(
+            (message) => message.content === "What is two plus two?",
+          ),
+        ).toBe(true);
+        return {
+          providerId: "freellmapi",
+          model: input.model ?? "auto",
+          content: "Four.",
+          latencyMs: 9,
+          usage: { promptTokens: 24, completionTokens: 2, totalTokens: 26 },
+        };
+      },
+    );
     const freellmapi: ChatProvider = {
       id: "freellmapi",
       displayName: "FreeLLMAPI",
@@ -616,22 +630,26 @@ describe("Kuro-chan API", () => {
     app = buildServer({
       env: {},
       providers: {
-        providers: new Map<ProviderId, ChatProvider>([["freellmapi", freellmapi]]),
-        statuses: [{
-          id: "freellmapi",
-          name: "FreeLLMAPI",
-          configured: true,
-          defaultModel: "auto",
-          capabilityNotes: [],
-          capabilities: {
-            text: true,
-            vision: false,
-            tools: false,
-            json: false,
-            streaming: true,
-            reasoning: false,
+        providers: new Map<ProviderId, ChatProvider>([
+          ["freellmapi", freellmapi],
+        ]),
+        statuses: [
+          {
+            id: "freellmapi",
+            name: "FreeLLMAPI",
+            configured: true,
+            defaultModel: "auto",
+            capabilityNotes: [],
+            capabilities: {
+              text: true,
+              vision: false,
+              tools: false,
+              json: false,
+              streaming: true,
+              reasoning: false,
+            },
           },
-        }],
+        ],
       },
       logger: false,
       store,
@@ -644,34 +662,37 @@ describe("Kuro-chan API", () => {
     });
     const conversationId = created.json().conversation.id as string;
     const boundary = "kuro-voice-turn-boundary";
-    const body = (audioText = "FAKE_AUDIO_PAYLOAD") => [
-      "--" + boundary,
-      'Content-Disposition: form-data; name="file"; filename="speech.wav"',
-      "Content-Type: audio/wav",
-      "",
-      audioText,
-      "--" + boundary,
-      'Content-Disposition: form-data; name="clientMessageId"',
-      "",
-      "voice-turn-001",
-      "--" + boundary,
-      'Content-Disposition: form-data; name="model"',
-      "",
-      "freellmapi/auto",
-      "--" + boundary,
-      'Content-Disposition: form-data; name="voice"',
-      "",
-      "en-jp-female",
-      "--" + boundary,
-      'Content-Disposition: form-data; name="response_format"',
-      "",
-      "wav",
-      "--" + boundary + "--",
-      "",
-    ].join("\r\n");
+    const body = (audioText = "FAKE_AUDIO_PAYLOAD") =>
+      [
+        "--" + boundary,
+        'Content-Disposition: form-data; name="file"; filename="speech.wav"',
+        "Content-Type: audio/wav",
+        "",
+        audioText,
+        "--" + boundary,
+        'Content-Disposition: form-data; name="clientMessageId"',
+        "",
+        "voice-turn-001",
+        "--" + boundary,
+        'Content-Disposition: form-data; name="model"',
+        "",
+        "freellmapi/auto",
+        "--" + boundary,
+        'Content-Disposition: form-data; name="voice"',
+        "",
+        "en-jp-female",
+        "--" + boundary,
+        'Content-Disposition: form-data; name="response_format"',
+        "",
+        "wav",
+        "--" + boundary + "--",
+        "",
+      ].join("\r\n");
     const url = `/v1/conversations/${conversationId}/voice-turn`;
     const payload = body();
-    const headers = { "content-type": "multipart/form-data; boundary=" + boundary };
+    const headers = {
+      "content-type": "multipart/form-data; boundary=" + boundary,
+    };
 
     const first = await app.inject({ method: "POST", url, headers, payload });
     expect(first.statusCode).toBe(200);
@@ -707,7 +728,12 @@ describe("Kuro-chan API", () => {
       kind: "voice_input",
       voiceInput: { rawAudioPersisted: false },
     });
-    expect(store.getConversationAudio(conversationId, first.json().assistantMessage.id)).toMatchObject({
+    expect(
+      store.getConversationAudio(
+        conversationId,
+        first.json().assistantMessage.id,
+      ),
+    ).toMatchObject({
       contentType: "audio/wav",
       format: "wav",
       bytes: 8,
@@ -719,12 +745,16 @@ describe("Kuro-chan API", () => {
     });
     expect(audio.statusCode).toBe(200);
     expect(audio.headers["content-type"]).toContain("audio/wav");
-    expect([...Buffer.from(audio.rawPayload)]).toEqual([82, 73, 70, 70, 1, 2, 3, 4]);
+    expect([...Buffer.from(audio.rawPayload)]).toEqual([
+      82, 73, 70, 70, 1, 2, 3, 4,
+    ]);
 
     const replay = await app.inject({ method: "POST", url, headers, payload });
     expect(replay.statusCode).toBe(200);
     expect(replay.json().idempotentReplay).toBe(true);
-    expect(replay.json().assistantMessage.id).toBe(first.json().assistantMessage.id);
+    expect(replay.json().assistantMessage.id).toBe(
+      first.json().assistantMessage.id,
+    );
     expect(complete).toHaveBeenCalledOnce();
     expect(fetchImpl).toHaveBeenCalledTimes(2);
     expect(store.listConversationMessages(conversationId)).toHaveLength(2);

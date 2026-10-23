@@ -799,31 +799,46 @@ export class RunStore {
     if (input.audio.byteLength > 50 * 1024 * 1024) {
       throw new Error("Conversation audio exceeds the 50 MiB storage limit.");
     }
-    if (!/^audio\//i.test(input.contentType) && input.contentType !== "application/octet-stream") {
-      throw new Error("Conversation audio content type must be an audio media type.");
+    if (
+      !/^audio\//i.test(input.contentType) &&
+      input.contentType !== "application/octet-stream"
+    ) {
+      throw new Error(
+        "Conversation audio content type must be an audio media type.",
+      );
     }
     const audio = Buffer.from(input.audio);
     const transaction = this.db.transaction(() => {
-      const message = this.db.prepare(
-        "SELECT role FROM conversation_messages WHERE id=? AND conversation_id=?",
-      ).get(input.messageId, input.conversationId) as { role: ConversationMessageRole } | undefined;
+      const message = this.db
+        .prepare(
+          "SELECT role FROM conversation_messages WHERE id=? AND conversation_id=?",
+        )
+        .get(input.messageId, input.conversationId) as
+        { role: ConversationMessageRole } | undefined;
       if (!message || message.role !== "assistant") {
-        throw new Error("Audio can only be attached to an assistant message in the same conversation.");
+        throw new Error(
+          "Audio can only be attached to an assistant message in the same conversation.",
+        );
       }
-      this.db.prepare(
-        "INSERT INTO conversation_audio(message_id,conversation_id,content_type,format,data,bytes,created_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(message_id) DO NOTHING",
-      ).run(
-        input.messageId,
-        input.conversationId,
-        input.contentType,
-        input.format,
-        audio,
-        audio.byteLength,
-        now,
-      );
-      const row = this.db.prepare(
-        "SELECT conversation_id,message_id,content_type,format,bytes,created_at FROM conversation_audio WHERE message_id=? AND conversation_id=?",
-      ).get(input.messageId, input.conversationId) as Omit<ConversationAudioRow, "data"> | undefined;
+      this.db
+        .prepare(
+          "INSERT INTO conversation_audio(message_id,conversation_id,content_type,format,data,bytes,created_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(message_id) DO NOTHING",
+        )
+        .run(
+          input.messageId,
+          input.conversationId,
+          input.contentType,
+          input.format,
+          audio,
+          audio.byteLength,
+          now,
+        );
+      const row = this.db
+        .prepare(
+          "SELECT conversation_id,message_id,content_type,format,bytes,created_at FROM conversation_audio WHERE message_id=? AND conversation_id=?",
+        )
+        .get(input.messageId, input.conversationId) as
+        Omit<ConversationAudioRow, "data"> | undefined;
       if (!row) throw new Error("Audio artifact could not be persisted.");
       return {
         conversationId: row.conversation_id,
@@ -843,9 +858,11 @@ export class RunStore {
   ): ConversationAudioContent | undefined {
     assertText(conversationId, "conversationId", 200);
     assertText(messageId, "messageId", 200);
-    const row = this.db.prepare(
-      "SELECT conversation_id,message_id,content_type,format,data,bytes,created_at FROM conversation_audio WHERE conversation_id=? AND message_id=?",
-    ).get(conversationId, messageId) as ConversationAudioRow | undefined;
+    const row = this.db
+      .prepare(
+        "SELECT conversation_id,message_id,content_type,format,data,bytes,created_at FROM conversation_audio WHERE conversation_id=? AND message_id=?",
+      )
+      .get(conversationId, messageId) as ConversationAudioRow | undefined;
     if (!row) return undefined;
     return {
       conversationId: row.conversation_id,

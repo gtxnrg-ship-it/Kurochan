@@ -139,7 +139,9 @@ export function approvalGranted(
   const events = store
     .listEvents(task.runId, 0, 1000)
     .filter((event) => event.taskId === task.id);
-  const requests = events.filter((event) => event.type === "approval.requested");
+  const requests = events.filter(
+    (event) => event.type === "approval.requested",
+  );
   const matches = (event: (typeof requests)[number]) => {
     const payload = event.payload as { action?: Record<string, unknown> };
     const action = payload?.action ?? {};
@@ -147,16 +149,20 @@ export function approvalGranted(
     if (
       type !== approvalType &&
       !(type === undefined && approvalType === "task-level")
-    ) return false;
+    )
+      return false;
     return Object.entries(expectedAction).every(
       ([key, value]) => action[key] === value,
     );
   };
 
   // A later approval for an unrelated tool must never authorize an older request.
-  const request = approvalType === "external-write"
-    ? (requests.at(-1) && matches(requests.at(-1)!) ? requests.at(-1) : undefined)
-    : requests.filter(matches).at(-1);
+  const request =
+    approvalType === "external-write"
+      ? requests.at(-1) && matches(requests.at(-1)!)
+        ? requests.at(-1)
+        : undefined
+      : requests.filter(matches).at(-1);
   if (!request) return false;
   const decision = events.find(
     (event) =>

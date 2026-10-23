@@ -61,33 +61,51 @@ describe("Approval scope", () => {
     const runId = "be42cfea-6262-4c10-ad4f-ad7bb78b2a61";
     const workerId = "approval-scope-test";
     try {
-      store.createRun({
-        id: runId,
-        goal: "Use two external service tools with separate approvals",
-        profile: "balanced",
-        tasks: [{
-          key: "external-tools",
-          agentId: "engineering/engineering-test-agent",
-          objective: "Use the exact external service action requested by the user.",
-        }],
-      }, 1);
+      store.createRun(
+        {
+          id: runId,
+          goal: "Use two external service tools with separate approvals",
+          profile: "balanced",
+          tasks: [
+            {
+              key: "external-tools",
+              agentId: "engineering/engineering-test-agent",
+              objective:
+                "Use the exact external service action requested by the user.",
+            },
+          ],
+        },
+        1,
+      );
       let task = store.claimNextTask(workerId, { now: 2, leaseMs: 1_000 });
       expect(task).toBeDefined();
-      task = store.requestTaskApproval(runId, task!.id, workerId, {
-        description: "Tool one",
-        approvalType: "external-write",
-        mcpServerId: "service-one",
-        mcpToolName: "write_one",
-      }, 3);
+      task = store.requestTaskApproval(
+        runId,
+        task!.id,
+        workerId,
+        {
+          description: "Tool one",
+          approvalType: "external-write",
+          mcpServerId: "service-one",
+          mcpToolName: "write_one",
+        },
+        3,
+      );
       store.resolveTaskApproval(runId, task.id, true, "Approved tool one", 4);
       task = store.claimNextTask(workerId, { now: 5, leaseMs: 1_000 });
       expect(task).toBeDefined();
-      task = store.requestTaskApproval(runId, task!.id, workerId, {
-        description: "Tool two",
-        approvalType: "external-write",
-        mcpServerId: "service-two",
-        mcpToolName: "write_two",
-      }, 6);
+      task = store.requestTaskApproval(
+        runId,
+        task!.id,
+        workerId,
+        {
+          description: "Tool two",
+          approvalType: "external-write",
+          mcpServerId: "service-two",
+          mcpToolName: "write_two",
+        },
+        6,
+      );
       store.resolveTaskApproval(runId, task.id, true, "Approved tool two", 7);
 
       const currentTask = store.listTasks(runId)[0]!;

@@ -16,23 +16,32 @@ describe("OpenAICompatibleSpeechRuntime", () => {
   it("uploads bounded audio to an OpenAI-compatible transcription endpoint and returns text", async () => {
     let uploadedText = "";
     let uploadedType = "";
-    const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-      expect(String(input)).toBe("https://speech.example.test/v1/audio/transcriptions");
-      expect(init?.method).toBe("POST");
-      expect((init?.headers as Record<string, string>).authorization).toBe("Bearer stt-test-secret");
-      expect(init?.signal).toBeDefined();
-      const form = init?.body as FormData;
-      uploadedText = String(form.get("model"));
-      uploadedType = String(form.get("language"));
-      const file = form.get("file") as File;
-      expect(file.name).toBe("sample.webm");
-      expect(file.type).toBe("audio/webm");
-      expect(await file.text()).toBe("fake audio bytes");
-      return new Response(JSON.stringify({ text: "  Hello from the microphone. " }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
-    });
+    const fetchImpl = vi.fn(
+      async (input: string | URL | Request, init?: RequestInit) => {
+        expect(String(input)).toBe(
+          "https://speech.example.test/v1/audio/transcriptions",
+        );
+        expect(init?.method).toBe("POST");
+        expect((init?.headers as Record<string, string>).authorization).toBe(
+          "Bearer stt-test-secret",
+        );
+        expect(init?.signal).toBeDefined();
+        const form = init?.body as FormData;
+        uploadedText = String(form.get("model"));
+        uploadedType = String(form.get("language"));
+        const file = form.get("file") as File;
+        expect(file.name).toBe("sample.webm");
+        expect(file.type).toBe("audio/webm");
+        expect(await file.text()).toBe("fake audio bytes");
+        return new Response(
+          JSON.stringify({ text: "  Hello from the microphone. " }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      },
+    );
     const runtime = new OpenAICompatibleSpeechRuntime({
       transcription: {
         baseUrl: "https://speech.example.test/v1",
@@ -49,28 +58,37 @@ describe("OpenAICompatibleSpeechRuntime", () => {
     });
     expect(uploadedText).toBe("whisper-compatible");
     expect(uploadedType).toBe("en");
-    expect(result).toMatchObject({ text: "Hello from the microphone.", model: "whisper-compatible" });
+    expect(result).toMatchObject({
+      text: "Hello from the microphone.",
+      model: "whisper-compatible",
+    });
     expect(result.latencyMs).toBeGreaterThanOrEqual(0);
     expect(JSON.stringify(runtime.status)).not.toContain("stt-test-secret");
   });
 
   it("synthesizes text into bounded audio bytes without exposing upstream keys", async () => {
-    const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-      expect(String(input)).toBe("https://speech.example.test/v1/audio/speech");
-      expect((init?.headers as Record<string, string>).authorization).toBe("Bearer tts-test-secret");
-      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      expect(body).toMatchObject({
-        model: "voice-model",
-        input: "Hello there.",
-        voice: "en-jp-female",
-        response_format: "wav",
-        instructions: "Speak clearly in English with a Japanese accent.",
-      });
-      return new Response(new Uint8Array([82, 73, 70, 70, 1, 2, 3, 4]), {
-        status: 200,
-        headers: { "content-type": "audio/wav" },
-      });
-    });
+    const fetchImpl = vi.fn(
+      async (input: string | URL | Request, init?: RequestInit) => {
+        expect(String(input)).toBe(
+          "https://speech.example.test/v1/audio/speech",
+        );
+        expect((init?.headers as Record<string, string>).authorization).toBe(
+          "Bearer tts-test-secret",
+        );
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        expect(body).toMatchObject({
+          model: "voice-model",
+          input: "Hello there.",
+          voice: "en-jp-female",
+          response_format: "wav",
+          instructions: "Speak clearly in English with a Japanese accent.",
+        });
+        return new Response(new Uint8Array([82, 73, 70, 70, 1, 2, 3, 4]), {
+          status: 200,
+          headers: { "content-type": "audio/wav" },
+        });
+      },
+    );
     const runtime = new OpenAICompatibleSpeechRuntime({
       synthesis: {
         baseUrl: "https://speech.example.test/v1",
@@ -109,24 +127,32 @@ describe("OpenAICompatibleSpeechRuntime", () => {
       maxAudioBytes: 1024,
       maxSpeechTextCharacters: 10,
     });
-    await expect(runtime.transcribe({
-      audio: new Uint8Array([1, 2, 3]),
-      filename: "sample.exe",
-      contentType: "application/octet-stream",
-    })).rejects.toMatchObject({ code: "invalid_audio" });
-    await expect(runtime.transcribe({
-      audio: new Uint8Array(1025),
-      filename: "sample.wav",
-      contentType: "audio/wav",
-    })).rejects.toMatchObject({ code: "audio_too_large" });
-    await expect(runtime.synthesize({ text: "this text is too long" })).rejects.toMatchObject({
+    await expect(
+      runtime.transcribe({
+        audio: new Uint8Array([1, 2, 3]),
+        filename: "sample.exe",
+        contentType: "application/octet-stream",
+      }),
+    ).rejects.toMatchObject({ code: "invalid_audio" });
+    await expect(
+      runtime.transcribe({
+        audio: new Uint8Array(1025),
+        filename: "sample.wav",
+        contentType: "audio/wav",
+      }),
+    ).rejects.toMatchObject({ code: "audio_too_large" });
+    await expect(
+      runtime.synthesize({ text: "this text is too long" }),
+    ).rejects.toMatchObject({
       code: "text_too_large",
     });
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("fails safely on bad upstream responses and does not disclose response body contents", async () => {
-    const fetchImpl = vi.fn(async () => new Response("UPSTREAM_SECRET_DATA", { status: 401 }));
+    const fetchImpl = vi.fn(
+      async () => new Response("UPSTREAM_SECRET_DATA", { status: 401 }),
+    );
     const runtime = new OpenAICompatibleSpeechRuntime({
       synthesis: {
         baseUrl: "https://speech.example.test/v1",
@@ -142,14 +168,32 @@ describe("OpenAICompatibleSpeechRuntime", () => {
   });
 
   it("rejects credential-bearing URLs and requires HTTPS except for loopback", () => {
-    expect(() => new OpenAICompatibleSpeechRuntime({
-      synthesis: { baseUrl: "https://user:pass@speech.example.test/v1", model: "tts" },
-    })).toThrow(SpeechProviderError);
-    expect(() => new OpenAICompatibleSpeechRuntime({
-      transcription: { baseUrl: "http://speech.example.test/v1", model: "stt" },
-    })).toThrow(SpeechProviderError);
-    expect(() => new OpenAICompatibleSpeechRuntime({
-      transcription: { baseUrl: "http://127.0.0.1:5000/v1", model: "whisper" },
-    })).not.toThrow();
+    expect(
+      () =>
+        new OpenAICompatibleSpeechRuntime({
+          synthesis: {
+            baseUrl: "https://user:pass@speech.example.test/v1",
+            model: "tts",
+          },
+        }),
+    ).toThrow(SpeechProviderError);
+    expect(
+      () =>
+        new OpenAICompatibleSpeechRuntime({
+          transcription: {
+            baseUrl: "http://speech.example.test/v1",
+            model: "stt",
+          },
+        }),
+    ).toThrow(SpeechProviderError);
+    expect(
+      () =>
+        new OpenAICompatibleSpeechRuntime({
+          transcription: {
+            baseUrl: "http://127.0.0.1:5000/v1",
+            model: "whisper",
+          },
+        }),
+    ).not.toThrow();
   });
 });
