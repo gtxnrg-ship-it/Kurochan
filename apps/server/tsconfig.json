@@ -23,7 +23,12 @@
     },
     {
       "path": "../../packages/agent-catalog"
+    },
+    {
+      "path": "../../packages/orchestrator"
     }
   ],
-  "include": ["src/**/*.ts"]
+  "include": [
+    "src/**/*.ts"
+  ]
 }
