@@ -307,12 +307,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     webResearch,
     githubProject,
     mcpTools,
-    concurrency: parseBoundedInteger(
-      env.KUROCHAN_WORKER_CONCURRENCY,
-      4,
-      1,
-      32,
-    ),
+    concurrency: parseBoundedInteger(env.KUROCHAN_WORKER_CONCURRENCY, 4, 1, 32),
     leaseMs: parseBoundedInteger(
       env.KUROCHAN_WORKER_LEASE_MS,
       120_000,
@@ -622,12 +617,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     enabled: workerEnabled,
     running: worker.isRunning,
     workerId: worker.workerId,
-    concurrency: parseBoundedInteger(
-      env.KUROCHAN_WORKER_CONCURRENCY,
-      4,
-      1,
-      32,
-    ),
+    concurrency: parseBoundedInteger(env.KUROCHAN_WORKER_CONCURRENCY, 4, 1, 32),
     leaseMs: parseBoundedInteger(
       env.KUROCHAN_WORKER_LEASE_MS,
       120_000,
