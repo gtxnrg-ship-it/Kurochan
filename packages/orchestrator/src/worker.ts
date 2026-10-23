@@ -407,7 +407,7 @@ export class TaskWorker {
       await this.finalizePendingRuns();
       return { kind: "idle" };
     }
-    if (task.approvalRequired && !approvalGranted(this.options.store, task, "external-write")) {
+    if (task.approvalRequired && !approvalGranted(this.options.store, task, "task-level")) {
       this.options.store.requestTaskApproval(
         task.runId,
         task.id,
@@ -753,7 +753,7 @@ export class TaskWorker {
           ) {
             if (
               call.name === "github.create_pull_request" &&
-              !approvalGranted(this.options.store, task)
+              !approvalGranted(this.options.store, task, "external-write")
             ) {
               this.options.store.requestTaskApproval(task.runId, task.id, this.workerId, {
                 description: "Publish this run's workspace changes to GitHub by creating a pull request.",
