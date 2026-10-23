@@ -25,7 +25,9 @@ import {
   PlanService,
   TaskWorker,
   WorkspaceRuntime,
+  WebResearchRuntime,
   type SandboxExecutor,
+  type WebResearchExecutor,
 } from "@kurochan/orchestrator";
 
 export interface ServerOptions {
@@ -37,6 +39,7 @@ export interface ServerOptions {
   readonly planner?: PlanService;
   readonly workerEnabled?: boolean;
   readonly sandbox?: SandboxExecutor;
+  readonly webResearch?: WebResearchExecutor;
 }
 
 function safeEqual(a: string, b: string): boolean {
@@ -201,12 +204,18 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           ),
         })
       : undefined);
+  const webResearch = options.webResearch ?? new WebResearchRuntime({
+    ...(env.BRAVE_SEARCH_API_KEY?.trim() ? { apiKey: env.BRAVE_SEARCH_API_KEY.trim() } : {}),
+    ...(env.BRAVE_SEARCH_COUNTRY?.trim() ? { country: env.BRAVE_SEARCH_COUNTRY.trim() } : {}),
+    ...(env.BRAVE_SEARCH_LANG?.trim() ? { searchLang: env.BRAVE_SEARCH_LANG.trim() } : {}),
+  });
   const worker = new TaskWorker({
     store,
     catalog,
     router,
     workspaceRoot,
     ...(sandbox ? { sandbox } : {}),
+    webResearch,
     onError: (error) => {
       const code =
         error && typeof error === "object" && "code" in error
@@ -457,7 +466,14 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       "github.get_repository",
       "github.list_files",
       "github.read_file",
+      ...(webResearch.isConfigured ? ["web.search"] : []),
     ],
+    webResearch: {
+      enabled: webResearch.isConfigured,
+      provider: "Brave Search LLM Context",
+      sourceType: "pre-extracted-web-context",
+      arbitraryUrlsAllowed: false,
+    },
     githubResearch: {
       enabled: true,
       access: "public-repositories-read-only",
@@ -495,6 +511,21 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       workspaceRootConfigured: Boolean(workspaceRoot),
       maxToolRounds: 6,
       leaseMs: 120000,
+    },
+  }));
+
+  app.get("/v1/research/status", async () => ({
+    web: {
+      provider: "Brave Search LLM Context",
+      configured: webResearch.isConfigured,
+      capability: "web.search",
+      requiresServerSideApiKey: true,
+      arbitraryUrlFetching: false,
+    },
+    github: {
+      enabled: true,
+      access: "public-repositories-read-only",
+      arbitraryUrlsAllowed: false,
     },
   }));
 
