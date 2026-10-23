@@ -791,10 +791,12 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     }
   });
 
-  app.get("/v1/agents/:division/:slug", async (request, reply) => {
-    const params = request.params as { division: string; slug: string };
+  const getAgentProfile = async (
+    id: string,
+    reply: import("fastify").FastifyReply,
+  ) => {
     try {
-      const agent = await catalog.get(`${params.division}/${params.slug}`);
+      const agent = await catalog.get(id);
       if (!agent)
         return reply.code(404).send({
           error: {
@@ -815,6 +817,16 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         },
       });
     }
+  };
+
+  // Specialist IDs may contain nested category paths, not just division/slug.
+  app.get("/v1/agents/:division/:slug", async (request, reply) => {
+    const params = request.params as { division: string; slug: string };
+    return getAgentProfile(`${params.division}/${params.slug}`, reply);
+  });
+  app.get("/v1/agents/*", async (request, reply) => {
+    const params = request.params as { "*": string };
+    return getAgentProfile(params["*"], reply);
   });
 
   const PlannedTaskSchema = z.object({
