@@ -153,7 +153,10 @@ describe("GitHubProjectRuntime", () => {
           expect(payload.content).toBe(changedContent);
           return jsonResponse({ sha: blobSha(changedContent) });
         }
-        if (url.endsWith("/git/ref/heads/kurochan/run-6b8d4614") && method === "GET") {
+        if (
+          url.endsWith("/git/ref/heads/kurochan/run-6b8d4614") &&
+          method === "GET"
+        ) {
           return jsonResponse({ message: "Not Found" }, 404);
         }
         if (url.endsWith("/git/trees") && method === "POST") {
@@ -185,21 +188,30 @@ describe("GitHubProjectRuntime", () => {
           const payload = body as { ref: string; sha: string };
           expect(payload.ref).toBe("refs/heads/kurochan/run-6b8d4614");
           expect(payload.sha).toBe(newCommit);
-          return jsonResponse({ ref: payload.ref, object: { sha: payload.sha } }, 201);
+          return jsonResponse(
+            { ref: payload.ref, object: { sha: payload.sha } },
+            201,
+          );
         }
-        if (url.includes("/pulls?") && method === "GET") return jsonResponse([]);
+        if (url.includes("/pulls?") && method === "GET")
+          return jsonResponse([]);
         if (url.endsWith("/pulls") && method === "POST") {
           const payload = body as { head: string; base: string; title: string };
           expect(payload.head).toBe("kurochan/run-6b8d4614");
           expect(payload.base).toBe("main");
           expect(payload.title).toBe("Fix the answer");
-          return jsonResponse({
-            number: 7,
-            html_url: "https://github.com/acme/demo/pull/7",
-            state: "open",
-          }, 201);
+          return jsonResponse(
+            {
+              number: 7,
+              html_url: "https://github.com/acme/demo/pull/7",
+              state: "open",
+            },
+            201,
+          );
         }
-        throw new Error("Unexpected mocked GitHub request: " + method + " " + url);
+        throw new Error(
+          "Unexpected mocked GitHub request: " + method + " " + url,
+        );
       },
     );
 
@@ -231,7 +243,9 @@ describe("GitHubProjectRuntime", () => {
       await readFile(join(workspaceRoot, runId, "src/index.ts"), "utf8"),
     ).toBe(baseContent);
     expect(
-      await readFile(join(workspaceRoot, runId, ".env"), "utf8").catch(() => ""),
+      await readFile(join(workspaceRoot, runId, ".env"), "utf8").catch(
+        () => "",
+      ),
     ).toBe("");
 
     const workspace = new WorkspaceRuntime({ root: workspaceRoot });
@@ -265,13 +279,21 @@ describe("GitHubProjectRuntime", () => {
       "https://github.com/acme/demo/pull/7",
     );
     expect(
-      requests.some((request) => request.url.endsWith("/git/refs") && request.method === "POST"),
+      requests.some(
+        (request) =>
+          request.url.endsWith("/git/refs") && request.method === "POST",
+      ),
     ).toBe(true);
     expect(
-      requests.some((request) => request.url.endsWith("/pulls") && request.method === "POST"),
+      requests.some(
+        (request) =>
+          request.url.endsWith("/pulls") && request.method === "POST",
+      ),
     ).toBe(true);
     expect(
-      requests.every((request) => request.url.startsWith("https://api.github.com/")),
+      requests.every((request) =>
+        request.url.startsWith("https://api.github.com/"),
+      ),
     ).toBe(true);
   });
 

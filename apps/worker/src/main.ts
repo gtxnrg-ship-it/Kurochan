@@ -68,7 +68,9 @@ if (sandboxNetwork !== "none" && sandboxNetwork !== "bridge") {
 const workspaceRoot = resolve(
   process.env.KUROCHAN_WORKSPACE_ROOT?.trim() || "data/workspaces",
 );
-const githubAllowedRepositories = (process.env.KUROCHAN_GITHUB_ALLOWED_REPOSITORIES ?? "")
+const githubAllowedRepositories = (
+  process.env.KUROCHAN_GITHUB_ALLOWED_REPOSITORIES ?? ""
+)
   .split(",")
   .map((value) => value.trim())
   .filter(Boolean);
@@ -84,7 +86,8 @@ const githubProject = new GitHubProjectRuntime({
     ? { token: process.env.KUROCHAN_GITHUB_TOKEN.trim() }
     : {}),
   allowedRepositories: githubAllowedRepositories,
-  writeEnabled: process.env.KUROCHAN_GITHUB_WRITE_ENABLED?.trim().toLowerCase() === "true",
+  writeEnabled:
+    process.env.KUROCHAN_GITHUB_WRITE_ENABLED?.trim().toLowerCase() === "true",
   maxFiles: integerEnv("KUROCHAN_GITHUB_MAX_FILES", 500, 1, 2000),
   maxFileBytes: githubProjectMaxFileBytes,
   maxTotalBytes: integerEnv(

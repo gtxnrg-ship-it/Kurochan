@@ -20,7 +20,10 @@ import {
 } from "./web-research.js";
 import { WorkspaceRuntime, type WorkspaceToolCall } from "./workspace.js";
 import type { SandboxExecutor } from "./sandbox.js";
-import type { GitHubProjectToolCall, GitHubProjectToolResult } from "./github-project.js";
+import type {
+  GitHubProjectToolCall,
+  GitHubProjectToolResult,
+} from "./github-project.js";
 
 const WorkerToolCallSchema = z
   .object({
@@ -139,14 +142,15 @@ function approvalGranted(
         action?: { approvalType?: unknown };
       };
       const type = payload?.action?.approvalType;
-      return type === approvalType ||
-        (type === undefined && approvalType === "task-level");
+      return (
+        type === approvalType ||
+        (type === undefined && approvalType === "task-level")
+      );
     })
     .at(-1);
   if (!request) return false;
   return events.some(
-    (event) =>
-      event.type === "approval.granted" && event.id > request.id,
+    (event) => event.type === "approval.granted" && event.id > request.id,
   );
 }
 
@@ -430,7 +434,10 @@ export class TaskWorker {
       await this.finalizePendingRuns();
       return { kind: "idle" };
     }
-    if (task.approvalRequired && !approvalGranted(this.options.store, task, "task-level")) {
+    if (
+      task.approvalRequired &&
+      !approvalGranted(this.options.store, task, "task-level")
+    ) {
       this.options.store.requestTaskApproval(
         task.runId,
         task.id,
@@ -694,8 +701,12 @@ export class TaskWorker {
             "github.read_file",
             ...(this.webResearch.isConfigured ? ["web.search"] : []),
             ...(this.options.sandbox ? ["sandbox.run"] : []),
-            ...(this.options.githubProject?.isConfigured ? ["github.checkout_repository"] : []),
-            ...(this.options.githubProject?.canPublish ? ["github.create_pull_request"] : []),
+            ...(this.options.githubProject?.isConfigured
+              ? ["github.checkout_repository"]
+              : []),
+            ...(this.options.githubProject?.canPublish
+              ? ["github.create_pull_request"]
+              : []),
           ],
         }),
       },
@@ -779,16 +790,28 @@ export class TaskWorker {
               call.name === "github.create_pull_request" &&
               !approvalGranted(this.options.store, task, "external-write")
             ) {
-              this.options.store.requestTaskApproval(task.runId, task.id, this.workerId, {
-                description: "Publish this run's workspace changes to GitHub by creating a pull request.",
-                taskId: task.id,
-                approvalType: "external-write",
-                warning: "This operation creates a branch and a pull request in the allowlisted GitHub repository. Review the proposed changes before approving.",
-              });
-              throw Object.assign(new Error("Waiting for explicit approval before publishing repository changes."), {
-                code: "approval_paused",
-                retryable: false,
-              });
+              this.options.store.requestTaskApproval(
+                task.runId,
+                task.id,
+                this.workerId,
+                {
+                  description:
+                    "Publish this run's workspace changes to GitHub by creating a pull request.",
+                  taskId: task.id,
+                  approvalType: "external-write",
+                  warning:
+                    "This operation creates a branch and a pull request in the allowlisted GitHub repository. Review the proposed changes before approving.",
+                },
+              );
+              throw Object.assign(
+                new Error(
+                  "Waiting for explicit approval before publishing repository changes.",
+                ),
+                {
+                  code: "approval_paused",
+                  retryable: false,
+                },
+              );
             }
             outcome = this.options.githubProject
               ? await this.withWorkspaceLock(task.runId, () =>
@@ -803,7 +826,8 @@ export class TaskWorker {
                   ok: false,
                   error: {
                     code: "github_project_not_configured",
-                    message: "Configure KUROCHAN_GITHUB_TOKEN and KUROCHAN_GITHUB_ALLOWED_REPOSITORIES to enable project checkout and pull requests.",
+                    message:
+                      "Configure KUROCHAN_GITHUB_TOKEN and KUROCHAN_GITHUB_ALLOWED_REPOSITORIES to enable project checkout and pull requests.",
                   },
                 };
           } else if (call.name === "web.search") {
@@ -814,14 +838,19 @@ export class TaskWorker {
           } else if (call.name === "sandbox.run") {
             outcome = this.options.sandbox
               ? await this.withWorkspaceLock(task.runId, () =>
-                  this.options.sandbox!.execute(task.runId, call.arguments, signal),
+                  this.options.sandbox!.execute(
+                    task.runId,
+                    call.arguments,
+                    signal,
+                  ),
                 )
               : {
                   name: "sandbox.run" as const,
                   ok: false,
                   error: {
                     code: "sandbox_unavailable",
-                    message: "Command execution is disabled. Configure the isolated Docker sandbox before requesting shell commands.",
+                    message:
+                      "Command execution is disabled. Configure the isolated Docker sandbox before requesting shell commands.",
                   },
                 };
           } else {
@@ -977,10 +1006,7 @@ export class TaskWorker {
     for (const run of runs) await this.finalizeRun(run);
   }
 
-  private finalizeRun(
-    run: RunRecord,
-    taskSignal?: AbortSignal,
-  ): Promise<void> {
+  private finalizeRun(run: RunRecord, taskSignal?: AbortSignal): Promise<void> {
     const existing = this.finalizationPromises.get(run.id);
     if (existing) return existing;
 

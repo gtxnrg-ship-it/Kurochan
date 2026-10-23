@@ -24,12 +24,7 @@ export interface OmniRouteRequest extends ChatCompletionInput {
 }
 
 export type OmniRouteOperation =
-  | "chat"
-  | "planning"
-  | "task"
-  | "verification"
-  | "provider_test"
-  | "other";
+  "chat" | "planning" | "task" | "verification" | "provider_test" | "other";
 
 export interface OmniRouteContext {
   readonly operation?: OmniRouteOperation;
@@ -571,12 +566,19 @@ export class OmniRouter {
         health.lastLatencyMs = now() - startedAt;
         health.lastErrorCode = undefined;
         health.successes += 1;
-        emitUsage("success", Math.max(0, now() - startedAt), undefined, reportedUsage);
+        emitUsage(
+          "success",
+          Math.max(0, now() - startedAt),
+          undefined,
+          reportedUsage,
+        );
         usageRecorded = true;
       } catch (error) {
         const providerError =
           error instanceof ProviderError ? error : undefined;
-        const errorCode = providerError?.code ?? (error instanceof OmniRouterError ? error.code : "provider_error");
+        const errorCode =
+          providerError?.code ??
+          (error instanceof OmniRouterError ? error.code : "provider_error");
         emitUsage(
           "failure",
           Math.max(0, now() - startedAt),
@@ -750,7 +752,8 @@ export class OmniRouter {
           providerId: provider.id,
           model:
             request.model &&
-            (!request.preferredProvider || request.preferredProvider === provider.id)
+            (!request.preferredProvider ||
+              request.preferredProvider === provider.id)
               ? request.model
               : provider.defaultModel || "",
           latencyMs: Math.max(0, this.now() - beganAt),

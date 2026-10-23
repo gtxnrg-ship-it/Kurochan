@@ -11,12 +11,7 @@ import type {
 
 export type ProviderUsageOutcome = "success" | "failure";
 export type ProviderUsageOperation =
-  | "chat"
-  | "planning"
-  | "task"
-  | "verification"
-  | "provider_test"
-  | "other";
+  "chat" | "planning" | "task" | "verification" | "provider_test" | "other";
 
 export interface ProviderUsageInput {
   readonly providerId: ProviderId;
@@ -350,11 +345,11 @@ export class RunStore {
     this.db.close();
   }
 
-  recordProviderUsage(
-    input: ProviderUsageInput,
-    now = Date.now(),
-  ): void {
-    if (input.providerId !== "openrouter" && input.providerId !== "freellmapi") {
+  recordProviderUsage(input: ProviderUsageInput, now = Date.now()): void {
+    if (
+      input.providerId !== "openrouter" &&
+      input.providerId !== "freellmapi"
+    ) {
       throw new Error("Unknown provider ID for usage record.");
     }
     assertText(input.model, "model", 400);
@@ -362,15 +357,28 @@ export class RunStore {
       throw new Error("Unknown route profile for usage record.");
     }
     if (
-      !["chat", "planning", "task", "verification", "provider_test", "other"].includes(input.operation)
+      ![
+        "chat",
+        "planning",
+        "task",
+        "verification",
+        "provider_test",
+        "other",
+      ].includes(input.operation)
     ) {
       throw new Error("Unknown operation for usage record.");
     }
     if (input.outcome !== "success" && input.outcome !== "failure") {
       throw new Error("Unknown usage outcome.");
     }
-    if (!Number.isInteger(input.latencyMs) || input.latencyMs < 0 || input.latencyMs > 86_400_000) {
-      throw new Error("Usage latency must be a non-negative integer under 24 hours.");
+    if (
+      !Number.isInteger(input.latencyMs) ||
+      input.latencyMs < 0 ||
+      input.latencyMs > 86_400_000
+    ) {
+      throw new Error(
+        "Usage latency must be a non-negative integer under 24 hours.",
+      );
     }
     if (input.runId !== undefined) assertText(input.runId, "runId", 200);
     if (input.taskId !== undefined) assertText(input.taskId, "taskId", 200);
@@ -381,8 +389,14 @@ export class RunStore {
       }
       return value ?? null;
     };
-    const promptTokens = validateTokens(input.usage?.promptTokens, "promptTokens");
-    const completionTokens = validateTokens(input.usage?.completionTokens, "completionTokens");
+    const promptTokens = validateTokens(
+      input.usage?.promptTokens,
+      "promptTokens",
+    );
+    const completionTokens = validateTokens(
+      input.usage?.completionTokens,
+      "completionTokens",
+    );
     const reportedTotalTokens = input.usage?.totalTokens;
     const totalTokens = validateTokens(
       reportedTotalTokens ??
@@ -394,26 +408,28 @@ export class RunStore {
     const errorCode = input.errorCode?.trim();
     if (errorCode) assertText(errorCode, "errorCode", 100);
 
-    this.db.prepare(
-      `INSERT INTO provider_usage(
+    this.db
+      .prepare(
+        `INSERT INTO provider_usage(
         provider_id,model,route_profile,operation,run_id,task_id,
         prompt_tokens,completion_tokens,total_tokens,latency_ms,outcome,error_code,created_at
       ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    ).run(
-      input.providerId,
-      input.model,
-      input.profile,
-      input.operation,
-      input.runId ?? null,
-      input.taskId ?? null,
-      promptTokens,
-      completionTokens,
-      totalTokens,
-      input.latencyMs,
-      input.outcome,
-      errorCode || null,
-      now,
-    );
+      )
+      .run(
+        input.providerId,
+        input.model,
+        input.profile,
+        input.operation,
+        input.runId ?? null,
+        input.taskId ?? null,
+        promptTokens,
+        completionTokens,
+        totalTokens,
+        input.latencyMs,
+        input.outcome,
+        errorCode || null,
+        now,
+      );
   }
 
   summarizeProviderUsage(
@@ -426,10 +442,13 @@ export class RunStore {
       since < 0 ||
       until < since
     ) {
-      throw new Error("Usage time range must be a valid increasing timestamp range.");
+      throw new Error(
+        "Usage time range must be a valid increasing timestamp range.",
+      );
     }
-    const rows = this.db.prepare(
-      `SELECT
+    const rows = this.db
+      .prepare(
+        `SELECT
         provider_id,
         model,
         operation,
@@ -446,7 +465,8 @@ export class RunStore {
       WHERE created_at >= ? AND created_at <= ?
       GROUP BY provider_id, model, operation
       ORDER BY provider_id, model, operation`,
-    ).all(since, until) as Array<{
+      )
+      .all(since, until) as Array<{
       provider_id: ProviderId;
       model: string;
       operation: ProviderUsageOperation;

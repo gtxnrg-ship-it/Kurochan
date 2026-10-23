@@ -249,7 +249,8 @@ export class WorkspaceRuntime {
           (entry.name.startsWith(".") &&
             !SAFE_DOTFILES.has(entry.name) &&
             !SAFE_DOT_DIRECTORIES.has(entry.name))
-        ) continue;
+        )
+          continue;
         const fullPath = join(directory, entry.name);
         const info = await lstat(fullPath);
         if (info.isSymbolicLink()) continue;

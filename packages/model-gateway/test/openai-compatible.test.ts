@@ -122,12 +122,22 @@ describe("OpenAICompatibleChatProvider", () => {
       messages: [{ role: "user", content: "hi" }],
       requiredCapabilities: ["text", "streaming"],
     });
-    const chunks: Array<{ content: string; usage?: { promptTokens?: number; completionTokens?: number; totalTokens?: number } }> = [];
+    const chunks: Array<{
+      content: string;
+      usage?: {
+        promptTokens?: number;
+        completionTokens?: number;
+        totalTokens?: number;
+      };
+    }> = [];
     for await (const chunk of stream) chunks.push(chunk);
     expect(chunks).toEqual([
       { content: "hello" },
       { content: " world" },
-      { content: "", usage: { promptTokens: 3, completionTokens: 2, totalTokens: 5 } },
+      {
+        content: "",
+        usage: { promptTokens: 3, completionTokens: 2, totalTokens: 5 },
+      },
     ]);
     expect(
       JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body)),

@@ -102,7 +102,9 @@ function modelSelection(
 export function buildServer(options: ServerOptions = {}): FastifyInstance {
   const env = options.env ?? process.env;
   const registry = options.providers ?? createProviderRegistry(env);
-  const githubAllowedRepositories = (env.KUROCHAN_GITHUB_ALLOWED_REPOSITORIES ?? "")
+  const githubAllowedRepositories = (
+    env.KUROCHAN_GITHUB_ALLOWED_REPOSITORIES ?? ""
+  )
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean);
@@ -139,10 +141,9 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         16,
         1000,
       ),
-      githubProjectRepositories:
-        env.KUROCHAN_GITHUB_TOKEN?.trim()
-          ? githubAllowedRepositories
-          : [],
+      githubProjectRepositories: env.KUROCHAN_GITHUB_TOKEN?.trim()
+        ? githubAllowedRepositories
+        : [],
       githubProjectPublishingEnabled:
         Boolean(env.KUROCHAN_GITHUB_TOKEN?.trim()) &&
         githubAllowedRepositories.length > 0 &&
@@ -242,22 +243,30 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     1_024,
     1_000_000,
   );
-  const githubProject = options.githubProject ?? new GitHubProjectRuntime({
-    workspaceRoot,
-    ...(env.KUROCHAN_GITHUB_TOKEN?.trim()
-      ? { token: env.KUROCHAN_GITHUB_TOKEN.trim() }
-      : {}),
-    allowedRepositories: githubAllowedRepositories,
-    writeEnabled: env.KUROCHAN_GITHUB_WRITE_ENABLED?.trim().toLowerCase() === "true",
-    maxFiles: parseBoundedInteger(env.KUROCHAN_GITHUB_MAX_FILES, 500, 1, 2000),
-    maxFileBytes: githubProjectMaxFileBytes,
-    maxTotalBytes: parseBoundedInteger(
-      env.KUROCHAN_GITHUB_MAX_TOTAL_BYTES,
-      10_000_000,
-      githubProjectMaxFileBytes,
-      50_000_000,
-    ),
-  });
+  const githubProject =
+    options.githubProject ??
+    new GitHubProjectRuntime({
+      workspaceRoot,
+      ...(env.KUROCHAN_GITHUB_TOKEN?.trim()
+        ? { token: env.KUROCHAN_GITHUB_TOKEN.trim() }
+        : {}),
+      allowedRepositories: githubAllowedRepositories,
+      writeEnabled:
+        env.KUROCHAN_GITHUB_WRITE_ENABLED?.trim().toLowerCase() === "true",
+      maxFiles: parseBoundedInteger(
+        env.KUROCHAN_GITHUB_MAX_FILES,
+        500,
+        1,
+        2000,
+      ),
+      maxFileBytes: githubProjectMaxFileBytes,
+      maxTotalBytes: parseBoundedInteger(
+        env.KUROCHAN_GITHUB_MAX_TOTAL_BYTES,
+        10_000_000,
+        githubProjectMaxFileBytes,
+        50_000_000,
+      ),
+    });
   const worker = new TaskWorker({
     store,
     catalog,
@@ -540,7 +549,12 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       allowlistConfigured: githubAllowedRepositories.length > 0,
       requiresTaskApproval: true,
       arbitraryUrlsAllowed: false,
-      maxFiles: parseBoundedInteger(env.KUROCHAN_GITHUB_MAX_FILES, 500, 1, 2000),
+      maxFiles: parseBoundedInteger(
+        env.KUROCHAN_GITHUB_MAX_FILES,
+        500,
+        1,
+        2000,
+      ),
       maxFileBytes: githubProjectMaxFileBytes,
       maxTotalBytes: parseBoundedInteger(
         env.KUROCHAN_GITHUB_MAX_TOTAL_BYTES,
@@ -625,32 +639,38 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     const until = Date.now();
     const since = rawPeriod === "all" ? 0 : until - windows[rawPeriod]!;
     const data = store.summarizeProviderUsage(since, until);
-    const totals = data.reduce((sum, entry) => ({
-      requests: sum.requests + entry.requests,
-      successfulRequests: sum.successfulRequests + entry.successfulRequests,
-      failedRequests: sum.failedRequests + entry.failedRequests,
-      requestsWithTokenUsage: sum.requestsWithTokenUsage + entry.requestsWithTokenUsage,
-      requestsWithoutTokenUsage: sum.requestsWithoutTokenUsage + entry.requestsWithoutTokenUsage,
-      promptTokens: sum.promptTokens + entry.promptTokens,
-      completionTokens: sum.completionTokens + entry.completionTokens,
-      totalTokens: sum.totalTokens + entry.totalTokens,
-    }), {
-      requests: 0,
-      successfulRequests: 0,
-      failedRequests: 0,
-      requestsWithTokenUsage: 0,
-      requestsWithoutTokenUsage: 0,
-      promptTokens: 0,
-      completionTokens: 0,
-      totalTokens: 0,
-    });
+    const totals = data.reduce(
+      (sum, entry) => ({
+        requests: sum.requests + entry.requests,
+        successfulRequests: sum.successfulRequests + entry.successfulRequests,
+        failedRequests: sum.failedRequests + entry.failedRequests,
+        requestsWithTokenUsage:
+          sum.requestsWithTokenUsage + entry.requestsWithTokenUsage,
+        requestsWithoutTokenUsage:
+          sum.requestsWithoutTokenUsage + entry.requestsWithoutTokenUsage,
+        promptTokens: sum.promptTokens + entry.promptTokens,
+        completionTokens: sum.completionTokens + entry.completionTokens,
+        totalTokens: sum.totalTokens + entry.totalTokens,
+      }),
+      {
+        requests: 0,
+        successfulRequests: 0,
+        failedRequests: 0,
+        requestsWithTokenUsage: 0,
+        requestsWithoutTokenUsage: 0,
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+      },
+    );
     return {
       period: rawPeriod,
       since,
       until,
       totals,
       data,
-      accountingNote: "Token totals include only usage reported by an upstream provider. Missing usage is not estimated, and provider billing/pricing is not inferred.",
+      accountingNote:
+        "Token totals include only usage reported by an upstream provider. Missing usage is not estimated, and provider billing/pricing is not inferred.",
     };
   });
 

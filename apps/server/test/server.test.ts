@@ -64,24 +64,30 @@ describe("Kuro-chan API", () => {
   it("exposes durable provider and reported-token usage without leaking credentials", async () => {
     const store = new RunStore(":memory:");
     const now = Date.now();
-    store.recordProviderUsage({
-      providerId: "freellmapi",
-      model: "auto",
-      profile: "fast",
-      operation: "chat",
-      latencyMs: 120,
-      outcome: "success",
-      usage: { promptTokens: 40, completionTokens: 16 },
-    }, now);
-    store.recordProviderUsage({
-      providerId: "openrouter",
-      model: "test-model",
-      profile: "balanced",
-      operation: "task",
-      latencyMs: 240,
-      outcome: "failure",
-      errorCode: "rate_limited",
-    }, now + 1);
+    store.recordProviderUsage(
+      {
+        providerId: "freellmapi",
+        model: "auto",
+        profile: "fast",
+        operation: "chat",
+        latencyMs: 120,
+        outcome: "success",
+        usage: { promptTokens: 40, completionTokens: 16 },
+      },
+      now,
+    );
+    store.recordProviderUsage(
+      {
+        providerId: "openrouter",
+        model: "test-model",
+        profile: "balanced",
+        operation: "task",
+        latencyMs: 240,
+        outcome: "failure",
+        errorCode: "rate_limited",
+      },
+      now + 1,
+    );
     app = buildServer({
       env: { FREELLMAPI_API_KEY: "must-not-be-returned" },
       logger: false,

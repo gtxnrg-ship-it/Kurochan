@@ -243,7 +243,7 @@ describe("TaskWorker", () => {
             )
           ) {
             reviewerCalls += 1;
-          return {
+            return {
               providerId: "openrouter",
               model: "test-model",
               content: JSON.stringify({
@@ -346,11 +346,13 @@ describe("TaskWorker", () => {
           state: "open",
         },
       },
-      evidence: [{
-        kind: "github_project",
-        summary: "Created pull request #7 for acme/demo",
-        uri: "https://github.com/acme/demo/pull/7",
-      }],
+      evidence: [
+        {
+          kind: "github_project",
+          summary: "Created pull request #7 for acme/demo",
+          uri: "https://github.com/acme/demo/pull/7",
+        },
+      ],
     }));
 
     try {
@@ -358,65 +360,80 @@ describe("TaskWorker", () => {
         id: runId,
         goal: "Update the project and open a pull request",
         profile: "balanced",
-        tasks: [{
-          key: "publish",
-          agentId: "engineering/engineering-test-agent",
-          objective: "Open a pull request after preparing the requested source changes.",
-        }],
+        tasks: [
+          {
+            key: "publish",
+            agentId: "engineering/engineering-test-agent",
+            objective:
+              "Open a pull request after preparing the requested source changes.",
+          },
+        ],
       });
-      const fakeProvider = provider(async (input: ChatCompletionInput): Promise<ChatCompletionOutput> => {
-        if ((input.systemPrompt ?? "").includes("independent consistency reviewer")) {
-          return {
-            providerId: "openrouter",
-            model: "test-model",
-            content: JSON.stringify({
-              passed: true,
-              summary: "The pull-request action returned real evidence.",
-              checks: [{
-                name: "Pull request evidence is present",
+      const fakeProvider = provider(
+        async (input: ChatCompletionInput): Promise<ChatCompletionOutput> => {
+          if (
+            (input.systemPrompt ?? "").includes(
+              "independent consistency reviewer",
+            )
+          ) {
+            return {
+              providerId: "openrouter",
+              model: "test-model",
+              content: JSON.stringify({
                 passed: true,
-                notes: "The connector returned a PR URL.",
-              }],
-              blockers: [],
-            }),
-            latencyMs: 1,
-          };
-        }
-        modelCalls += 1;
-        if (modelCalls <= 2) {
+                summary: "The pull-request action returned real evidence.",
+                checks: [
+                  {
+                    name: "Pull request evidence is present",
+                    passed: true,
+                    notes: "The connector returned a PR URL.",
+                  },
+                ],
+                blockers: [],
+              }),
+              latencyMs: 1,
+            };
+          }
+          modelCalls += 1;
+          if (modelCalls <= 2) {
+            return {
+              providerId: "openrouter",
+              model: "test-model",
+              content: JSON.stringify({
+                status: "tool_calls",
+                summary: "Publish the requested pull request.",
+                toolCalls: [
+                  {
+                    name: "github.create_pull_request",
+                    arguments: {
+                      repository: "acme/demo",
+                      title: "Implement the requested change",
+                      body: "Created by Kuro-chan.",
+                    },
+                  },
+                ],
+                evidence: [],
+              }),
+              latencyMs: 1,
+            };
+          }
           return {
             providerId: "openrouter",
             model: "test-model",
             content: JSON.stringify({
-              status: "tool_calls",
-              summary: "Publish the requested pull request.",
-              toolCalls: [{
-                name: "github.create_pull_request",
-                arguments: {
-                  repository: "acme/demo",
-                  title: "Implement the requested change",
-                  body: "Created by Kuro-chan.",
-                },
-              }],
+              status: "completed",
+              summary: "The authorized connector created the pull request.",
+              toolCalls: [],
               evidence: [],
             }),
             latencyMs: 1,
           };
-        }
-        return {
-          providerId: "openrouter",
-          model: "test-model",
-          content: JSON.stringify({
-            status: "completed",
-            summary: "The authorized connector created the pull request.",
-            toolCalls: [],
-            evidence: [],
-          }),
-          latencyMs: 1,
-        };
-      });
+        },
+      );
       const router = new OmniRouter({
-        providers: new Map<ProviderId, ChatProvider>([["openrouter", fakeProvider]]),
+        providers: new Map<ProviderId, ChatProvider>([
+          ["openrouter", fakeProvider],
+        ]),
       });
       const worker = new TaskWorker({
         store,
@@ -435,9 +452,12 @@ describe("TaskWorker", () => {
       expect(execute).not.toHaveBeenCalled();
       const task = store.listTasks(runId)[0]!;
       expect(task.status).toBe("waiting_for_approval");
-      const requests = store.listEvents(runId, 0, 1000).filter((event) =>
-        event.taskId === task.id && event.type === "approval.requested",
-      );
+      const requests = store
+        .listEvents(runId, 0, 1000)
+        .filter(
+          (event) =>
+            event.taskId === task.id && event.type === "approval.requested",
+        );
       expect(requests.at(-1)?.payload).toMatchObject({
         action: { approvalType: "external-write" },
       });
