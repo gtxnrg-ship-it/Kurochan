@@ -9,10 +9,11 @@ import {
 } from "@kurochan/orchestrator";
 import { RunStore } from "@kurochan/storage";
 import type { ProviderId } from "@kurochan/contracts";
-import type {
-  ChatCompletionInput,
-  ChatCompletionOutput,
-  ChatProvider,
+import {
+  OpenAICompatibleSpeechRuntime,
+  type ChatCompletionInput,
+  type ChatCompletionOutput,
+  type ChatProvider,
 } from "@kurochan/model-gateway";
 
 describe("Kuro-chan API", () => {
@@ -441,6 +442,115 @@ describe("Kuro-chan API", () => {
     expect(store.getConversation(conversationId)?.messageCount).toBe(1);
     expect(store.getRun(response.json().run.id)?.createdBy).toBe("local");
     expect(plan.createPlan).toHaveBeenCalledOnce();
+  });
+
+  it("reports configured speech providers and serves transcription plus audio synthesis", async () => {
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/audio/transcriptions")) {
+        return new Response(JSON.stringify({ text: "Hello from the microphone." }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.endsWith("/audio/speech")) {
+        return new Response(new Uint8Array([82, 73, 70, 70, 1, 2, 3, 4]), {
+          status: 200,
+          headers: { "content-type": "audio/wav" },
+        });
+      }
+      return new Response("not found", { status: 404 });
+    });
+    const speech = new OpenAICompatibleSpeechRuntime({
+      transcription: {
+        baseUrl: "https://speech.example.test/v1",
+        apiKey: "transcribe-key",
+        model: "whisper-compatible",
+      },
+      synthesis: {
+        baseUrl: "https://speech.example.test/v1",
+        apiKey: "synthesis-key",
+        model: "speech-compatible",
+        voice: "en-jp-female",
+        responseFormat: "wav",
+        instructions: "Speak English naturally with a light Japanese accent.",
+      },
+      defaultLanguage: "en",
+      fetchImpl,
+    });
+    app = buildServer({
+      env: {},
+      logger: false,
+      store: new RunStore(":memory:"),
+      speech,
+    });
+
+    const status = await app.inject({ method: "GET", url: "/v1/speech/status" });
+    expect(status.statusCode).toBe(200);
+    expect(status.json()).toMatchObject({
+      transcription: {
+        enabled: true,
+        model: "whisper-compatible",
+        defaultLanguage: "en",
+        authenticationConfigured: true,
+      },
+      synthesis: {
+        enabled: true,
+        model: "speech-compatible",
+        voice: "en-jp-female",
+        format: "wav",
+        customInstructionsConfigured: true,
+        authenticationConfigured: true,
+      },
+      security: {
+        credentialsInResponses: false,
+        arbitraryUrlsAllowed: false,
+      },
+    });
+    expect(status.body).not.toContain("transcribe-key");
+    expect(status.body).not.toContain("synthesis-key");
+
+    const boundary = "kuro-voice-boundary";
+    const multipartBody = [
+      "--" + boundary,
+      'Content-Disposition: form-data; name="file"; filename="sample.wav"',
+      "Content-Type: audio/wav",
+      "",
+      "FAKE_AUDIO_PAYLOAD",
+      "--" + boundary,
+      'Content-Disposition: form-data; name="language"',
+      "",
+      "en",
+      "--" + boundary + "--",
+      "",
+    ].join("\r\n");
+    const transcription = await app.inject({
+      method: "POST",
+      url: "/v1/audio/transcriptions",
+      headers: { "content-type": "multipart/form-data; boundary=" + boundary },
+      payload: multipartBody,
+    });
+    expect(transcription.statusCode).toBe(200);
+    expect(transcription.json()).toMatchObject({
+      text: "Hello from the microphone.",
+      model: "whisper-compatible",
+      language: "en",
+    });
+
+    const synthesis = await app.inject({
+      method: "POST",
+      url: "/v1/audio/speech",
+      payload: {
+        input: "Hello there.",
+        voice: "en-jp-female",
+        response_format: "wav",
+      },
+    });
+    expect(synthesis.statusCode).toBe(200);
+    expect(synthesis.headers["content-type"]).toContain("audio/wav");
+    expect([...Buffer.from(synthesis.rawPayload)]).toEqual([82, 73, 70, 70, 1, 2, 3, 4]);
+    expect(synthesis.headers["x-speech-model"]).toBe("speech-compatible");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
   it("reports MCP configuration and can explicitly probe discovered tools", async () => {
