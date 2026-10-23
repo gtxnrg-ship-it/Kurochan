@@ -202,6 +202,72 @@ describe("PlanService", () => {
     ).toBe(true);
   });
 
+  it("plans project checkout before repo edits and exposes only configured capabilities", async () => {
+    const router = fakeRouter(JSON.stringify({
+      summary: "Check out, implement, test, and propose a reviewed repository change.",
+      tasks: [
+        {
+          key: "checkout",
+          agentId: "engineering/backend-architect",
+          objective: "Check out acme/demo using github.checkout_repository before any source edits.",
+          dependsOn: [],
+        },
+        {
+          key: "implement",
+          agentId: "engineering/backend-architect",
+          objective: "Implement the source changes in the checked-out workspace.",
+          dependsOn: ["checkout"],
+        },
+        {
+          key: "verify",
+          agentId: "testing/api-tester",
+          objective: "Run the configured sandbox test suite and report command evidence.",
+          dependsOn: ["implement"],
+        },
+        {
+          key: "review",
+          agentId: "research/research-analyst",
+          objective: "Review the code changes and verification evidence.",
+          dependsOn: ["implement", "verify"],
+        },
+        {
+          key: "pull-request",
+          agentId: "engineering/backend-architect",
+          objective: "Request github.create_pull_request for acme/demo after review and wait for explicit approval.",
+          dependsOn: ["review", "verify"],
+          approvalRequired: true,
+        },
+      ],
+    }));
+    const planner = new PlanService({
+      catalog: fakeCatalog(),
+      router,
+      githubProjectRepositories: ["acme/demo"],
+      githubProjectPublishingEnabled: true,
+      webResearchEnabled: true,
+      sandboxEnabled: true,
+    });
+    const plan = await planner.createPlan({
+      goal: "Update acme/demo, run tests, review the changes, and open a pull request.",
+      profile: "balanced",
+    });
+
+    expect(plan.tasks.find((task) => task.key === "checkout")?.dependsOn).toEqual([]);
+    expect(plan.tasks.find((task) => task.key === "implement")?.dependsOn).toContain("checkout");
+    expect(plan.tasks.find((task) => task.key === "pull-request")?.dependsOn).toContain("review");
+    expect(plan.tasks.find((task) => task.key === "pull-request")?.approvalRequired).toBe(true);
+    expect(router.complete.mock.calls[0]![0].systemPrompt).toContain("Authenticated GitHub project checkout");
+    expect(router.complete.mock.calls[0]![0].systemPrompt).toContain("publishing is an external action");
+    const prompt = JSON.parse(router.complete.mock.calls[0]![0].messages[0]!.content);
+    expect(prompt.installationCapabilities).toEqual({
+      githubProjectRepositories: ["acme/demo"],
+      githubProjectCheckoutEnabled: true,
+      githubProjectPublishingEnabled: true,
+      webResearchEnabled: true,
+      sandboxEnabled: true,
+    });
+  });
+
   it("supports larger plans when a goal genuinely needs coordinated specialists", async () => {
     const tasks = Array.from({ length: 16 }, (_, index) => ({
       key: `task-${index + 1}`,
