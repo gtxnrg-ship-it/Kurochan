@@ -16,7 +16,7 @@ export interface OpenAICompatibleProviderOptions {
   readonly displayName: string;
   readonly baseUrl: string;
   readonly apiKey?: string;
-  readonly defaultModel?: string;
+  readonly defaultModel: string | undefined;
   readonly capabilities?: Partial<ProviderCapabilities>;
   readonly timeoutMs?: number;
   readonly maxResponseBytes?: number;
