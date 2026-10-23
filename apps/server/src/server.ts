@@ -175,9 +175,13 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   });
 
   app.setErrorHandler((error, request, reply) => {
+    const rawStatusCode =
+      error && typeof error === "object" && "statusCode" in error
+        ? (error as { statusCode?: unknown }).statusCode
+        : undefined;
     const status =
-      error.statusCode && error.statusCode >= 400 && error.statusCode < 500
-        ? error.statusCode
+      typeof rawStatusCode === "number" && rawStatusCode >= 400 && rawStatusCode < 500
+        ? rawStatusCode
         : 500;
     if (status >= 500)
       request.log.error(
