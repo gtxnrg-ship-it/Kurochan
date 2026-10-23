@@ -122,12 +122,32 @@ function jsonCharacterLimit(value: unknown, limit = 60_000): string {
   return result.slice(0, limit) + "\n[Context truncated by Kuro-chan.]";
 }
 
-function approvalGranted(store: RunStore, task: TaskRecord): boolean {
-  return store
+type ApprovalType = "task-level" | "external-write";
+
+function approvalGranted(
+  store: RunStore,
+  task: TaskRecord,
+  approvalType: ApprovalType = "task-level",
+): boolean {
+  const events = store
     .listEvents(task.runId, 0, 1000)
-    .some(
-      (event) => event.taskId === task.id && event.type === "approval.granted",
-    );
+    .filter((event) => event.taskId === task.id);
+  const request = events
+    .filter((event) => event.type === "approval.requested")
+    .filter((event) => {
+      const payload = event.payload as {
+        action?: { approvalType?: unknown };
+      };
+      const type = payload?.action?.approvalType;
+      return type === approvalType ||
+        (type === undefined && approvalType === "task-level");
+    })
+    .at(-1);
+  if (!request) return false;
+  return events.some(
+    (event) =>
+      event.type === "approval.granted" && event.id > request.id,
+  );
 }
 
 function profileText(instructions: string): string {
@@ -387,7 +407,7 @@ export class TaskWorker {
       await this.finalizePendingRuns();
       return { kind: "idle" };
     }
-    if (task.approvalRequired && !approvalGranted(this.options.store, task)) {
+    if (task.approvalRequired && !approvalGranted(this.options.store, task, "external-write")) {
       this.options.store.requestTaskApproval(
         task.runId,
         task.id,
