@@ -53,7 +53,7 @@ export type ProviderErrorCode =
 export class ProviderError extends Error {
   readonly code: ProviderErrorCode;
   readonly retryable: boolean;
-  readonly statusCode?: number;
+  readonly statusCode: number | undefined;
 
   constructor(
     code: ProviderErrorCode,
