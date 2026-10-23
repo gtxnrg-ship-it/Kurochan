@@ -874,7 +874,9 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           },
         });
     try {
-      return { run: store.cancelRun(runId, body.data.reason) };
+      const run = store.cancelRun(runId, body.data.reason);
+      worker.cancelRun(runId);
+      return { run };
     } catch {
       return reply
         .code(404)
