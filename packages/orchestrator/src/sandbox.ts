@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { lstat, mkdir } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { z } from "zod";
-import { WorkspaceToolError, WorkspaceRuntime } from "./workspace.js";
+import { WorkspaceRuntime } from "./workspace.js";
 
 const SandboxRunArgsSchema = z.object({
   command: z.string().trim().min(1).max(20_000),
@@ -52,6 +52,10 @@ export interface SandboxRuntimeOptions {
   readonly timeoutMs?: number;
   readonly maxOutputBytes?: number;
   readonly runner?: SandboxProcessRunner;
+}
+
+export interface SandboxExecutor {
+  execute(runId: string, input: unknown, signal?: AbortSignal): Promise<SandboxToolResult>;
 }
 
 export interface SandboxToolResult {
