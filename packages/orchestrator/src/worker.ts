@@ -224,7 +224,7 @@ export class TaskWorker {
     const controller = new AbortController();
     this.activeAbortController = controller;
     let leaseFailure: unknown;
-    const heartbeatInterval = Math.max(250, Math.floor(this.leaseMs / 3));
+    const heartbeatInterval = Math.max(250, Math.min(5_000, Math.floor(this.leaseMs / 3)));
     const heartbeat = setInterval(() => {
       const currentRun = this.options.store.getRun(task.runId);
       if (!currentRun || currentRun.status === "cancelled") {
