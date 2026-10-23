@@ -17,6 +17,12 @@
     },
     {
       "path": "../../packages/omnirouter"
+    },
+    {
+      "path": "../../packages/storage"
+    },
+    {
+      "path": "../../packages/agent-catalog"
     }
   ],
   "include": [

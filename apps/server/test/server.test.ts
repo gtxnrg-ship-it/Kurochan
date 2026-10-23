@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { buildServer, validateServerConfiguration } from "../src/server.js";
+import { RunStore } from "@kurochan/storage";
 import type { ProviderId } from "@kurochan/contracts";
 import type { ChatCompletionInput, ChatCompletionOutput, ChatProvider } from "@kurochan/model-gateway";
 
@@ -9,21 +10,21 @@ describe("Kuro-chan API", () => {
   afterEach(async () => { await app?.close(); app = undefined; });
 
   it("returns a liveness response without provider credentials", async () => {
-    app = buildServer({ env: { HOST: "127.0.0.1", PORT: "8787" }, logger: false });
+    app = buildServer({ env: { HOST: "127.0.0.1", PORT: "8787" }, logger: false, store: new RunStore(":memory:") });
     const response = await app.inject({ method: "GET", url: "/healthz" });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({ ok: true, service: "kurochan-api" });
   });
 
   it("does not report ready when no provider is configured", async () => {
-    app = buildServer({ env: {}, logger: false });
+    app = buildServer({ env: {}, logger: false, store: new RunStore(":memory:") });
     const response = await app.inject({ method: "GET", url: "/readyz" });
     expect(response.statusCode).toBe(503);
     expect(response.json()).toMatchObject({ ready: false, configuredProviders: 0 });
   });
 
   it("provides public, secret-free provider configuration", async () => {
-    app = buildServer({ env: { OPENROUTER_API_KEY: "top-secret", OPENROUTER_MODEL: "configured-model" }, logger: false });
+    app = buildServer({ env: { OPENROUTER_API_KEY: "top-secret", OPENROUTER_MODEL: "configured-model" }, logger: false, store: new RunStore(":memory:") });
     const response = await app.inject({ method: "GET", url: "/v1/config" });
     expect(response.statusCode).toBe(200);
     expect(response.body).not.toContain("top-secret");
@@ -31,7 +32,7 @@ describe("Kuro-chan API", () => {
   });
 
   it("requires an API token when one is configured", async () => {
-    app = buildServer({ env: { KUROCHAN_API_TOKEN: "test-token" }, logger: false });
+    app = buildServer({ env: { KUROCHAN_API_TOKEN: "test-token" }, logger: false, store: new RunStore(":memory:") });
     const response = await app.inject({ method: "GET", url: "/v1/models" });
     expect(response.statusCode).toBe(401);
     const ok = await app.inject({ method: "GET", url: "/v1/models", headers: { authorization: "Bearer test-token" } });
@@ -79,7 +80,7 @@ describe("Kuro-chan API", () => {
   });
 
   it("rejects unknown model IDs instead of quietly changing route profiles", async () => {
-    app = buildServer({ env: {}, logger: false });
+    app = buildServer({ env: {}, logger: false, store: new RunStore(":memory:") });
     const response = await app.inject({
       method: "POST",
       url: "/v1/chat/completions",

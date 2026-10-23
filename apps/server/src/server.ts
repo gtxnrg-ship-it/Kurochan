@@ -11,6 +11,8 @@ import {
 } from "@kurochan/contracts";
 import { createProviderRegistry, type Environment } from "@kurochan/model-gateway";
 import { OmniRouter, routeOrdersFromEnvironment } from "@kurochan/omnirouter";
+import { AgentCatalog } from "@kurochan/agent-catalog";
+import { RunStore, type CreateRunInput } from "@kurochan/storage";
 
 export interface ServerOptions {
   readonly env?: Environment;
@@ -61,6 +63,8 @@ function modelSelection(model: string, registry: ReturnType<typeof createProvide
 export function buildServer(options: ServerOptions = {}): FastifyInstance {
   const env = options.env ?? process.env;
   const registry = options.providers ?? createProviderRegistry(env);
+  const store = options.store ?? new RunStore(env.KUROCHAN_DB_PATH?.trim() || "data/kurochan.sqlite");
+  const catalog = options.catalog ?? new AgentCatalog();
   const router = new OmniRouter({
     providers: registry.providers,
     routeOrder: routeOrdersFromEnvironment(env),
@@ -86,6 +90,8 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     requestIdHeader: "x-request-id",
     disableRequestLogging: false,
   });
+
+  app.addHook("onClose", async () => { store.close(); });
 
   const origins = allowedOrigins(env);
   void app.register(helmet, { contentSecurityPolicy: false });
@@ -158,6 +164,111 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     profiles: routeOrdersFromEnvironment(env),
     providers: router.getProviderHealth(registry.statuses),
   }));
+
+  app.get("/v1/agents/catalog", async (_request, reply) => {
+    try { return await catalog.metadata(); }
+    catch (error) {
+      requestWarning(app, error, "catalog_unavailable");
+      return reply.code(503).send({ error: { code: "catalog_unavailable", message: "Agency Agents catalog is unavailable. Check that the pinned submodule is initialized.", retryable: true } });
+    }
+  });
+
+  app.get("/v1/agents", async (request, reply) => {
+    const query = request.query as Record<string, unknown>;
+    const q = typeof query.q === "string" ? query.q : "";
+    const division = typeof query.division === "string" ? query.division : undefined;
+    const limit = parseBoundedInteger(query.limit, 50, 1, 100);
+    try {
+      if (q.trim()) return { data: await catalog.search(q, { ...(division ? { division } : {}), limit }) };
+      return { data: await catalog.list({ ...(division ? { division } : {}), limit }) };
+    } catch (error) {
+      requestWarning(app, error, "catalog_unavailable");
+      return reply.code(503).send({ error: { code: "catalog_unavailable", message: "Agency Agents catalog could not be loaded.", retryable: true } });
+    }
+  });
+
+  app.get("/v1/agents/:division/:slug", async (request, reply) => {
+    const params = request.params as { division: string; slug: string };
+    try {
+      const agent = await catalog.get(`${params.division}/${params.slug}`);
+      if (!agent) return reply.code(404).send({ error: { code: "agent_not_found", message: "No agent was found at that catalog path.", retryable: false } });
+      const { instructions: _instructions, ...profile } = agent;
+      return profile;
+    } catch (error) {
+      requestWarning(app, error, "catalog_unavailable");
+      return reply.code(503).send({ error: { code: "catalog_unavailable", message: "Agency Agents catalog could not be loaded.", retryable: true } });
+    }
+  });
+
+  const PlannedTaskSchema = z.object({
+    key: z.string().trim().min(1).max(200),
+    agentId: z.string().trim().min(1).max(200),
+    objective: z.string().trim().min(1).max(20_000),
+    dependsOn: z.array(z.string().trim().min(1).max(200)).max(200).optional(),
+    maxAttempts: z.number().int().min(1).max(10).optional(),
+    input: z.unknown().optional(),
+    approvalRequired: z.boolean().optional(),
+  });
+  const CreateRunSchema = z.object({
+    goal: z.string().trim().min(1).max(20_000),
+    profile: z.enum(["fast", "balanced", "quality"]).default("balanced"),
+    tasks: z.array(PlannedTaskSchema).min(1).max(200),
+    createdBy: z.string().trim().min(1).max(200).optional(),
+  }).strict();
+
+  app.post("/v1/runs", async (request, reply) => {
+    const parsed = CreateRunSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: { code: "invalid_run_plan", message: "A run requires a goal and a valid, bounded task plan.", retryable: false, requestId: request.id } });
+    try {
+      const run = store.createRun(parsed.data as CreateRunInput);
+      return reply.code(201).send({ run, tasks: store.listTasks(run.id), events: store.listEvents(run.id) });
+    } catch (error) {
+      requestWarning(app, error, "invalid_run_plan");
+      return reply.code(400).send({ error: { code: "invalid_run_plan", message: error instanceof Error ? error.message : "Run plan was rejected.", retryable: false, requestId: request.id } });
+    }
+  });
+
+  app.get("/v1/runs", async (request, reply) => {
+    const query = request.query as Record<string, unknown>;
+    const limit = parseBoundedInteger(query.limit, 50, 1, 200);
+    const beforeRaw = query.before;
+    const before = typeof beforeRaw === "string" && /^\\d+$/.test(beforeRaw) ? Number(beforeRaw) : undefined;
+    if (beforeRaw !== undefined && before === undefined) return reply.code(400).send({ error: { code: "invalid_cursor", message: "The before cursor must be a positive integer timestamp.", retryable: false } });
+    try { return { data: store.listRuns(limit, before) }; }
+    catch { return reply.code(400).send({ error: { code: "invalid_query", message: "Run list query was invalid.", retryable: false } }); }
+  });
+
+  app.get("/v1/runs/:runId", async (request, reply) => {
+    const { runId } = request.params as { runId: string };
+    const run = store.getRun(runId);
+    if (!run) return reply.code(404).send({ error: { code: "run_not_found", message: "Run not found.", retryable: false, requestId: request.id } });
+    return { run, tasks: store.listTasks(runId), events: store.listEvents(runId, 0, 100) };
+  });
+
+  app.get("/v1/runs/:runId/events", async (request, reply) => {
+    const { runId } = request.params as { runId: string };
+    if (!store.getRun(runId)) return reply.code(404).send({ error: { code: "run_not_found", message: "Run not found.", retryable: false } });
+    const query = request.query as Record<string, unknown>;
+    const afterId = parseBoundedInteger(query.afterId, 0, 0, Number.MAX_SAFE_INTEGER);
+    const limit = parseBoundedInteger(query.limit, 200, 1, 1000);
+    return { data: store.listEvents(runId, afterId, limit) };
+  });
+
+  app.post("/v1/runs/:runId/cancel", async (request, reply) => {
+    const { runId } = request.params as { runId: string };
+    const body = z.object({ reason: z.string().max(2000).optional() }).safeParse(request.body ?? {});
+    if (!body.success) return reply.code(400).send({ error: { code: "invalid_request", message: "Cancellation reason is too long.", retryable: false } });
+    try { return { run: store.cancelRun(runId, body.data.reason) }; }
+    catch { return reply.code(404).send({ error: { code: "run_not_found", message: "Run not found.", retryable: false } }); }
+  });
+
+  app.post("/v1/runs/:runId/approvals/:taskId", async (request, reply) => {
+    const { runId, taskId } = request.params as { runId: string; taskId: string };
+    const body = z.object({ approved: z.boolean(), reason: z.string().max(2000).optional() }).safeParse(request.body);
+    if (!body.success) return reply.code(400).send({ error: { code: "invalid_request", message: "Approval needs a boolean decision and an optional bounded reason.", retryable: false } });
+    try { return { task: store.resolveTaskApproval(runId, taskId, body.data.approved, body.data.reason) }; }
+    catch (error) { return reply.code(409).send({ error: { code: "approval_conflict", message: error instanceof Error ? error.message : "Task is not awaiting approval.", retryable: false } }); }
+  });
 
   app.get("/v1/models", async () => ({
     object: "list",
@@ -250,6 +361,17 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   });
 
   return app;
+}
+
+function parseBoundedInteger(value: unknown, fallback: number, min: number, max: number): number {
+  const parsed = value === undefined ? fallback : typeof value === "number" ? value
+    : typeof value === "string" && /^\\d+$/.test(value) ? Number(value) : Number.NaN;
+  if (!Number.isInteger(parsed) || parsed < min || parsed > max) throw new Error(`Value must be an integer between ${min} and ${max}.`);
+  return parsed;
+}
+
+function requestWarning(app: FastifyInstance, error: unknown, code: string): void {
+  app.log.warn({ error: error instanceof Error ? error.message : String(error), code }, "Backend request could not be completed");
 }
 
 export function validateServerConfiguration(env: Environment = process.env): { host: string; port: number } {
