@@ -155,11 +155,11 @@ async function readBoundedBody(
 export class OpenAICompatibleChatProvider implements ChatProvider {
   readonly id: ProviderId;
   readonly displayName: string;
-  readonly defaultModel?: string;
+  readonly defaultModel: string | undefined;
   readonly isConfigured: boolean;
   readonly capabilities: ProviderCapabilities;
   private readonly endpoint: string;
-  private readonly apiKey?: string;
+  private readonly apiKey: string | undefined;
   private readonly timeoutMs: number;
   private readonly maxResponseBytes: number;
   private readonly fetchImpl: typeof fetch;
