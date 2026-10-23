@@ -126,6 +126,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       env.OMNIROUTER_CIRCUIT_COOLDOWN_MS ?? "30000",
       10,
     ),
+    onUsage: (event) => store.recordProviderUsage(event),
   });
   const planner =
     options.planner ??
@@ -406,6 +407,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     try {
       const result = await router.complete({
         profile: "balanced",
+        context: { operation: "provider_test" },
         preferredProvider: parsed.data.providerId,
         lockProvider: true,
         model: provider.defaultModel,
@@ -1202,6 +1204,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       if (body.stream) {
         const routed = await router.stream({
           profile: selection.profile,
+          context: { operation: "chat" },
           ...(selection.preferredProvider
             ? {
                 preferredProvider: selection.preferredProvider,
@@ -1312,6 +1315,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
 
       const result = await router.complete({
         profile: selection.profile,
+        context: { operation: "chat" },
         ...(selection.preferredProvider
           ? {
               preferredProvider: selection.preferredProvider,
