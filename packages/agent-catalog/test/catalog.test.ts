@@ -25,9 +25,7 @@ describe("Agency Agents catalog", () => {
       21,
     );
     expect(
-      await catalog.get(
-        "game-development/unreal-engine/unreal-world-builder",
-      ),
+      await catalog.get("game-development/unreal-engine/unreal-world-builder"),
     ).toMatchObject({
       name: "Unreal World Builder",
       division: "game-development",
@@ -38,7 +36,9 @@ describe("Agency Agents catalog", () => {
     const catalog = new AgentCatalog();
     const runbooks = await catalog.listRunbooks();
     expect(runbooks.length).toBeGreaterThanOrEqual(4);
-    expect(runbooks.some((runbook) => runbook.slug === "startup-mvp")).toBe(true);
+    expect(runbooks.some((runbook) => runbook.slug === "startup-mvp")).toBe(
+      true,
+    );
     expect(
       runbooks.every((runbook) =>
         runbook.roster.every((group) =>
@@ -46,7 +46,9 @@ describe("Agency Agents catalog", () => {
         ),
       ),
     ).toBe(true);
-    expect((await catalog.readNexusStrategy()).toLowerCase()).toContain("nexus");
+    expect((await catalog.readNexusStrategy()).toLowerCase()).toContain(
+      "nexus",
+    );
   });
 
   it("does not resolve path traversal IDs", async () => {

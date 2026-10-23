@@ -43,7 +43,9 @@ export interface ChatProvider {
   readonly capabilities?: Partial<ProviderCapabilities>;
   complete(input: ChatCompletionInput): Promise<ChatCompletionOutput>;
   /** Available only when the provider's selected model is configured for streaming. */
-  stream?(input: ChatCompletionInput): Promise<AsyncIterable<ChatCompletionStreamChunk>>;
+  stream?(
+    input: ChatCompletionInput,
+  ): Promise<AsyncIterable<ChatCompletionStreamChunk>>;
 }
 
 export type ProviderErrorCode =

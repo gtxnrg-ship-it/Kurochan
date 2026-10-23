@@ -19,7 +19,14 @@ import {
 import { OmniRouter, routeOrdersFromEnvironment } from "@kurochan/omnirouter";
 import { AgentCatalog } from "@kurochan/agent-catalog";
 import { RunStore, type CreateRunInput } from "@kurochan/storage";
-import { DockerSandboxRuntime, PlanError, PlanService, TaskWorker, WorkspaceRuntime, type SandboxExecutor } from "@kurochan/orchestrator";
+import {
+  DockerSandboxRuntime,
+  PlanError,
+  PlanService,
+  TaskWorker,
+  WorkspaceRuntime,
+  type SandboxExecutor,
+} from "@kurochan/orchestrator";
 
 export interface ServerOptions {
   readonly env?: Environment;
@@ -110,16 +117,18 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       10,
     ),
   });
-  const planner = options.planner ?? new PlanService({
-    catalog,
-    router,
-    maxCandidates: parseBoundedInteger(
-      env.KUROCHAN_PLANNER_MAX_CANDIDATES,
-      96,
-      16,
-      1000,
-    ),
-  });
+  const planner =
+    options.planner ??
+    new PlanService({
+      catalog,
+      router,
+      maxCandidates: parseBoundedInteger(
+        env.KUROCHAN_PLANNER_MAX_CANDIDATES,
+        96,
+        16,
+        1000,
+      ),
+    });
 
   const app = Fastify({
     logger: options.logger ?? {
@@ -155,21 +164,43 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   );
   const workspace = new WorkspaceRuntime({ root: workspaceRoot });
   const workerEnabled = options.workerEnabled ?? false;
-  const sandboxEnabled = env.KUROCHAN_SANDBOX_ENABLED?.trim().toLowerCase() === "true";
-  const configuredSandboxNetwork = env.KUROCHAN_SANDBOX_NETWORK?.trim().toLowerCase();
-  if (configuredSandboxNetwork && configuredSandboxNetwork !== "none" && configuredSandboxNetwork !== "bridge") {
+  const sandboxEnabled =
+    env.KUROCHAN_SANDBOX_ENABLED?.trim().toLowerCase() === "true";
+  const configuredSandboxNetwork =
+    env.KUROCHAN_SANDBOX_NETWORK?.trim().toLowerCase();
+  if (
+    configuredSandboxNetwork &&
+    configuredSandboxNetwork !== "none" &&
+    configuredSandboxNetwork !== "bridge"
+  ) {
     throw new Error("KUROCHAN_SANDBOX_NETWORK must be none or bridge.");
   }
-  const sandbox = options.sandbox ?? (sandboxEnabled
-    ? new DockerSandboxRuntime({
-        workspaceRoot,
-        ...(env.KUROCHAN_SANDBOX_IMAGE?.trim() ? { image: env.KUROCHAN_SANDBOX_IMAGE.trim() } : {}),
-        ...(env.DOCKER_BINARY?.trim() ? { dockerBinary: env.DOCKER_BINARY.trim() } : {}),
-        network: configuredSandboxNetwork === "bridge" ? "bridge" : "none",
-        timeoutMs: parseBoundedInteger(env.KUROCHAN_SANDBOX_TIMEOUT_MS, 30_000, 1_000, 120_000),
-        maxOutputBytes: parseBoundedInteger(env.KUROCHAN_SANDBOX_MAX_OUTPUT_BYTES, 40_000, 1_024, 200_000),
-      })
-    : undefined);
+  const sandbox =
+    options.sandbox ??
+    (sandboxEnabled
+      ? new DockerSandboxRuntime({
+          workspaceRoot,
+          ...(env.KUROCHAN_SANDBOX_IMAGE?.trim()
+            ? { image: env.KUROCHAN_SANDBOX_IMAGE.trim() }
+            : {}),
+          ...(env.DOCKER_BINARY?.trim()
+            ? { dockerBinary: env.DOCKER_BINARY.trim() }
+            : {}),
+          network: configuredSandboxNetwork === "bridge" ? "bridge" : "none",
+          timeoutMs: parseBoundedInteger(
+            env.KUROCHAN_SANDBOX_TIMEOUT_MS,
+            30_000,
+            1_000,
+            120_000,
+          ),
+          maxOutputBytes: parseBoundedInteger(
+            env.KUROCHAN_SANDBOX_MAX_OUTPUT_BYTES,
+            40_000,
+            1_024,
+            200_000,
+          ),
+        })
+      : undefined);
   const worker = new TaskWorker({
     store,
     catalog,
@@ -177,9 +208,10 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     workspaceRoot,
     ...(sandbox ? { sandbox } : {}),
     onError: (error) => {
-      const code = error && typeof error === "object" && "code" in error
-        ? String((error as { code?: unknown }).code ?? "worker_error")
-        : "worker_error";
+      const code =
+        error && typeof error === "object" && "code" in error
+          ? String((error as { code?: unknown }).code ?? "worker_error")
+          : "worker_error";
       app.log.warn({ code }, "Task worker iteration failed");
     },
   });
@@ -233,7 +265,9 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         ? (error as { statusCode?: unknown }).statusCode
         : undefined;
     const status =
-      typeof rawStatusCode === "number" && rawStatusCode >= 400 && rawStatusCode < 500
+      typeof rawStatusCode === "number" &&
+      rawStatusCode >= 400 &&
+      rawStatusCode < 500
         ? rawStatusCode
         : 500;
     if (status >= 500)
@@ -277,9 +311,11 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   });
 
   app.post("/v1/providers/:providerId/test", async (request, reply) => {
-    const parsed = z.object({
-      providerId: z.enum(["openrouter", "freellmapi"]),
-    }).safeParse(request.params);
+    const parsed = z
+      .object({
+        providerId: z.enum(["openrouter", "freellmapi"]),
+      })
+      .safeParse(request.params);
     if (!parsed.success) {
       return reply.code(400).send({
         error: {
@@ -296,9 +332,10 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       return reply.code(503).send({
         error: {
           code: "provider_not_configured",
-          message: parsed.data.providerId === "freellmapi"
-            ? "Configure FREELLMAPI_BASE_URL, FREELLMAPI_MODEL, and the unified key from your own FreeLLMAPI instance."
-            : "Configure OPENROUTER_BASE_URL, OPENROUTER_MODEL, and OPENROUTER_API_KEY.",
+          message:
+            parsed.data.providerId === "freellmapi"
+              ? "Configure FREELLMAPI_BASE_URL, FREELLMAPI_MODEL, and the unified key from your own FreeLLMAPI instance."
+              : "Configure OPENROUTER_BASE_URL, OPENROUTER_MODEL, and OPENROUTER_API_KEY.",
           retryable: false,
           requestId: request.id,
         },
@@ -313,7 +350,9 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         preferredProvider: parsed.data.providerId,
         lockProvider: true,
         model: provider.defaultModel,
-        messages: [{ role: "user", content: "Reply with the single word connected." }],
+        messages: [
+          { role: "user", content: "Reply with the single word connected." },
+        ],
         maxTokens: 12,
         temperature: 0,
         timeoutMs: 15_000,
@@ -328,17 +367,30 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         testedAt: new Date().toISOString(),
       };
     } catch (error) {
-      const failure = error as { code?: string; message?: string; retryable?: boolean };
+      const failure = error as {
+        code?: string;
+        message?: string;
+        retryable?: boolean;
+      };
       const code = failure.code ?? "provider_test_failed";
-      const status = code === "cancelled" ? 499
-        : code === "router_overloaded" ? 429
-        : code === "no_provider_available" ? 503
-        : 502;
-      request.log.warn({ provider: parsed.data.providerId, code, requestId: request.id }, "Provider connection test failed");
+      const status =
+        code === "cancelled"
+          ? 499
+          : code === "router_overloaded"
+            ? 429
+            : code === "no_provider_available"
+              ? 503
+              : 502;
+      request.log.warn(
+        { provider: parsed.data.providerId, code, requestId: request.id },
+        "Provider connection test failed",
+      );
       return reply.code(status).send({
         error: {
           code,
-          message: failure.message ?? "Provider connection test failed. Check the server-side configuration and provider availability.",
+          message:
+            failure.message ??
+            "Provider connection test failed. Check the server-side configuration and provider availability.",
           retryable: failure.retryable ?? status >= 500,
           requestId: request.id,
         },
@@ -360,7 +412,12 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     const query = request.query as Record<string, unknown>;
     let staleAfterMs: number;
     try {
-      staleAfterMs = parseBoundedInteger(query.staleAfterMs, 30_000, 1_000, 600_000);
+      staleAfterMs = parseBoundedInteger(
+        query.staleAfterMs,
+        30_000,
+        1_000,
+        600_000,
+      );
     } catch {
       return reply.code(400).send({
         error: {
@@ -375,7 +432,9 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       data: workers,
       summary: {
         total: workers.length,
-        active: workers.filter((worker) => !worker.stale && worker.state !== "stopping").length,
+        active: workers.filter(
+          (worker) => !worker.stale && worker.state !== "stopping",
+        ).length,
         stale: workers.filter((worker) => worker.stale).length,
       },
       staleAfterMs,
@@ -405,14 +464,31 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       arbitraryUrlsAllowed: false,
       repositoryWritesEnabled: false,
     },
-    sandbox: sandbox ? {
-      enabled: true,
-      runtime: sandbox instanceof DockerSandboxRuntime ? "docker" : "custom",
-      image: sandbox instanceof DockerSandboxRuntime ? sandbox.image : "custom",
-      network: sandbox instanceof DockerSandboxRuntime ? sandbox.network : "unknown",
-      timeoutMs: parseBoundedInteger(env.KUROCHAN_SANDBOX_TIMEOUT_MS, 30_000, 1_000, 120_000),
-      maxOutputBytes: parseBoundedInteger(env.KUROCHAN_SANDBOX_MAX_OUTPUT_BYTES, 40_000, 1_024, 200_000),
-    } : { enabled: false, runtime: null, network: "none" },
+    sandbox: sandbox
+      ? {
+          enabled: true,
+          runtime:
+            sandbox instanceof DockerSandboxRuntime ? "docker" : "custom",
+          image:
+            sandbox instanceof DockerSandboxRuntime ? sandbox.image : "custom",
+          network:
+            sandbox instanceof DockerSandboxRuntime
+              ? sandbox.network
+              : "unknown",
+          timeoutMs: parseBoundedInteger(
+            env.KUROCHAN_SANDBOX_TIMEOUT_MS,
+            30_000,
+            1_000,
+            120_000,
+          ),
+          maxOutputBytes: parseBoundedInteger(
+            env.KUROCHAN_SANDBOX_MAX_OUTPUT_BYTES,
+            40_000,
+            1_024,
+            200_000,
+          ),
+        }
+      : { enabled: false, runtime: null, network: "none" },
     executionLimits: {
       shellEnabled: Boolean(sandbox),
       networkToolEnabled: false,
@@ -434,9 +510,17 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       return {
         source: "Agency Agents NEXUS strategy/runbooks.json",
         pinnedCommit: (await catalog.metadata()).pinnedCommit,
-        data: runbooks.map(({ slug, title, mode, duration, summary, doc, roster }) => ({
-          slug, title, mode, duration, summary, doc, roster,
-        })),
+        data: runbooks.map(
+          ({ slug, title, mode, duration, summary, doc, roster }) => ({
+            slug,
+            title,
+            mode,
+            duration,
+            summary,
+            doc,
+            roster,
+          }),
+        ),
       };
     } catch (error) {
       requestWarning(app, error, "nexus_runbooks_unavailable");
@@ -474,16 +558,14 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       return await catalog.metadata();
     } catch (error) {
       requestWarning(app, error, "catalog_unavailable");
-      return reply
-        .code(503)
-        .send({
-          error: {
-            code: "catalog_unavailable",
-            message:
-              "Agency Agents catalog is unavailable. Check that the pinned submodule is initialized.",
-            retryable: true,
-          },
-        });
+      return reply.code(503).send({
+        error: {
+          code: "catalog_unavailable",
+          message:
+            "Agency Agents catalog is unavailable. Check that the pinned submodule is initialized.",
+          retryable: true,
+        },
+      });
     }
   });
 
@@ -495,7 +577,12 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     const maximumLimit = q.trim() ? 100 : 1000;
     let limit: number;
     try {
-      limit = parseBoundedInteger(query.limit, q.trim() ? 50 : 100, 1, maximumLimit);
+      limit = parseBoundedInteger(
+        query.limit,
+        q.trim() ? 50 : 100,
+        1,
+        maximumLimit,
+      );
     } catch {
       return reply.code(400).send({
         error: {
@@ -518,15 +605,13 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       };
     } catch (error) {
       requestWarning(app, error, "catalog_unavailable");
-      return reply
-        .code(503)
-        .send({
-          error: {
-            code: "catalog_unavailable",
-            message: "Agency Agents catalog could not be loaded.",
-            retryable: true,
-          },
-        });
+      return reply.code(503).send({
+        error: {
+          code: "catalog_unavailable",
+          message: "Agency Agents catalog could not be loaded.",
+          retryable: true,
+        },
+      });
     }
   });
 
@@ -535,28 +620,24 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     try {
       const agent = await catalog.get(`${params.division}/${params.slug}`);
       if (!agent)
-        return reply
-          .code(404)
-          .send({
-            error: {
-              code: "agent_not_found",
-              message: "No agent was found at that catalog path.",
-              retryable: false,
-            },
-          });
+        return reply.code(404).send({
+          error: {
+            code: "agent_not_found",
+            message: "No agent was found at that catalog path.",
+            retryable: false,
+          },
+        });
       const { instructions: _instructions, ...profile } = agent;
       return profile;
     } catch (error) {
       requestWarning(app, error, "catalog_unavailable");
-      return reply
-        .code(503)
-        .send({
-          error: {
-            code: "catalog_unavailable",
-            message: "Agency Agents catalog could not be loaded.",
-            retryable: true,
-          },
-        });
+      return reply.code(503).send({
+        error: {
+          code: "catalog_unavailable",
+          message: "Agency Agents catalog could not be loaded.",
+          retryable: true,
+        },
+      });
     }
   });
 
@@ -581,21 +662,19 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   app.post("/v1/runs", async (request, reply) => {
     const parsed = CreateRunSchema.safeParse(request.body);
     if (!parsed.success)
-      return reply
-        .code(400)
-        .send({
-          error: {
-            code: "invalid_run_plan",
-            message: "A run requires a goal and a valid, bounded task plan.",
-            retryable: false,
-            requestId: request.id,
-          },
-        });
+      return reply.code(400).send({
+        error: {
+          code: "invalid_run_plan",
+          message: "A run requires a goal and a valid, bounded task plan.",
+          retryable: false,
+          requestId: request.id,
+        },
+      });
     let knownAgents: readonly (string | undefined)[];
     try {
       knownAgents = await Promise.all(
-        [...new Set(parsed.data.tasks.map((task) => task.agentId))].map(async (agentId) =>
-          (await catalog.get(agentId))?.id,
+        [...new Set(parsed.data.tasks.map((task) => task.agentId))].map(
+          async (agentId) => (await catalog.get(agentId))?.id,
         ),
       );
     } catch (error) {
@@ -603,20 +682,25 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       return reply.code(503).send({
         error: {
           code: "catalog_unavailable",
-          message: "The pinned specialist catalog could not be loaded to validate this run.",
+          message:
+            "The pinned specialist catalog could not be loaded to validate this run.",
           retryable: true,
           requestId: request.id,
         },
       });
     }
-    const knownAgentIds = new Set(knownAgents.filter((id): id is string => Boolean(id)));
-    const missingAgentIds = [...new Set(parsed.data.tasks.map((task) => task.agentId))]
-      .filter((agentId) => !knownAgentIds.has(agentId));
+    const knownAgentIds = new Set(
+      knownAgents.filter((id): id is string => Boolean(id)),
+    );
+    const missingAgentIds = [
+      ...new Set(parsed.data.tasks.map((task) => task.agentId)),
+    ].filter((agentId) => !knownAgentIds.has(agentId));
     if (missingAgentIds.length) {
       return reply.code(422).send({
         error: {
           code: "unknown_specialist",
-          message: "Every task must reference an agent ID from the pinned Agency Agents catalog.",
+          message:
+            "Every task must reference an agent ID from the pinned Agency Agents catalog.",
           retryable: false,
           requestId: request.id,
         },
@@ -625,34 +709,32 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     }
     try {
       const run = store.createRun(parsed.data as CreateRunInput);
-      return reply
-        .code(201)
-        .send({
-          run,
-          tasks: store.listTasks(run.id),
-          events: store.listEvents(run.id),
-        });
+      return reply.code(201).send({
+        run,
+        tasks: store.listTasks(run.id),
+        events: store.listEvents(run.id),
+      });
     } catch (error) {
       requestWarning(app, error, "invalid_run_plan");
-      return reply
-        .code(400)
-        .send({
-          error: {
-            code: "invalid_run_plan",
-            message:
-              error instanceof Error ? error.message : "Run plan was rejected.",
-            retryable: false,
-            requestId: request.id,
-          },
-        });
+      return reply.code(400).send({
+        error: {
+          code: "invalid_run_plan",
+          message:
+            error instanceof Error ? error.message : "Run plan was rejected.",
+          retryable: false,
+          requestId: request.id,
+        },
+      });
     }
   });
 
-  const PlanRequestSchema = z.object({
-    goal: z.string().trim().min(1).max(20_000),
-    profile: z.enum(["fast", "balanced", "quality"]).default("balanced"),
-    createdBy: z.string().trim().min(1).max(200).optional(),
-  }).strict();
+  const PlanRequestSchema = z
+    .object({
+      goal: z.string().trim().min(1).max(20_000),
+      profile: z.enum(["fast", "balanced", "quality"]).default("balanced"),
+      createdBy: z.string().trim().min(1).max(200).optional(),
+    })
+    .strict();
 
   app.post("/v1/runs/plan", async (request, reply) => {
     const parsed = PlanRequestSchema.safeParse(request.body);
@@ -660,7 +742,8 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       return reply.code(400).send({
         error: {
           code: "invalid_plan_request",
-          message: "Request must include a goal and an optional valid OmniRouter profile.",
+          message:
+            "Request must include a goal and an optional valid OmniRouter profile.",
           retryable: false,
           requestId: request.id,
         },
@@ -686,7 +769,11 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         plan: {
           summary: plan.summary,
           selectedAgents: plan.selectedAgents,
-          provider: { id: plan.providerId, model: plan.model, latencyMs: plan.latencyMs },
+          provider: {
+            id: plan.providerId,
+            model: plan.model,
+            latencyMs: plan.latencyMs,
+          },
           planningAttempts: plan.attempts,
         },
         tasks: store.listTasks(run.id),
@@ -694,11 +781,21 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       });
     } catch (error) {
       if (error instanceof PlanError) {
-        const status = error.code === "catalog_unavailable" ? 503
-          : error.code === "no_provider_available" || error.code === "no_specialists_found" ? 503
-          : error.code === "cancelled" ? 499
-          : error.retryable ? 502 : 422;
-        request.log.warn({ code: error.code, requestId: request.id }, "Run planning failed");
+        const status =
+          error.code === "catalog_unavailable"
+            ? 503
+            : error.code === "no_provider_available" ||
+                error.code === "no_specialists_found"
+              ? 503
+              : error.code === "cancelled"
+                ? 499
+                : error.retryable
+                  ? 502
+                  : 422;
+        request.log.warn(
+          { code: error.code, requestId: request.id },
+          "Run planning failed",
+        );
         return reply.code(status).send({
           error: {
             code: error.code,
@@ -726,15 +823,13 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     try {
       limit = parseBoundedInteger(query.limit, 50, 1, 200);
     } catch {
-      return reply
-        .code(400)
-        .send({
-          error: {
-            code: "invalid_query",
-            message: "limit must be an integer from 1 to 200.",
-            retryable: false,
-          },
-        });
+      return reply.code(400).send({
+        error: {
+          code: "invalid_query",
+          message: "limit must be an integer from 1 to 200.",
+          retryable: false,
+        },
+      });
     }
     const beforeRaw = query.before;
     const before =
@@ -742,27 +837,23 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         ? Number(beforeRaw)
         : undefined;
     if (beforeRaw !== undefined && before === undefined)
-      return reply
-        .code(400)
-        .send({
-          error: {
-            code: "invalid_cursor",
-            message: "The before cursor must be a positive integer timestamp.",
-            retryable: false,
-          },
-        });
+      return reply.code(400).send({
+        error: {
+          code: "invalid_cursor",
+          message: "The before cursor must be a positive integer timestamp.",
+          retryable: false,
+        },
+      });
     try {
       return { data: store.listRuns(limit, before) };
     } catch {
-      return reply
-        .code(400)
-        .send({
-          error: {
-            code: "invalid_query",
-            message: "Run list query was invalid.",
-            retryable: false,
-          },
-        });
+      return reply.code(400).send({
+        error: {
+          code: "invalid_query",
+          message: "Run list query was invalid.",
+          retryable: false,
+        },
+      });
     }
   });
 
@@ -770,16 +861,14 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     const { runId } = request.params as { runId: string };
     const run = store.getRun(runId);
     if (!run)
-      return reply
-        .code(404)
-        .send({
-          error: {
-            code: "run_not_found",
-            message: "Run not found.",
-            retryable: false,
-            requestId: request.id,
-          },
-        });
+      return reply.code(404).send({
+        error: {
+          code: "run_not_found",
+          message: "Run not found.",
+          retryable: false,
+          requestId: request.id,
+        },
+      });
     return {
       run,
       tasks: store.listTasks(runId),
@@ -790,13 +879,25 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   app.get("/v1/runs/:runId/artifacts", async (request, reply) => {
     const { runId } = request.params as { runId: string };
     if (!store.getRun(runId)) {
-      return reply.code(404).send({ error: { code: "run_not_found", message: "Run was not found.", retryable: false } });
+      return reply.code(404).send({
+        error: {
+          code: "run_not_found",
+          message: "Run was not found.",
+          retryable: false,
+        },
+      });
     }
     try {
       return { runId, data: await workspace.listFiles(runId) };
     } catch (error) {
       requestWarning(app, error, "workspace_list_failed");
-      return reply.code(400).send({ error: { code: "workspace_unavailable", message: "Workspace files could not be listed for this run.", retryable: false } });
+      return reply.code(400).send({
+        error: {
+          code: "workspace_unavailable",
+          message: "Workspace files could not be listed for this run.",
+          retryable: false,
+        },
+      });
     }
   });
 
@@ -805,34 +906,54 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     const query = request.query as Record<string, unknown>;
     const path = typeof query.path === "string" ? query.path : "";
     if (!store.getRun(runId)) {
-      return reply.code(404).send({ error: { code: "run_not_found", message: "Run was not found.", retryable: false } });
+      return reply.code(404).send({
+        error: {
+          code: "run_not_found",
+          message: "Run was not found.",
+          retryable: false,
+        },
+      });
     }
     if (!path || path.length > 1000) {
-      return reply.code(400).send({ error: { code: "invalid_artifact_path", message: "A workspace-relative path is required.", retryable: false } });
+      return reply.code(400).send({
+        error: {
+          code: "invalid_artifact_path",
+          message: "A workspace-relative path is required.",
+          retryable: false,
+        },
+      });
     }
     try {
       return await workspace.readFile(runId, path);
     } catch (error) {
-      const code = error && typeof error === "object" && "code" in error
-        ? String((error as { code?: unknown }).code ?? "artifact_read_failed")
-        : "artifact_read_failed";
+      const code =
+        error && typeof error === "object" && "code" in error
+          ? String((error as { code?: unknown }).code ?? "artifact_read_failed")
+          : "artifact_read_failed";
       const status = code === "file_not_found" ? 404 : 400;
-      return reply.code(status).send({ error: { code, message: error instanceof Error ? error.message : "Artifact could not be read.", retryable: false } });
+      return reply.code(status).send({
+        error: {
+          code,
+          message:
+            error instanceof Error
+              ? error.message
+              : "Artifact could not be read.",
+          retryable: false,
+        },
+      });
     }
   });
 
   app.get("/v1/runs/:runId/events", async (request, reply) => {
     const { runId } = request.params as { runId: string };
     if (!store.getRun(runId))
-      return reply
-        .code(404)
-        .send({
-          error: {
-            code: "run_not_found",
-            message: "Run not found.",
-            retryable: false,
-          },
-        });
+      return reply.code(404).send({
+        error: {
+          code: "run_not_found",
+          message: "Run not found.",
+          retryable: false,
+        },
+      });
     const query = request.query as Record<string, unknown>;
     let afterId: number;
     let limit: number;
@@ -845,15 +966,13 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       );
       limit = parseBoundedInteger(query.limit, 200, 1, 1000);
     } catch {
-      return reply
-        .code(400)
-        .send({
-          error: {
-            code: "invalid_query",
-            message: "Event cursor or limit is outside the allowed range.",
-            retryable: false,
-          },
-        });
+      return reply.code(400).send({
+        error: {
+          code: "invalid_query",
+          message: "Event cursor or limit is outside the allowed range.",
+          retryable: false,
+        },
+      });
     }
     return { data: store.listEvents(runId, afterId, limit) };
   });
@@ -864,29 +983,25 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       .object({ reason: z.string().max(2000).optional() })
       .safeParse(request.body ?? {});
     if (!body.success)
-      return reply
-        .code(400)
-        .send({
-          error: {
-            code: "invalid_request",
-            message: "Cancellation reason is too long.",
-            retryable: false,
-          },
-        });
+      return reply.code(400).send({
+        error: {
+          code: "invalid_request",
+          message: "Cancellation reason is too long.",
+          retryable: false,
+        },
+      });
     try {
       const run = store.cancelRun(runId, body.data.reason);
       worker.cancelRun(runId);
       return { run };
     } catch {
-      return reply
-        .code(404)
-        .send({
-          error: {
-            code: "run_not_found",
-            message: "Run not found.",
-            retryable: false,
-          },
-        });
+      return reply.code(404).send({
+        error: {
+          code: "run_not_found",
+          message: "Run not found.",
+          retryable: false,
+        },
+      });
     }
   });
 
@@ -902,16 +1017,14 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       })
       .safeParse(request.body);
     if (!body.success)
-      return reply
-        .code(400)
-        .send({
-          error: {
-            code: "invalid_request",
-            message:
-              "Approval needs a boolean decision and an optional bounded reason.",
-            retryable: false,
-          },
-        });
+      return reply.code(400).send({
+        error: {
+          code: "invalid_request",
+          message:
+            "Approval needs a boolean decision and an optional bounded reason.",
+          retryable: false,
+        },
+      });
     try {
       return {
         task: store.resolveTaskApproval(
@@ -922,18 +1035,16 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         ),
       };
     } catch (error) {
-      return reply
-        .code(409)
-        .send({
-          error: {
-            code: "approval_conflict",
-            message:
-              error instanceof Error
-                ? error.message
-                : "Task is not awaiting approval.",
-            retryable: false,
-          },
-        });
+      return reply.code(409).send({
+        error: {
+          code: "approval_conflict",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Task is not awaiting approval.",
+          retryable: false,
+        },
+      });
     }
   });
 
@@ -988,9 +1099,14 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         const routed = await router.stream({
           profile: selection.profile,
           ...(selection.preferredProvider
-            ? { preferredProvider: selection.preferredProvider, lockProvider: true }
+            ? {
+                preferredProvider: selection.preferredProvider,
+                lockProvider: true,
+              }
             : {}),
-          ...(selection.providerModel ? { model: selection.providerModel } : {}),
+          ...(selection.providerModel
+            ? { model: selection.providerModel }
+            : {}),
           messages: body.messages,
           maxTokens: body.max_tokens ?? 1024,
           temperature: body.temperature ?? 0.2,
@@ -1010,7 +1126,8 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           .header("x-omnirouter-attempts", String(routed.attempts));
         const raw = reply.raw;
         const onResponseClose = () => {
-          if (!raw.writableEnded) abort.abort(new Error("Streaming client disconnected."));
+          if (!raw.writableEnded)
+            abort.abort(new Error("Streaming client disconnected."));
         };
         raw.once("close", onResponseClose);
         const chunkBase = {
@@ -1019,49 +1136,73 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           created,
           model: body.model,
         };
-        const eventStream = Readable.from((async function* () {
-          const frame = (value: unknown) => "data: " + (value === "[DONE]" ? "[DONE]" : JSON.stringify(value)) + "\n\n";
-          try {
-            yield frame({
-              ...chunkBase,
-              choices: [{ index: 0, delta: { role: "assistant" }, finish_reason: null }],
-            });
-            for await (const chunk of routed.stream) {
-              if (abort.signal.aborted) return;
+        const eventStream = Readable.from(
+          (async function* () {
+            const frame = (value: unknown) =>
+              "data: " +
+              (value === "[DONE]" ? "[DONE]" : JSON.stringify(value)) +
+              "\n\n";
+            try {
               yield frame({
                 ...chunkBase,
-                choices: [{ index: 0, delta: { content: chunk.content }, finish_reason: null }],
+                choices: [
+                  {
+                    index: 0,
+                    delta: { role: "assistant" },
+                    finish_reason: null,
+                  },
+                ],
               });
-            }
-            if (!abort.signal.aborted) {
-              yield frame({
-                ...chunkBase,
-                choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
-              });
-              yield frame("[DONE]");
-            }
-          } catch (streamError) {
-            const error = streamError as { code?: string; retryable?: boolean };
-            request.log.warn(
-              { code: error.code ?? "stream_interrupted", requestId: request.id },
-              "OmniRouter stream ended before completion",
-            );
-            if (!abort.signal.aborted) {
-              yield frame({
-                error: {
+              for await (const chunk of routed.stream) {
+                if (abort.signal.aborted) return;
+                yield frame({
+                  ...chunkBase,
+                  choices: [
+                    {
+                      index: 0,
+                      delta: { content: chunk.content },
+                      finish_reason: null,
+                    },
+                  ],
+                });
+              }
+              if (!abort.signal.aborted) {
+                yield frame({
+                  ...chunkBase,
+                  choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+                });
+                yield frame("[DONE]");
+              }
+            } catch (streamError) {
+              const error = streamError as {
+                code?: string;
+                retryable?: boolean;
+              };
+              request.log.warn(
+                {
                   code: error.code ?? "stream_interrupted",
-                  message: "The model stream ended before completion.",
-                  retryable: error.retryable ?? true,
                   requestId: request.id,
                 },
-              });
-              yield frame("[DONE]");
+                "OmniRouter stream ended before completion",
+              );
+              if (!abort.signal.aborted) {
+                yield frame({
+                  error: {
+                    code: error.code ?? "stream_interrupted",
+                    message: "The model stream ended before completion.",
+                    retryable: error.retryable ?? true,
+                    requestId: request.id,
+                  },
+                });
+                yield frame("[DONE]");
+              }
+            } finally {
+              routed.close();
+              raw.removeListener("close", onResponseClose);
             }
-          } finally {
-            routed.close();
-            raw.removeListener("close", onResponseClose);
-          }
-        })(), { objectMode: false });
+          })(),
+          { objectMode: false },
+        );
         return reply.send(eventStream);
       }
 

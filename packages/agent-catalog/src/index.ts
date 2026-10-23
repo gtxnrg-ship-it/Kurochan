@@ -279,10 +279,18 @@ export class AgentCatalog {
     try {
       parsed = JSON.parse(source) as unknown;
     } catch (error) {
-      throw new Error("Agency NEXUS runbooks file is not valid JSON.", { cause: error });
+      throw new Error("Agency NEXUS runbooks file is not valid JSON.", {
+        cause: error,
+      });
     }
-    if (!parsed || typeof parsed !== "object" || !Array.isArray((parsed as { runbooks?: unknown }).runbooks)) {
-      throw new Error("Agency NEXUS runbooks file must contain a runbooks array.");
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      !Array.isArray((parsed as { runbooks?: unknown }).runbooks)
+    ) {
+      throw new Error(
+        "Agency NEXUS runbooks file must contain a runbooks array.",
+      );
     }
 
     const agents = await this.load();
@@ -296,27 +304,48 @@ export class AgentCatalog {
 
     const runbooks: AgentRunbook[] = [];
     for (const raw of (parsed as { runbooks: unknown[] }).runbooks) {
-      if (!raw || typeof raw !== "object") throw new Error("NEXUS runbook entry must be an object.");
+      if (!raw || typeof raw !== "object")
+        throw new Error("NEXUS runbook entry must be an object.");
       const value = raw as Record<string, unknown>;
       const textFieldValue = (key: string): string => {
         const field = value[key];
-        if (typeof field !== "string" || !field.trim()) throw new Error("NEXUS runbook has a missing or invalid " + key + ".");
+        if (typeof field !== "string" || !field.trim())
+          throw new Error(
+            "NEXUS runbook has a missing or invalid " + key + ".",
+          );
         return field.trim();
       };
-      if (!Array.isArray(value.roster)) throw new Error("NEXUS runbook roster must be an array.");
+      if (!Array.isArray(value.roster))
+        throw new Error("NEXUS runbook roster must be an array.");
       const roster = value.roster.map((rawGroup) => {
-        if (!rawGroup || typeof rawGroup !== "object") throw new Error("NEXUS runbook roster group must be an object.");
+        if (!rawGroup || typeof rawGroup !== "object")
+          throw new Error("NEXUS runbook roster group must be an object.");
         const group = rawGroup as Record<string, unknown>;
-        if (typeof group.group !== "string" || typeof group.activation !== "string" || !Array.isArray(group.agents)) {
+        if (
+          typeof group.group !== "string" ||
+          typeof group.activation !== "string" ||
+          !Array.isArray(group.agents)
+        ) {
           throw new Error("NEXUS runbook roster group has invalid fields.");
         }
         const resolvedAgents = group.agents.map((slug) => {
-          if (typeof slug !== "string" || ambiguous.has(slug) || !idsByStem.has(slug)) {
-            throw new Error("NEXUS runbook references an unknown or ambiguous agent slug: " + String(slug));
+          if (
+            typeof slug !== "string" ||
+            ambiguous.has(slug) ||
+            !idsByStem.has(slug)
+          ) {
+            throw new Error(
+              "NEXUS runbook references an unknown or ambiguous agent slug: " +
+                String(slug),
+            );
           }
           return idsByStem.get(slug)!;
         });
-        return { group: group.group, activation: group.activation, agents: resolvedAgents };
+        return {
+          group: group.group,
+          activation: group.activation,
+          agents: resolvedAgents,
+        };
       });
       runbooks.push({
         slug: textFieldValue("slug"),
@@ -332,8 +361,14 @@ export class AgentCatalog {
   }
 
   async readNexusStrategy(maxCharacters = 24_000): Promise<string> {
-    if (!Number.isInteger(maxCharacters) || maxCharacters < 1000 || maxCharacters > 100_000) {
-      throw new Error("NEXUS strategy character limit must be between 1000 and 100000.");
+    if (
+      !Number.isInteger(maxCharacters) ||
+      maxCharacters < 1000 ||
+      maxCharacters > 100_000
+    ) {
+      throw new Error(
+        "NEXUS strategy character limit must be between 1000 and 100000.",
+      );
     }
     const strategyPath = resolve(this.root, "strategy", "nexus-strategy.md");
     const strategy = await readFile(strategyPath, "utf8");

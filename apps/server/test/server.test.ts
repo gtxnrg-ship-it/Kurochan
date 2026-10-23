@@ -86,7 +86,9 @@ describe("Kuro-chan API", () => {
       defaultModel: "auto",
       isConfigured: true,
       capabilities: { text: true, streaming: true },
-      complete: async (input: ChatCompletionInput): Promise<ChatCompletionOutput> => {
+      complete: async (
+        input: ChatCompletionInput,
+      ): Promise<ChatCompletionOutput> => {
         calls.push(input);
         return {
           providerId: "freellmapi",
@@ -99,15 +101,26 @@ describe("Kuro-chan API", () => {
     app = buildServer({
       env: {},
       providers: {
-        providers: new Map<ProviderId, ChatProvider>([["freellmapi", freellmapi]]),
-        statuses: [{
-          id: "freellmapi",
-          name: "FreeLLMAPI",
-          configured: true,
-          defaultModel: "auto",
-          capabilityNotes: [],
-          capabilities: { text: true, vision: false, tools: false, json: false, streaming: true, reasoning: false },
-        }],
+        providers: new Map<ProviderId, ChatProvider>([
+          ["freellmapi", freellmapi],
+        ]),
+        statuses: [
+          {
+            id: "freellmapi",
+            name: "FreeLLMAPI",
+            configured: true,
+            defaultModel: "auto",
+            capabilityNotes: [],
+            capabilities: {
+              text: true,
+              vision: false,
+              tools: false,
+              json: false,
+              streaming: true,
+              reasoning: false,
+            },
+          },
+        ],
       },
       logger: false,
       store: new RunStore(":memory:"),
@@ -123,10 +136,12 @@ describe("Kuro-chan API", () => {
       model: "auto",
     });
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.messages).toEqual([{
-      role: "user",
-      content: "Reply with the single word connected.",
-    }]);
+    expect(calls[0]?.messages).toEqual([
+      {
+        role: "user",
+        content: "Reply with the single word connected.",
+      },
+    ]);
     expect(response.body).not.toContain("api_key");
   });
 
@@ -165,8 +180,20 @@ describe("Kuro-chan API", () => {
   it("reports live and stale worker heartbeats without leaking worker metadata", async () => {
     const store = new RunStore(":memory:");
     const now = Date.now();
-    store.recordWorkerHeartbeat("worker-live", "busy", "task-123", { service: "kurochan-worker" }, now);
-    store.recordWorkerHeartbeat("worker-stale", "idle", undefined, { service: "kurochan-worker" }, now - 60_000);
+    store.recordWorkerHeartbeat(
+      "worker-live",
+      "busy",
+      "task-123",
+      { service: "kurochan-worker" },
+      now,
+    );
+    store.recordWorkerHeartbeat(
+      "worker-stale",
+      "idle",
+      undefined,
+      { service: "kurochan-worker" },
+      now - 60_000,
+    );
     app = buildServer({
       env: {},
       logger: false,
@@ -302,11 +329,13 @@ describe("Kuro-chan API", () => {
       payload: {
         goal: "Run an unknown specialist",
         profile: "balanced",
-        tasks: [{
-          key: "unknown",
-          agentId: "invented/agent-id",
-          objective: "Perform the task.",
-        }],
+        tasks: [
+          {
+            key: "unknown",
+            agentId: "invented/agent-id",
+            objective: "Perform the task.",
+          },
+        ],
       },
     });
     expect(response.statusCode).toBe(422);
@@ -347,7 +376,14 @@ describe("Kuro-chan API", () => {
     expect(created.statusCode).toBe(201);
     const runId = created.json().run.id as string;
     expect(created.json().tasks).toHaveLength(2);
-    expect(created.json().tasks.some((task: { dependencies: readonly string[] }) => task.dependencies.length === 1)).toBe(true);
+    expect(
+      created
+        .json()
+        .tasks.some(
+          (task: { dependencies: readonly string[] }) =>
+            task.dependencies.length === 1,
+        ),
+    ).toBe(true);
     const events = await app.inject({
       method: "GET",
       url: `/v1/runs/${runId}/events`,
@@ -388,7 +424,11 @@ describe("Kuro-chan API", () => {
     });
     expect(completeCatalog.statusCode).toBe(200);
     expect(completeCatalog.json().data).toHaveLength(282);
-    expect(new Set(completeCatalog.json().data.map((agent: { id: string }) => agent.id)).size).toBe(282);
+    expect(
+      new Set(
+        completeCatalog.json().data.map((agent: { id: string }) => agent.id),
+      ).size,
+    ).toBe(282);
     expect(searched.json().data.length).toBeGreaterThan(0);
     expect(JSON.stringify(searched.json())).not.toContain("Core Mission");
   });
@@ -404,7 +444,8 @@ describe("Kuro-chan API", () => {
       url: "/v1/runs?limit=9999",
     });
     expect(response.statusCode).toBe(400);
-  });  it("streams chat completions through the API using provider SSE chunks", async () => {
+  });
+  it("streams chat completions through the API using provider SSE chunks", async () => {
     const streamingProvider: ChatProvider = {
       id: "openrouter",
       displayName: "Streaming test provider",
@@ -412,18 +453,40 @@ describe("Kuro-chan API", () => {
       isConfigured: true,
       capabilities: { text: true, streaming: true },
       complete: async (): Promise<ChatCompletionOutput> => ({
-        providerId: "openrouter", model: "test-model", content: "unused", latencyMs: 1,
+        providerId: "openrouter",
+        model: "test-model",
+        content: "unused",
+        latencyMs: 1,
       }),
-      stream: async () => (async function* () {
-        yield { content: "hello" };
-        yield { content: " mobile" };
-      })(),
+      stream: async () =>
+        (async function* () {
+          yield { content: "hello" };
+          yield { content: " mobile" };
+        })(),
     };
     app = buildServer({
       env: {},
       providers: {
-        providers: new Map<ProviderId, ChatProvider>([["openrouter", streamingProvider]]),
-        statuses: [{ id: "openrouter", name: "OpenRouter", configured: true, defaultModel: "test-model", capabilityNotes: [], capabilities: { text: true, vision: false, tools: false, json: false, streaming: true, reasoning: false } }],
+        providers: new Map<ProviderId, ChatProvider>([
+          ["openrouter", streamingProvider],
+        ]),
+        statuses: [
+          {
+            id: "openrouter",
+            name: "OpenRouter",
+            configured: true,
+            defaultModel: "test-model",
+            capabilityNotes: [],
+            capabilities: {
+              text: true,
+              vision: false,
+              tools: false,
+              json: false,
+              streaming: true,
+              reasoning: false,
+            },
+          },
+        ],
       },
       logger: false,
       store: new RunStore(":memory:"),
@@ -431,7 +494,11 @@ describe("Kuro-chan API", () => {
     const response = await app.inject({
       method: "POST",
       url: "/v1/chat/completions",
-      payload: { model: "openrouter/test-model", messages: [{ role: "user", content: "hello" }], stream: true },
+      payload: {
+        model: "openrouter/test-model",
+        messages: [{ role: "user", content: "hello" }],
+        stream: true,
+      },
     });
     expect(response.statusCode).toBe(200);
     expect(response.headers["content-type"]).toContain("text/event-stream");
@@ -449,14 +516,35 @@ describe("Kuro-chan API", () => {
       isConfigured: true,
       capabilities: { text: true, streaming: false },
       complete: async (): Promise<ChatCompletionOutput> => ({
-        providerId: "openrouter", model: "test-model", content: "unused", latencyMs: 1,
+        providerId: "openrouter",
+        model: "test-model",
+        content: "unused",
+        latencyMs: 1,
       }),
     };
     app = buildServer({
       env: {},
       providers: {
-        providers: new Map<ProviderId, ChatProvider>([["openrouter", ordinaryProvider]]),
-        statuses: [{ id: "openrouter", name: "OpenRouter", configured: true, defaultModel: "test-model", capabilityNotes: [], capabilities: { text: true, vision: false, tools: false, json: false, streaming: false, reasoning: false } }],
+        providers: new Map<ProviderId, ChatProvider>([
+          ["openrouter", ordinaryProvider],
+        ]),
+        statuses: [
+          {
+            id: "openrouter",
+            name: "OpenRouter",
+            configured: true,
+            defaultModel: "test-model",
+            capabilityNotes: [],
+            capabilities: {
+              text: true,
+              vision: false,
+              tools: false,
+              json: false,
+              streaming: false,
+              reasoning: false,
+            },
+          },
+        ],
       },
       logger: false,
       store: new RunStore(":memory:"),
@@ -464,9 +552,15 @@ describe("Kuro-chan API", () => {
     const response = await app.inject({
       method: "POST",
       url: "/v1/chat/completions",
-      payload: { model: "openrouter/test-model", messages: [{ role: "user", content: "hello" }], stream: true },
+      payload: {
+        model: "openrouter/test-model",
+        messages: [{ role: "user", content: "hello" }],
+        stream: true,
+      },
     });
     expect(response.statusCode).toBe(503);
-    expect(response.json()).toMatchObject({ error: { code: "no_provider_available" } });
+    expect(response.json()).toMatchObject({
+      error: { code: "no_provider_available" },
+    });
   });
 });

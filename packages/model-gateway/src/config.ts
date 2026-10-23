@@ -76,8 +76,7 @@ export function createProviderRegistry(
       id: "freellmapi" as const,
       key: env.FREELLMAPI_API_KEY?.trim(),
       model: env.FREELLMAPI_MODEL?.trim() || "auto",
-      baseUrl:
-        env.FREELLMAPI_BASE_URL?.trim() || "http://127.0.0.1:3001/v1",
+      baseUrl: env.FREELLMAPI_BASE_URL?.trim() || "http://127.0.0.1:3001/v1",
       capabilityPrefix: "FREELLMAPI",
       defaultCapabilities: ["streaming"] as const,
       extraHeaders: {},
@@ -97,7 +96,11 @@ export function createProviderRegistry(
           baseUrl: spec.baseUrl,
           apiKey: spec.key,
           defaultModel: spec.model,
-          capabilities: capabilitiesFromEnvironment(env, spec.capabilityPrefix, "defaultCapabilities" in spec ? spec.defaultCapabilities : []),
+          capabilities: capabilitiesFromEnvironment(
+            env,
+            spec.capabilityPrefix,
+            "defaultCapabilities" in spec ? spec.defaultCapabilities : [],
+          ),
           extraHeaders: spec.extraHeaders,
         });
       } catch (error) {

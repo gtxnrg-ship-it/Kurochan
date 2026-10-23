@@ -51,7 +51,9 @@ describe("GitHubResearchRuntime", () => {
   });
 
   it("rejects traversal paths before making a network request", async () => {
-    const fetchImpl = vi.fn(async () => jsonResponse({})) as unknown as typeof fetch;
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({}),
+    ) as unknown as typeof fetch;
     const runtime = new GitHubResearchRuntime({ fetchImpl });
 
     const result = await runtime.execute({
@@ -90,7 +92,9 @@ describe("GitHubResearchRuntime", () => {
       content: Buffer.from("x".repeat(50_001)).toString("base64"),
       html_url: "https://github.com/acme/portfolio/blob/main/large.txt",
     };
-    const fetchImpl = vi.fn(async () => jsonResponse(body)) as unknown as typeof fetch;
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse(body),
+    ) as unknown as typeof fetch;
     const runtime = new GitHubResearchRuntime({ fetchImpl });
 
     const result = await runtime.execute({

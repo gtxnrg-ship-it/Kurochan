@@ -176,17 +176,40 @@ describe("RunStore", () => {
   it("renews only a valid worker lease and blocks writes after expiry", () => {
     const store = makeStore();
     try {
-      const run = store.createRun({
-        goal: "Keep a long task alive",
-        profile: "balanced",
-        tasks: [{ key: "long-task", agentId: "builder", objective: "Run for a while" }],
-      }, 100);
-      const task = store.claimNextTask("worker-a", { now: 100, leaseMs: 1000 })!;
-      expect(store.renewTaskLease(run.id, task.id, "worker-a", 1000, 900)).toBe(1900);
-      expect(() => store.renewTaskLease(run.id, task.id, "worker-b", 1000, 901)).toThrow(/lease/);
-      expect(() => store.completeTask(run.id, task.id, "worker-a", {}, [], 1900)).toThrow(/lease/);
-      expect(store.renewTaskLease(run.id, task.id, "worker-a", 1000, 1500)).toBe(2500);
-      expect(store.completeTask(run.id, task.id, "worker-a", { ok: true }, [], 1600).status).toBe("succeeded");
+      const run = store.createRun(
+        {
+          goal: "Keep a long task alive",
+          profile: "balanced",
+          tasks: [
+            {
+              key: "long-task",
+              agentId: "builder",
+              objective: "Run for a while",
+            },
+          ],
+        },
+        100,
+      );
+      const task = store.claimNextTask("worker-a", {
+        now: 100,
+        leaseMs: 1000,
+      })!;
+      expect(store.renewTaskLease(run.id, task.id, "worker-a", 1000, 900)).toBe(
+        1900,
+      );
+      expect(() =>
+        store.renewTaskLease(run.id, task.id, "worker-b", 1000, 901),
+      ).toThrow(/lease/);
+      expect(() =>
+        store.completeTask(run.id, task.id, "worker-a", {}, [], 1900),
+      ).toThrow(/lease/);
+      expect(
+        store.renewTaskLease(run.id, task.id, "worker-a", 1000, 1500),
+      ).toBe(2500);
+      expect(
+        store.completeTask(run.id, task.id, "worker-a", { ok: true }, [], 1600)
+          .status,
+      ).toBe("succeeded");
     } finally {
       store.close();
     }

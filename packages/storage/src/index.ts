@@ -301,9 +301,12 @@ export class RunStore {
     if (!["idle", "busy", "waiting_for_approval", "stopping"].includes(state)) {
       throw new Error("Unknown worker state.");
     }
-    if (currentTaskId !== undefined) assertText(currentTaskId, "currentTaskId", 200);
+    if (currentTaskId !== undefined)
+      assertText(currentTaskId, "currentTaskId", 200);
     const metadataJson = encodeJson(metadata);
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       INSERT INTO worker_heartbeats(worker_id,state,current_task_id,metadata_json,started_at,last_seen_at)
       VALUES(?,?,?,?,?,?)
       ON CONFLICT(worker_id) DO UPDATE SET
@@ -311,18 +314,33 @@ export class RunStore {
         current_task_id=excluded.current_task_id,
         metadata_json=excluded.metadata_json,
         last_seen_at=excluded.last_seen_at
-    `).run(workerId, state, currentTaskId ?? null, metadataJson, now, now);
+    `,
+      )
+      .run(workerId, state, currentTaskId ?? null, metadataJson, now, now);
   }
 
-  listWorkerHeartbeats(now = Date.now(), staleAfterMs = 30_000): readonly WorkerHeartbeatRecord[] {
-    if (!Number.isInteger(staleAfterMs) || staleAfterMs < 1000 || staleAfterMs > 600_000) {
+  listWorkerHeartbeats(
+    now = Date.now(),
+    staleAfterMs = 30_000,
+  ): readonly WorkerHeartbeatRecord[] {
+    if (
+      !Number.isInteger(staleAfterMs) ||
+      staleAfterMs < 1000 ||
+      staleAfterMs > 600_000
+    ) {
       throw new Error("staleAfterMs must be between 1000 and 600000.");
     }
-    const rows = this.db.prepare(
-      "SELECT worker_id,state,current_task_id,metadata_json,started_at,last_seen_at FROM worker_heartbeats ORDER BY last_seen_at DESC",
-    ).all() as Array<{
-      worker_id: string; state: WorkerState; current_task_id: string | null;
-      metadata_json: string; started_at: number; last_seen_at: number;
+    const rows = this.db
+      .prepare(
+        "SELECT worker_id,state,current_task_id,metadata_json,started_at,last_seen_at FROM worker_heartbeats ORDER BY last_seen_at DESC",
+      )
+      .all() as Array<{
+      worker_id: string;
+      state: WorkerState;
+      current_task_id: string | null;
+      metadata_json: string;
+      started_at: number;
+      last_seen_at: number;
     }>;
     return rows.map((row) => ({
       workerId: row.worker_id,
@@ -618,9 +636,11 @@ export class RunStore {
       throw new Error("leaseMs must be between 1000 and 600000.");
     }
     const leaseExpiresAt = now + leaseMs;
-    const updated = this.db.prepare(
-      "UPDATE tasks SET lease_expires_at=?,updated_at=? WHERE id=? AND run_id=? AND status='running' AND lease_owner=? AND lease_expires_at > ?",
-    ).run(leaseExpiresAt, now, taskId, runId, workerId, now);
+    const updated = this.db
+      .prepare(
+        "UPDATE tasks SET lease_expires_at=?,updated_at=? WHERE id=? AND run_id=? AND status='running' AND lease_owner=? AND lease_expires_at > ?",
+      )
+      .run(leaseExpiresAt, now, taskId, runId, workerId, now);
     if (updated.changes !== 1) {
       throw new Error("Task lease is no longer valid for this worker.");
     }
@@ -649,7 +669,9 @@ export class RunStore {
         task.lease_expires_at === null ||
         task.lease_expires_at <= now
       ) {
-        throw new Error("Task lease is not owned by this worker or has expired.");
+        throw new Error(
+          "Task lease is not owned by this worker or has expired.",
+        );
       }
       this.db
         .prepare(

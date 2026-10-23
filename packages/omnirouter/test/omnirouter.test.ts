@@ -211,15 +211,23 @@ describe("OmniRouter", () => {
     const firstStream = vi.fn(async () => {
       throw new ProviderError("rate_limited", "limited", { retryable: true });
     });
-    const secondStream = vi.fn(async () => (async function* () {
-      yield { content: "streamed" };
-    })());
+    const secondStream = vi.fn(async () =>
+      (async function* () {
+        yield { content: "streamed" };
+      })(),
+    );
     const first = {
-      ...provider("openrouter", vi.fn(success), { text: true, streaming: true }),
+      ...provider("openrouter", vi.fn(success), {
+        text: true,
+        streaming: true,
+      }),
       stream: firstStream,
     };
     const second = {
-      ...provider("freellmapi", vi.fn(success), { text: true, streaming: true }),
+      ...provider("freellmapi", vi.fn(success), {
+        text: true,
+        streaming: true,
+      }),
       stream: secondStream,
     };
     const router = new OmniRouter({
@@ -241,16 +249,24 @@ describe("OmniRouter", () => {
     expect(firstStream).toHaveBeenCalledOnce();
     expect(secondStream).toHaveBeenCalledOnce();
     expect(routed.providerId).toBe("freellmapi");
-    expect(routed.providerErrors).toEqual([{ providerId: "openrouter", code: "rate_limited" }]);
+    expect(routed.providerErrors).toEqual([
+      { providerId: "openrouter", code: "rate_limited" },
+    ]);
   });
 
   it("rejects streaming when no configured provider advertises streaming", async () => {
-    const ordinary = provider("openrouter", vi.fn(success), { text: true, streaming: false });
-    const router = new OmniRouter({ providers: new Map([["openrouter", ordinary]]) });
-    await expect(router.stream({
-      profile: "balanced",
-      messages: [{ role: "user", content: "test" }],
-    })).rejects.toMatchObject({ code: "no_provider_available" });
+    const ordinary = provider("openrouter", vi.fn(success), {
+      text: true,
+      streaming: false,
+    });
+    const router = new OmniRouter({
+      providers: new Map([["openrouter", ordinary]]),
+    });
+    await expect(
+      router.stream({
+        profile: "balanced",
+        messages: [{ role: "user", content: "test" }],
+      }),
+    ).rejects.toMatchObject({ code: "no_provider_available" });
   });
-
 });

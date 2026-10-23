@@ -4,7 +4,11 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { AgentCatalog } from "@kurochan/agent-catalog";
 import type { ProviderId } from "@kurochan/contracts";
-import type { ChatCompletionInput, ChatCompletionOutput, ChatProvider } from "@kurochan/model-gateway";
+import type {
+  ChatCompletionInput,
+  ChatCompletionOutput,
+  ChatProvider,
+} from "@kurochan/model-gateway";
 import { OmniRouter } from "@kurochan/omnirouter";
 import { RunStore } from "@kurochan/storage";
 import { TaskWorker } from "../src/worker.js";
@@ -12,21 +16,27 @@ import { WorkspaceRuntime } from "../src/workspace.js";
 
 const created: string[] = [];
 afterEach(async () => {
-  await Promise.all(created.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+  await Promise.all(
+    created.splice(0).map((path) => rm(path, { recursive: true, force: true })),
+  );
 });
 
 async function fakeCatalogRoot(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "kuro-agents-"));
   created.push(root);
   await mkdir(join(root, "engineering"), { recursive: true });
-  await writeFile(join(root, "engineering", "engineering-test-agent.md"), [
-    "---",
-    "name: Test Engineer",
-    "description: Writes and verifies project files",
-    "tools: [workspace]",
-    "---",
-    "You are a test engineer. Produce concrete files in the scoped workspace.",
-  ].join("\n"), "utf8");
+  await writeFile(
+    join(root, "engineering", "engineering-test-agent.md"),
+    [
+      "---",
+      "name: Test Engineer",
+      "description: Writes and verifies project files",
+      "tools: [workspace]",
+      "---",
+      "You are a test engineer. Produce concrete files in the scoped workspace.",
+    ].join("\n"),
+    "utf8",
+  );
   return root;
 }
 
@@ -46,11 +56,19 @@ describe("WorkspaceRuntime", () => {
     created.push(root);
     const runtime = new WorkspaceRuntime({ root: resolve(root) });
     const runId = "799f3f6a-a5f0-4f0f-876c-42347e0e183b";
-    const written = await runtime.writeFile(runId, "src/index.ts", "export const answer = 42;\n");
+    const written = await runtime.writeFile(
+      runId,
+      "src/index.ts",
+      "export const answer = 42;\n",
+    );
     expect(written.path).toBe("src/index.ts");
-    expect((await runtime.readFile(runId, "src/index.ts")).content).toContain("42");
+    expect((await runtime.readFile(runId, "src/index.ts")).content).toContain(
+      "42",
+    );
     expect((await runtime.searchText(runId, "answer")).length).toBe(1);
-    expect((await runtime.listFiles(runId)).map((file) => file.path)).toContain("src/index.ts");
+    expect((await runtime.listFiles(runId)).map((file) => file.path)).toContain(
+      "src/index.ts",
+    );
   });
 
   it("rejects traversal, absolute paths and symbolic links", async () => {
@@ -58,12 +76,20 @@ describe("WorkspaceRuntime", () => {
     created.push(root);
     const runtime = new WorkspaceRuntime({ root: resolve(root) });
     const runId = "e3eb00b5-1a04-4d0a-a523-3bf5f1151e5f";
-    await expect(runtime.writeFile(runId, "../escape.txt", "no")).rejects.toMatchObject({ code: "invalid_path" });
-    await expect(runtime.writeFile(runId, "/tmp/escape.txt", "no")).rejects.toMatchObject({ code: "invalid_path" });
+    await expect(
+      runtime.writeFile(runId, "../escape.txt", "no"),
+    ).rejects.toMatchObject({ code: "invalid_path" });
+    await expect(
+      runtime.writeFile(runId, "/tmp/escape.txt", "no"),
+    ).rejects.toMatchObject({ code: "invalid_path" });
     await runtime.writeFile(runId, "safe.txt", "safe");
     const runDirectory = runtime.runDirectory(runId);
-    await (await import("node:fs/promises")).symlink("/tmp", join(runDirectory, "link"));
-    await expect(runtime.readFile(runId, "link/something")).rejects.toMatchObject({ code: "unsafe_path" });
+    await (
+      await import("node:fs/promises")
+    ).symlink("/tmp", join(runDirectory, "link"));
+    await expect(
+      runtime.readFile(runId, "link/something"),
+    ).rejects.toMatchObject({ code: "unsafe_path" });
   });
 });
 
@@ -79,48 +105,96 @@ describe("TaskWorker", () => {
         id: runId,
         goal: "Create a small TypeScript module",
         profile: "balanced",
-        tasks: [{ key: "build-module", agentId: "engineering/engineering-test-agent", objective: "Create src/index.ts with answer = 42." }],
+        tasks: [
+          {
+            key: "build-module",
+            agentId: "engineering/engineering-test-agent",
+            objective: "Create src/index.ts with answer = 42.",
+          },
+        ],
       });
       let toolRequestSent = false;
-      const fakeProvider = provider(async (input: ChatCompletionInput): Promise<ChatCompletionOutput> => {
-        const system = input.systemPrompt ?? "";
-        let content: string;
-        if (system.includes("independent consistency reviewer")) {
-          content = JSON.stringify({
-            passed: true,
-            summary: "Task output is consistent with the goal.",
-            checks: [{ name: "Expected file exists in workspace output", passed: true, notes: "Worker created a file using the scoped write tool." }],
-            blockers: [],
-          });
-        } else if (!toolRequestSent) {
-          toolRequestSent = true;
-          content = JSON.stringify({
-            status: "tool_calls", summary: "Write the module.", toolCalls: [{
-              name: "workspace.write_file",
-              arguments: { path: "src/index.ts", content: "export const answer = 42;\n", overwrite: true },
-            }], evidence: [],
-          });
-        } else {
-          content = JSON.stringify({
-            status: "completed",
-            summary: "Created src/index.ts.",
-            toolCalls: [],
-            evidence: [{ kind: "artifact", summary: "TypeScript file created in the run workspace.", uri: "workspace://" + runId + "/src/index.ts" }],
-          });
-        }
-        return { providerId: "openrouter", model: "test-model", content, latencyMs: 2 };
+      const fakeProvider = provider(
+        async (input: ChatCompletionInput): Promise<ChatCompletionOutput> => {
+          const system = input.systemPrompt ?? "";
+          let content: string;
+          if (system.includes("independent consistency reviewer")) {
+            content = JSON.stringify({
+              passed: true,
+              summary: "Task output is consistent with the goal.",
+              checks: [
+                {
+                  name: "Expected file exists in workspace output",
+                  passed: true,
+                  notes: "Worker created a file using the scoped write tool.",
+                },
+              ],
+              blockers: [],
+            });
+          } else if (!toolRequestSent) {
+            toolRequestSent = true;
+            content = JSON.stringify({
+              status: "tool_calls",
+              summary: "Write the module.",
+              toolCalls: [
+                {
+                  name: "workspace.write_file",
+                  arguments: {
+                    path: "src/index.ts",
+                    content: "export const answer = 42;\n",
+                    overwrite: true,
+                  },
+                },
+              ],
+              evidence: [],
+            });
+          } else {
+            content = JSON.stringify({
+              status: "completed",
+              summary: "Created src/index.ts.",
+              toolCalls: [],
+              evidence: [
+                {
+                  kind: "artifact",
+                  summary: "TypeScript file created in the run workspace.",
+                  uri: "workspace://" + runId + "/src/index.ts",
+                },
+              ],
+            });
+          }
+          return {
+            providerId: "openrouter",
+            model: "test-model",
+            content,
+            latencyMs: 2,
+          };
+        },
+      );
+      const router = new OmniRouter({
+        providers: new Map<ProviderId, ChatProvider>([
+          ["openrouter", fakeProvider],
+        ]),
       });
-      const router = new OmniRouter({ providers: new Map<ProviderId, ChatProvider>([["openrouter", fakeProvider]]) });
-      const worker = new TaskWorker({ store, catalog: new AgentCatalog(catalogRoot), router, workspaceRoot: resolve(workspaceRoot), pollIntervalMs: 100 });
+      const worker = new TaskWorker({
+        store,
+        catalog: new AgentCatalog(catalogRoot),
+        router,
+        workspaceRoot: resolve(workspaceRoot),
+        pollIntervalMs: 100,
+      });
       const result = await worker.runOnce();
       expect(result.kind).toBe("completed");
-      expect(await readFile(join(workspaceRoot, runId, "src/index.ts"), "utf8")).toContain("answer = 42");
+      expect(
+        await readFile(join(workspaceRoot, runId, "src/index.ts"), "utf8"),
+      ).toContain("answer = 42");
       expect(store.getRun(runId)?.status).toBe("completed");
-      expect(JSON.stringify(store.getRun(runId)?.output)).toContain("executionTestsRun");
+      expect(JSON.stringify(store.getRun(runId)?.output)).toContain(
+        "executionTestsRun",
+      );
     } finally {
       store.close();
     }
-  });  
+  });
   it("cancels an in-flight model request when the run is cancelled", async () => {
     const catalogRoot = await fakeCatalogRoot();
     const workspaceRoot = await mkdtemp(join(tmpdir(), "kuro-workspaces-"));
@@ -132,29 +206,40 @@ describe("TaskWorker", () => {
         id: runId,
         goal: "Cancel a long-running task",
         profile: "balanced",
-        tasks: [{
-          key: "long-task",
-          agentId: "engineering/engineering-test-agent",
-          objective: "Wait for the current inference call to finish.",
-        }],
+        tasks: [
+          {
+            key: "long-task",
+            agentId: "engineering/engineering-test-agent",
+            objective: "Wait for the current inference call to finish.",
+          },
+        ],
       });
       let markStarted: (() => void) | undefined;
       const inferenceStarted = new Promise<void>((resolveStarted) => {
         markStarted = resolveStarted;
       });
-      const fakeProvider = provider(async (input: ChatCompletionInput): Promise<ChatCompletionOutput> => {
-        markStarted?.();
-        return await new Promise<ChatCompletionOutput>((_resolve, reject) => {
-          const cancel = () => reject(Object.assign(new Error("Inference cancelled."), { code: "cancelled" }));
-          if (input.signal?.aborted) {
-            cancel();
-            return;
-          }
-          input.signal?.addEventListener("abort", cancel, { once: true });
-        });
-      });
+      const fakeProvider = provider(
+        async (input: ChatCompletionInput): Promise<ChatCompletionOutput> => {
+          markStarted?.();
+          return await new Promise<ChatCompletionOutput>((_resolve, reject) => {
+            const cancel = () =>
+              reject(
+                Object.assign(new Error("Inference cancelled."), {
+                  code: "cancelled",
+                }),
+              );
+            if (input.signal?.aborted) {
+              cancel();
+              return;
+            }
+            input.signal?.addEventListener("abort", cancel, { once: true });
+          });
+        },
+      );
       const router = new OmniRouter({
-        providers: new Map<ProviderId, ChatProvider>([["openrouter", fakeProvider]]),
+        providers: new Map<ProviderId, ChatProvider>([
+          ["openrouter", fakeProvider],
+        ]),
       });
       const worker = new TaskWorker({
         store,
@@ -190,53 +275,70 @@ describe("TaskWorker", () => {
         id: runId,
         goal: "Run the project's tests",
         profile: "balanced",
-        tasks: [{
-          key: "test",
-          agentId: "engineering/engineering-test-agent",
-          objective: "Run npm test and report its exit status.",
-        }],
+        tasks: [
+          {
+            key: "test",
+            agentId: "engineering/engineering-test-agent",
+            objective: "Run npm test and report its exit status.",
+          },
+        ],
       });
       let toolRequested = false;
-      const fakeProvider = provider(async (input: ChatCompletionInput): Promise<ChatCompletionOutput> => {
-        if ((input.systemPrompt ?? "").includes("independent consistency reviewer")) {
+      const fakeProvider = provider(
+        async (input: ChatCompletionInput): Promise<ChatCompletionOutput> => {
+          if (
+            (input.systemPrompt ?? "").includes(
+              "independent consistency reviewer",
+            )
+          ) {
+            return {
+              providerId: "openrouter",
+              model: "test-model",
+              content: JSON.stringify({
+                passed: true,
+                summary:
+                  "The task output matches the observed sandbox evidence.",
+                checks: [
+                  {
+                    name: "Command evidence is present",
+                    passed: true,
+                    notes: "A real sandbox adapter returned exit code 0.",
+                  },
+                ],
+                blockers: [],
+              }),
+              latencyMs: 1,
+            };
+          }
+          if (!toolRequested) {
+            toolRequested = true;
+            return {
+              providerId: "openrouter",
+              model: "test-model",
+              content: JSON.stringify({
+                status: "tool_calls",
+                summary: "Run the test suite.",
+                toolCalls: [
+                  { name: "sandbox.run", arguments: { command: "npm test" } },
+                ],
+                evidence: [],
+              }),
+              latencyMs: 1,
+            };
+          }
           return {
             providerId: "openrouter",
             model: "test-model",
             content: JSON.stringify({
-              passed: true,
-              summary: "The task output matches the observed sandbox evidence.",
-              checks: [{ name: "Command evidence is present", passed: true, notes: "A real sandbox adapter returned exit code 0." }],
-              blockers: [],
-            }),
-            latencyMs: 1,
-          };
-        }
-        if (!toolRequested) {
-          toolRequested = true;
-          return {
-            providerId: "openrouter",
-            model: "test-model",
-            content: JSON.stringify({
-              status: "tool_calls",
-              summary: "Run the test suite.",
-              toolCalls: [{ name: "sandbox.run", arguments: { command: "npm test" } }],
+              status: "completed",
+              summary: "npm test exited successfully in the sandbox.",
+              toolCalls: [],
               evidence: [],
             }),
             latencyMs: 1,
           };
-        }
-        return {
-          providerId: "openrouter",
-          model: "test-model",
-          content: JSON.stringify({
-            status: "completed",
-            summary: "npm test exited successfully in the sandbox.",
-            toolCalls: [],
-            evidence: [],
-          }),
-          latencyMs: 1,
-        };
-      });
+        },
+      );
       const execute = vi.fn(async (_runId: string, input: unknown) => {
         expect(input).toMatchObject({ command: "npm test" });
         return {
@@ -255,7 +357,9 @@ describe("TaskWorker", () => {
         };
       });
       const router = new OmniRouter({
-        providers: new Map<ProviderId, ChatProvider>([["openrouter", fakeProvider]]),
+        providers: new Map<ProviderId, ChatProvider>([
+          ["openrouter", fakeProvider],
+        ]),
       });
       const worker = new TaskWorker({
         store,
@@ -268,11 +372,14 @@ describe("TaskWorker", () => {
       expect(result.kind).toBe("completed");
       expect(execute).toHaveBeenCalledOnce();
       const task = store.listTasks(runId)[0]!;
-      expect(task.evidence.some((item) => item.kind === "sandbox_execution")).toBe(true);
-      expect(store.getRun(runId)?.output).toMatchObject({ executionTestsRun: true });
+      expect(
+        task.evidence.some((item) => item.kind === "sandbox_execution"),
+      ).toBe(true);
+      expect(store.getRun(runId)?.output).toMatchObject({
+        executionTestsRun: true,
+      });
     } finally {
       store.close();
     }
   });
-
 });

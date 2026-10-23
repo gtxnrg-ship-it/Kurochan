@@ -90,24 +90,33 @@ function contentFrom(data: unknown): string | undefined {
 function streamDeltaFrom(value: unknown): string | undefined {
   if (!value || typeof value !== "object") return undefined;
   const choices = (value as { choices?: unknown }).choices;
-  if (!Array.isArray(choices) || !choices[0] || typeof choices[0] !== "object") return undefined;
+  if (!Array.isArray(choices) || !choices[0] || typeof choices[0] !== "object")
+    return undefined;
   const delta = (choices[0] as { delta?: unknown }).delta;
   if (!delta || typeof delta !== "object") return undefined;
   const content = (delta as { content?: unknown }).content;
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
-    const text = content.flatMap((part: unknown) => {
-      if (!part || typeof part !== "object") return [];
-      const item = part as { type?: unknown; text?: unknown };
-      return item.type === "text" && typeof item.text === "string" ? [item.text] : [];
-    }).join("");
+    const text = content
+      .flatMap((part: unknown) => {
+        if (!part || typeof part !== "object") return [];
+        const item = part as { type?: unknown; text?: unknown };
+        return item.type === "text" && typeof item.text === "string"
+          ? [item.text]
+          : [];
+      })
+      .join("");
     return text || undefined;
   }
   return undefined;
 }
 
-function parseStreamEvent(event: string): { done: boolean; chunks: ChatCompletionStreamChunk[] } {
-  const data = event.split(/\r?\n/)
+function parseStreamEvent(event: string): {
+  done: boolean;
+  chunks: ChatCompletionStreamChunk[];
+} {
+  const data = event
+    .split(/\r?\n/)
     .filter((line) => line.startsWith("data:"))
     .map((line) => line.slice(5).replace(/^ /, ""))
     .join("\n")
@@ -118,7 +127,11 @@ function parseStreamEvent(event: string): { done: boolean; chunks: ChatCompletio
   try {
     payload = JSON.parse(data) as unknown;
   } catch (error) {
-    throw new ProviderError("invalid_response", "Provider returned a malformed streaming event.", { cause: error });
+    throw new ProviderError(
+      "invalid_response",
+      "Provider returned a malformed streaming event.",
+      { cause: error },
+    );
   }
   const content = streamDeltaFrom(payload);
   return { done: false, chunks: content ? [{ content }] : [] };
@@ -237,25 +250,53 @@ export class OpenAICompatibleChatProvider implements ChatProvider {
     }
   }
 
-  async stream(input: ChatCompletionInput): Promise<AsyncIterable<ChatCompletionStreamChunk>> {
+  async stream(
+    input: ChatCompletionInput,
+  ): Promise<AsyncIterable<ChatCompletionStreamChunk>> {
     if (!this.apiKey) {
-      throw new ProviderError("not_configured", `${this.displayName} is missing its server-side API key.`);
+      throw new ProviderError(
+        "not_configured",
+        `${this.displayName} is missing its server-side API key.`,
+      );
     }
     const model = input.model?.trim() || this.defaultModel;
-    if (!model) throw new ProviderError("not_configured", `${this.displayName} has no model configured.`);
-    const requiredCapabilities: readonly Capability[] = input.requiredCapabilities ?? ["text", "streaming"];
-    const missingCapability = requiredCapabilities.find((capability) => !this.capabilities[capability]);
+    if (!model)
+      throw new ProviderError(
+        "not_configured",
+        `${this.displayName} has no model configured.`,
+      );
+    const requiredCapabilities: readonly Capability[] =
+      input.requiredCapabilities ?? ["text", "streaming"];
+    const missingCapability = requiredCapabilities.find(
+      (capability) => !this.capabilities[capability],
+    );
     if (missingCapability) {
-      throw new ProviderError("upstream_rejected", `${this.displayName} is not configured for the required ${missingCapability} capability.`);
+      throw new ProviderError(
+        "upstream_rejected",
+        `${this.displayName} is not configured for the required ${missingCapability} capability.`,
+      );
     }
-    if (input.messages.length === 0) throw new ProviderError("invalid_response", "At least one chat message is required.");
+    if (input.messages.length === 0)
+      throw new ProviderError(
+        "invalid_response",
+        "At least one chat message is required.",
+      );
 
     const messages = [
-      ...(input.systemPrompt?.trim() ? [{ role: "system", content: input.systemPrompt.trim() }] : []),
-      ...input.messages.map((message) => ({ role: message.role, content: message.content })),
+      ...(input.systemPrompt?.trim()
+        ? [{ role: "system", content: input.systemPrompt.trim() }]
+        : []),
+      ...input.messages.map((message) => ({
+        role: message.role,
+        content: message.content,
+      })),
     ];
-    const timeoutSignal = AbortSignal.timeout(Math.min(input.timeoutMs ?? this.timeoutMs, this.timeoutMs));
-    const signal = input.signal ? AbortSignal.any([input.signal, timeoutSignal]) : timeoutSignal;
+    const timeoutSignal = AbortSignal.timeout(
+      Math.min(input.timeoutMs ?? this.timeoutMs, this.timeoutMs),
+    );
+    const signal = input.signal
+      ? AbortSignal.any([input.signal, timeoutSignal])
+      : timeoutSignal;
     let response: Response;
     try {
       response = await this.fetchImpl(`${this.endpoint}/chat/completions`, {
@@ -276,22 +317,65 @@ export class OpenAICompatibleChatProvider implements ChatProvider {
         signal,
       });
     } catch (error) {
-      if (input.signal?.aborted) throw new ProviderError("cancelled", "The model request was cancelled.", { cause: error });
-      if (timeoutSignal.aborted) throw new ProviderError("timeout", `${this.displayName} exceeded the request deadline.`, { retryable: true, cause: error });
-      throw new ProviderError("upstream_unavailable", `${this.displayName} could not be reached.`, { retryable: true, cause: error });
+      if (input.signal?.aborted)
+        throw new ProviderError(
+          "cancelled",
+          "The model request was cancelled.",
+          { cause: error },
+        );
+      if (timeoutSignal.aborted)
+        throw new ProviderError(
+          "timeout",
+          `${this.displayName} exceeded the request deadline.`,
+          { retryable: true, cause: error },
+        );
+      throw new ProviderError(
+        "upstream_unavailable",
+        `${this.displayName} could not be reached.`,
+        { retryable: true, cause: error },
+      );
     }
     if (!response.ok) {
-      if (response.status === 429) throw new ProviderError("rate_limited", `${this.displayName} rate-limited the request.`, { retryable: true, statusCode: 429 });
-      if (response.status === 408 || response.status >= 500) throw new ProviderError("upstream_unavailable", `${this.displayName} returned an upstream error.`, { retryable: true, statusCode: response.status });
-      throw new ProviderError("upstream_rejected", `${this.displayName} rejected the request (HTTP ${response.status}).`, { statusCode: response.status });
+      if (response.status === 429)
+        throw new ProviderError(
+          "rate_limited",
+          `${this.displayName} rate-limited the request.`,
+          { retryable: true, statusCode: 429 },
+        );
+      if (response.status === 408 || response.status >= 500)
+        throw new ProviderError(
+          "upstream_unavailable",
+          `${this.displayName} returned an upstream error.`,
+          { retryable: true, statusCode: response.status },
+        );
+      throw new ProviderError(
+        "upstream_rejected",
+        `${this.displayName} rejected the request (HTTP ${response.status}).`,
+        { statusCode: response.status },
+      );
     }
-    if (!response.body) throw new ProviderError("invalid_response", "Provider returned an empty streaming response.");
+    if (!response.body)
+      throw new ProviderError(
+        "invalid_response",
+        "Provider returned an empty streaming response.",
+      );
     const contentType = response.headers.get("content-type");
-    if (contentType && !contentType.toLowerCase().includes("text/event-stream")) {
-      throw new ProviderError("invalid_response", "Provider did not return a server-sent event stream.");
+    if (
+      contentType &&
+      !contentType.toLowerCase().includes("text/event-stream")
+    ) {
+      throw new ProviderError(
+        "invalid_response",
+        "Provider did not return a server-sent event stream.",
+      );
     }
     const startedAt = Date.now();
-    return this.parseStream(response.body, input.signal, timeoutSignal, startedAt);
+    return this.parseStream(
+      response.body,
+      input.signal,
+      timeoutSignal,
+      startedAt,
+    );
   }
 
   private async *parseStream(
@@ -308,20 +392,43 @@ export class OpenAICompatibleChatProvider implements ChatProvider {
     let receivedDone = false;
     try {
       while (true) {
-        if (signal?.aborted) throw new ProviderError("cancelled", "The model request was cancelled.");
+        if (signal?.aborted)
+          throw new ProviderError(
+            "cancelled",
+            "The model request was cancelled.",
+          );
         let item: ReadableStreamReadResult<Uint8Array>;
         try {
           item = await reader.read();
         } catch (error) {
-          if (signal?.aborted) throw new ProviderError("cancelled", "The model request was cancelled.", { cause: error });
-          if (timeoutSignal.aborted) throw new ProviderError("timeout", "Provider streaming exceeded the request deadline.", { retryable: true, cause: error });
-          throw new ProviderError("upstream_unavailable", "Provider streaming was interrupted.", { retryable: true, cause: error });
+          if (signal?.aborted)
+            throw new ProviderError(
+              "cancelled",
+              "The model request was cancelled.",
+              { cause: error },
+            );
+          if (timeoutSignal.aborted)
+            throw new ProviderError(
+              "timeout",
+              "Provider streaming exceeded the request deadline.",
+              { retryable: true, cause: error },
+            );
+          throw new ProviderError(
+            "upstream_unavailable",
+            "Provider streaming was interrupted.",
+            { retryable: true, cause: error },
+          );
         }
         if (item.done) break;
         totalBytes += item.value.byteLength;
         if (totalBytes > this.maxResponseBytes) {
-          await reader.cancel("provider stream exceeded response limit").catch(() => undefined);
-          throw new ProviderError("invalid_response", "Provider stream exceeded the configured size limit.");
+          await reader
+            .cancel("provider stream exceeded response limit")
+            .catch(() => undefined);
+          throw new ProviderError(
+            "invalid_response",
+            "Provider stream exceeded the configured size limit.",
+          );
         }
         buffer += decoder.decode(item.value, { stream: true });
         const events = buffer.split(/\r?\n\r?\n/);
@@ -343,7 +450,10 @@ export class OpenAICompatibleChatProvider implements ChatProvider {
         for (const chunk of parsed.chunks) yield chunk;
       }
       if (!receivedDone) {
-        throw new ProviderError("invalid_response", "Provider stream ended before its [DONE] marker.");
+        throw new ProviderError(
+          "invalid_response",
+          "Provider stream ended before its [DONE] marker.",
+        );
       }
     } finally {
       reader.releaseLock();

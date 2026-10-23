@@ -2,12 +2,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, mkdir, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { DockerSandboxRuntime, type SandboxProcessRunner } from "../src/sandbox.js";
+import {
+  DockerSandboxRuntime,
+  type SandboxProcessRunner,
+} from "../src/sandbox.js";
 
 const roots: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  await Promise.all(
+    roots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
+  );
 });
 
 async function makeRoot(): Promise<string> {
@@ -53,9 +58,18 @@ describe("DockerSandboxRuntime", () => {
 
   it("rejects malformed commands without launching a process", async () => {
     const runner: SandboxProcessRunner = { run: vi.fn() };
-    const runtime = new DockerSandboxRuntime({ workspaceRoot: await makeRoot(), runner });
-    const result = await runtime.execute("e3eb00b5-1a04-4d0a-a523-3bf5f1151e5f", { command: " " });
-    expect(result).toMatchObject({ ok: false, error: { code: "invalid_arguments" } });
+    const runtime = new DockerSandboxRuntime({
+      workspaceRoot: await makeRoot(),
+      runner,
+    });
+    const result = await runtime.execute(
+      "e3eb00b5-1a04-4d0a-a523-3bf5f1151e5f",
+      { command: " " },
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "invalid_arguments" },
+    });
     expect(runner.run).not.toHaveBeenCalled();
   });
 
@@ -69,14 +83,28 @@ describe("DockerSandboxRuntime", () => {
     const runner: SandboxProcessRunner = { run: vi.fn() };
     const runtime = new DockerSandboxRuntime({ workspaceRoot: root, runner });
     const result = await runtime.execute(runId, { command: "id" });
-    expect(result).toMatchObject({ ok: false, error: { code: "unsafe_workspace_path" } });
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "unsafe_workspace_path" },
+    });
     expect(runner.run).not.toHaveBeenCalled();
   });
 
   it("rejects invalid limits and unsafe image names", async () => {
     const root = await makeRoot();
-    expect(() => new DockerSandboxRuntime({ workspaceRoot: root, timeoutMs: 999 })).toThrow(/timeout/);
-    expect(() => new DockerSandboxRuntime({ workspaceRoot: root, image: "--privileged" })).toThrow(/Docker image/);
-    expect(() => new DockerSandboxRuntime({ workspaceRoot: root, maxOutputBytes: 500 })).toThrow(/output limit/);
+    expect(
+      () => new DockerSandboxRuntime({ workspaceRoot: root, timeoutMs: 999 }),
+    ).toThrow(/timeout/);
+    expect(
+      () =>
+        new DockerSandboxRuntime({
+          workspaceRoot: root,
+          image: "--privileged",
+        }),
+    ).toThrow(/Docker image/);
+    expect(
+      () =>
+        new DockerSandboxRuntime({ workspaceRoot: root, maxOutputBytes: 500 }),
+    ).toThrow(/output limit/);
   });
 });
