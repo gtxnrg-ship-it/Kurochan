@@ -257,7 +257,7 @@ describe("PlanService", () => {
     expect(plan.tasks.find((task) => task.key === "pull-request")?.dependsOn).toContain("review");
     expect(plan.tasks.find((task) => task.key === "pull-request")?.approvalRequired).toBe(true);
     expect(router.complete.mock.calls[0]![0].systemPrompt).toContain("Authenticated GitHub project checkout");
-    expect(router.complete.mock.calls[0]![0].systemPrompt).toContain("publishing is an external action");
+    expect(router.complete.mock.calls[0]![0].systemPrompt).toContain("Publishing is an external action");
     const prompt = JSON.parse(router.complete.mock.calls[0]![0].messages[0]!.content);
     expect(prompt.installationCapabilities).toEqual({
       githubProjectRepositories: ["acme/demo"],
