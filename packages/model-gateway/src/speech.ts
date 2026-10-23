@@ -260,17 +260,17 @@ export class OpenAICompatibleSpeechRuntime {
   static fromEnvironment(env: Environment = process.env, overrides: Partial<Pick<SpeechRuntimeOptions, "fetchImpl" | "timeoutMs" | "maxAudioBytes" | "maxSpeechTextCharacters" | "maxResponseBytes">> = {}): OpenAICompatibleSpeechRuntime {
     return new OpenAICompatibleSpeechRuntime({
       transcription: {
-        baseUrl: env.KUROCHAN_STT_BASE_URL,
-        apiKey: env.KUROCHAN_STT_API_KEY,
-        model: env.KUROCHAN_STT_MODEL,
+        ...(env.KUROCHAN_STT_BASE_URL === undefined ? {} : { baseUrl: env.KUROCHAN_STT_BASE_URL }),
+        ...(env.KUROCHAN_STT_API_KEY === undefined ? {} : { apiKey: env.KUROCHAN_STT_API_KEY }),
+        ...(env.KUROCHAN_STT_MODEL === undefined ? {} : { model: env.KUROCHAN_STT_MODEL }),
       },
       synthesis: {
-        baseUrl: env.KUROCHAN_TTS_BASE_URL,
-        apiKey: env.KUROCHAN_TTS_API_KEY,
-        model: env.KUROCHAN_TTS_MODEL,
-        voice: env.KUROCHAN_TTS_VOICE,
-        responseFormat: parseSynthesisFormat(env.KUROCHAN_TTS_FORMAT),
-        instructions: env.KUROCHAN_TTS_INSTRUCTIONS,
+        ...(env.KUROCHAN_TTS_BASE_URL === undefined ? {} : { baseUrl: env.KUROCHAN_TTS_BASE_URL }),
+        ...(env.KUROCHAN_TTS_API_KEY === undefined ? {} : { apiKey: env.KUROCHAN_TTS_API_KEY }),
+        ...(env.KUROCHAN_TTS_MODEL === undefined ? {} : { model: env.KUROCHAN_TTS_MODEL }),
+        ...(env.KUROCHAN_TTS_VOICE === undefined ? {} : { voice: env.KUROCHAN_TTS_VOICE }),
+        responseFormat: parseSynthesisFormat(env.KUROCHAN_TTS_FORMAT) ?? "mp3",
+        ...(env.KUROCHAN_TTS_INSTRUCTIONS === undefined ? {} : { instructions: env.KUROCHAN_TTS_INSTRUCTIONS }),
       },
       defaultLanguage: env.KUROCHAN_STT_LANGUAGE?.trim() || "en",
       ...overrides,
