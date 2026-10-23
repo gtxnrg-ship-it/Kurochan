@@ -14,6 +14,21 @@ const WriteFileSchema = z
     overwrite: z.boolean().default(true),
   })
   .strict();
+const SAFE_DOTFILES = new Set([
+  ".gitignore",
+  ".dockerignore",
+  ".env.example",
+  ".editorconfig",
+  ".prettierrc",
+  ".prettierrc.json",
+  ".prettierignore",
+  ".eslintignore",
+  ".nvmrc",
+  ".python-version",
+  ".markdownlint.json",
+]);
+const SAFE_DOT_DIRECTORIES = new Set([".github"]);
+
 const SearchTextSchema = z
   .object({
     query: z.string().trim().min(1).max(500),
@@ -229,7 +244,12 @@ export class WorkspaceRuntime {
       entries.sort((a, b) => a.name.localeCompare(b.name));
       for (const entry of entries) {
         if (files.length >= this.maxFiles) break;
-        if (entry.name === ".kurochan" || entry.name.startsWith(".")) continue;
+        if (
+          entry.name === ".kurochan" ||
+          (entry.name.startsWith(".") &&
+            !SAFE_DOTFILES.has(entry.name) &&
+            !SAFE_DOT_DIRECTORIES.has(entry.name))
+        ) continue;
         const fullPath = join(directory, entry.name);
         const info = await lstat(fullPath);
         if (info.isSymbolicLink()) continue;
