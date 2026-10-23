@@ -299,9 +299,9 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     },
     sandbox: sandbox ? {
       enabled: true,
-      runtime: "docker",
-      image: sandbox.image,
-      network: sandbox.network,
+      runtime: sandbox instanceof DockerSandboxRuntime ? "docker" : "custom",
+      image: sandbox instanceof DockerSandboxRuntime ? sandbox.image : "custom",
+      network: sandbox instanceof DockerSandboxRuntime ? sandbox.network : "unknown",
       timeoutMs: parseBoundedInteger(env.KUROCHAN_SANDBOX_TIMEOUT_MS, 30_000, 1_000, 120_000),
       maxOutputBytes: parseBoundedInteger(env.KUROCHAN_SANDBOX_MAX_OUTPUT_BYTES, 40_000, 1_024, 200_000),
     } : { enabled: false, runtime: null, network: "none" },
