@@ -106,6 +106,7 @@ const worker = new TaskWorker({
   leaseMs: integerEnv("KUROCHAN_WORKER_LEASE_MS", 120_000, 1_000, 600_000),
   pollIntervalMs: integerEnv("KUROCHAN_WORKER_POLL_MS", 1_000, 100, 30_000),
   maxToolRounds: integerEnv("KUROCHAN_WORKER_MAX_TOOL_ROUNDS", 6, 1, 12),
+  concurrency: integerEnv("KUROCHAN_WORKER_CONCURRENCY", 4, 1, 32),
   onError: (error) => {
     const message =
       error instanceof Error ? error.message : "Unknown worker error";
@@ -123,6 +124,7 @@ process.stdout.write(
     level: "info",
     service: "kurochan-worker",
     workerId: worker.workerId,
+    concurrency: integerEnv("KUROCHAN_WORKER_CONCURRENCY", 4, 1, 32),
     configuredProviders: registry.statuses
       .filter((provider) => provider.configured)
       .map((provider) => provider.id),
