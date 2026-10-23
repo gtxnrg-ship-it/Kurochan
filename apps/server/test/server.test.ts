@@ -289,6 +289,34 @@ describe("Kuro-chan API", () => {
       error: { code: "invalid_request" },
     });
   });
+  it("rejects manual run plans that reference unknown specialists", async () => {
+    const store = new RunStore(":memory:");
+    app = buildServer({
+      env: {},
+      logger: false,
+      store,
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/runs",
+      payload: {
+        goal: "Run an unknown specialist",
+        profile: "balanced",
+        tasks: [{
+          key: "unknown",
+          agentId: "invented/agent-id",
+          objective: "Perform the task.",
+        }],
+      },
+    });
+    expect(response.statusCode).toBe(422);
+    expect(response.json()).toMatchObject({
+      error: { code: "unknown_specialist", retryable: false },
+      invalidAgentIds: ["invented/agent-id"],
+    });
+    expect(store.listRuns()).toHaveLength(0);
+  });
+
   it("creates a run graph, exposes its events, and supports cancellation", async () => {
     app = buildServer({
       env: {},
