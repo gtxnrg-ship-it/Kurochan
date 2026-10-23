@@ -92,7 +92,7 @@ function workerSystemPrompt(profile: { id: string; name: string }): string {
 
 function isRetryable(error: unknown): boolean {
   const typed = error as { retryable?: boolean; code?: string };
-  return typed.retryable === true || ["workspace_busy", "lease_lost", "deadline_exceeded", "upstream_unavailable", "rate_limited", "timeout"].includes(typed.code ?? "");
+  return typed.retryable === true || ["workspace_busy", "lease_lost", "worker_shutdown", "deadline_exceeded", "upstream_unavailable", "rate_limited", "timeout"].includes(typed.code ?? "");
 }
 
 export class TaskWorker {
@@ -104,6 +104,7 @@ export class TaskWorker {
   private readonly profile: RouteProfile;
   private stopping = false;
   private loopPromise: Promise<void> | undefined;
+  private activeAbortController: AbortController | undefined;
 
   constructor(private readonly options: TaskWorkerOptions) {
     this.workerId = options.workerId ?? "worker-" + randomUUID();
@@ -129,10 +130,13 @@ export class TaskWorker {
 
   async stop(): Promise<void> {
     this.stopping = true;
+    this.activeAbortController?.abort(new Error("Worker shutdown requested."));
     await this.loopPromise;
   }
 
   async runOnce(): Promise<WorkerTickResult> {
+    // Do not claim work that cannot be executed because no provider is configured.
+    if (!this.options.router.hasConfiguredProviders) return { kind: "idle" };
     const task = this.options.store.claimNextTask(this.workerId, { leaseMs: this.leaseMs });
     if (!task) {
       await this.finalizePendingRuns();
@@ -148,13 +152,52 @@ export class TaskWorker {
       return { kind: "waiting_for_approval", runId: task.runId, taskId: task.id, summary: "Waiting for explicit approval." };
     }
 
+    const controller = new AbortController();
+    this.activeAbortController = controller;
+    let leaseFailure: unknown;
+    const heartbeatInterval = Math.max(250, Math.floor(this.leaseMs / 3));
+    const heartbeat = setInterval(() => {
+      try {
+        this.options.store.renewTaskLease(task.runId, task.id, this.workerId, this.leaseMs);
+      } catch (error) {
+        leaseFailure = error;
+        controller.abort(error);
+        clearInterval(heartbeat);
+      }
+    }, heartbeatInterval);
+    heartbeat.unref?.();
+
     try {
-      const result = await this.executeTask(task);
+      const result = await this.executeTask(task, controller.signal);
+      if (leaseFailure) {
+        throw Object.assign(new Error("Worker lost its task lease; task output was discarded."), {
+          code: "lease_lost",
+          retryable: true,
+        });
+      }
+      if (this.stopping) {
+        throw Object.assign(new Error("Worker is shutting down; task will be retried."), {
+          code: "worker_shutdown",
+          retryable: true,
+        });
+      }
       this.options.store.completeTask(task.runId, task.id, this.workerId, result.output, result.evidence);
       const run = this.options.store.getRun(task.runId);
-      if (run?.status === "verifying") await this.finalizeRun(run);
+      // A reviewer/provider outage must not turn an already-persisted successful task into a failed task.
+      if (run?.status === "verifying") {
+        try {
+          await this.finalizeRun(run);
+        } catch (error) {
+          this.options.onError?.(error);
+        }
+      }
       return { kind: "completed", runId: task.runId, taskId: task.id, summary: result.summary };
-    } catch (error) {
+    } catch (caughtError) {
+      const error = leaseFailure
+        ? Object.assign(new Error("Worker lost its task lease; task will be retried."), { code: "lease_lost", retryable: true })
+        : this.stopping
+          ? Object.assign(new Error("Worker is shutting down; task will be retried."), { code: "worker_shutdown", retryable: true })
+          : caughtError;
       if (error && typeof error === "object" && "code" in error && error.code === "approval_paused") {
         return { kind: "waiting_for_approval", runId: task.runId, taskId: task.id };
       }
@@ -172,10 +215,13 @@ export class TaskWorker {
       }
       this.options.onError?.(error);
       return { kind: "failed", runId: task.runId, taskId: task.id, summary: "Task execution failed." };
+    } finally {
+      clearInterval(heartbeat);
+      if (this.activeAbortController === controller) this.activeAbortController = undefined;
     }
   }
 
-  private async executeTask(task: TaskRecord): Promise<{ output: unknown; evidence: readonly Evidence[]; summary: string }> {
+  private async executeTask(task: TaskRecord, signal: AbortSignal): Promise<{ output: unknown; evidence: readonly Evidence[]; summary: string }> {
     const run = this.options.store.getRun(task.runId);
     if (!run) throw Object.assign(new Error("Parent run no longer exists."), { code: "run_not_found" });
     const agent = await this.options.catalog.get(task.agentId);
@@ -198,6 +244,12 @@ export class TaskWorker {
     }];
     const evidence: Evidence[] = [];
     for (let round = 0; round < this.maxToolRounds; round += 1) {
+      if (signal.aborted) {
+        throw Object.assign(new Error("Task execution was interrupted."), {
+          code: this.stopping ? "worker_shutdown" : "lease_lost",
+          retryable: true,
+        });
+      }
       const response = await this.options.router.complete({
         profile: run.profile ?? this.profile,
         messages,
@@ -205,6 +257,7 @@ export class TaskWorker {
         maxTokens: 3500,
         temperature: 0.2,
         timeoutMs: 90_000,
+        signal,
         requiredCapabilities: ["text"],
       });
       let payload;
