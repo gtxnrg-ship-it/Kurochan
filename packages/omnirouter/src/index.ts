@@ -181,6 +181,13 @@ export class OmniRouter {
     }
   }
 
+  get hasConfiguredProviders(): boolean {
+    for (const provider of this.providers.values()) {
+      if (provider.isConfigured) return true;
+    }
+    return false;
+  }
+
   async complete(request: OmniRouteRequest): Promise<OmniRouteResult> {
     if (request.signal?.aborted)
       throw new OmniRouterError(
