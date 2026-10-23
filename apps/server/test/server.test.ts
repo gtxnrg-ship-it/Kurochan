@@ -324,6 +324,13 @@ describe("Kuro-chan API", () => {
       url: "/v1/agents?q=Unreal%20Engine%20world%20builder&limit=10",
     });
     expect(searched.statusCode).toBe(200);
+    const completeCatalog = await app.inject({
+      method: "GET",
+      url: "/v1/agents?limit=500",
+    });
+    expect(completeCatalog.statusCode).toBe(200);
+    expect(completeCatalog.json().data).toHaveLength(282);
+    expect(new Set(completeCatalog.json().data.map((agent: { id: string }) => agent.id)).size).toBe(282);
     expect(searched.json().data.length).toBeGreaterThan(0);
     expect(JSON.stringify(searched.json())).not.toContain("Core Mission");
   });
