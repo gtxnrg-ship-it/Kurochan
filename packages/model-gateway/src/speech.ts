@@ -9,6 +9,7 @@ export interface SpeechEndpointConfig {
 export interface SpeechSynthesisConfig extends SpeechEndpointConfig {
   readonly voice?: string;
   readonly responseFormat?: "mp3" | "opus" | "aac" | "flac" | "wav" | "pcm";
+  readonly instructions?: string;
 }
 
 export interface SpeechRuntimeOptions {
@@ -19,6 +20,7 @@ export interface SpeechRuntimeOptions {
   readonly maxAudioBytes?: number;
   readonly maxSpeechTextCharacters?: number;
   readonly maxResponseBytes?: number;
+  readonly defaultLanguage?: string;
 }
 
 export interface SpeechTranscriptionInput {
@@ -213,6 +215,8 @@ export class OpenAICompatibleSpeechRuntime {
   private readonly synthesisModel: string | undefined;
   private readonly synthesisVoice: string;
   private readonly synthesisFormat: NonNullable<SpeechSynthesisConfig["responseFormat"]>;
+  private readonly synthesisInstructions: string | undefined;
+  private readonly defaultLanguage: string | undefined;
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
   private readonly maxAudioBytes: number;
@@ -228,6 +232,11 @@ export class OpenAICompatibleSpeechRuntime {
     this.synthesisModel = boundedConfig(options.synthesis?.model, "TTS model", 200);
     this.synthesisVoice = boundedConfig(options.synthesis?.voice, "TTS voice", 200) ?? "alloy";
     this.synthesisFormat = options.synthesis?.responseFormat ?? "mp3";
+    this.synthesisInstructions = boundedConfig(options.synthesis?.instructions, "TTS instructions", 2000);
+    this.defaultLanguage = boundedConfig(options.defaultLanguage, "default transcription language", 24);
+    if (this.defaultLanguage && !/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$/.test(this.defaultLanguage)) {
+      throw new Error("Default speech transcription language must be a short language code such as en.");
+    }
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.timeoutMs = options.timeoutMs ?? 60_000;
     this.maxAudioBytes = options.maxAudioBytes ?? 25 * 1024 * 1024;
@@ -261,7 +270,9 @@ export class OpenAICompatibleSpeechRuntime {
         model: env.KUROCHAN_TTS_MODEL,
         voice: env.KUROCHAN_TTS_VOICE,
         responseFormat: parseSynthesisFormat(env.KUROCHAN_TTS_FORMAT),
+        instructions: env.KUROCHAN_TTS_INSTRUCTIONS,
       },
+      defaultLanguage: env.KUROCHAN_STT_LANGUAGE?.trim() || "en",
       ...overrides,
     });
   }
@@ -282,6 +293,7 @@ export class OpenAICompatibleSpeechRuntime {
         model: this.transcriptionModel ?? null,
         authenticationConfigured: Boolean(this.transcriptionApiKey),
         maxAudioBytes: this.maxAudioBytes,
+        defaultLanguage: this.defaultLanguage ?? null,
       },
       synthesis: {
         enabled: this.isSynthesisConfigured,
@@ -289,6 +301,7 @@ export class OpenAICompatibleSpeechRuntime {
         model: this.synthesisModel ?? null,
         voice: this.synthesisVoice,
         format: this.synthesisFormat,
+        customInstructionsConfigured: Boolean(this.synthesisInstructions),
         authenticationConfigured: Boolean(this.synthesisApiKey),
         maxTextCharacters: this.maxSpeechTextCharacters,
         maxResponseBytes: this.maxResponseBytes,
@@ -310,10 +323,14 @@ export class OpenAICompatibleSpeechRuntime {
     const extension = filename.split(".").at(-1)?.toLowerCase() ?? "";
     const inferredType = AUDIO_EXTENSION_TO_TYPE[extension];
     const contentType = (input.contentType?.split(";")[0]?.trim().toLowerCase() || inferredType || "").toLowerCase();
+    if (contentType !== inferredType) {
+      throw new SpeechProviderError("invalid_audio", "The audio content type does not match its file extension.");
+    }
     if (!inferredType || !contentType || !ALLOWED_AUDIO_TYPES.has(contentType)) {
       throw new SpeechProviderError("invalid_audio", "Audio must use a supported extension and an accepted audio content type.");
     }
-    if (input.language && !/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$/.test(input.language)) {
+    const language = input.language?.trim() || this.defaultLanguage;
+    if (language && !/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$/.test(language)) {
       throw new SpeechProviderError("invalid_audio", "Language must be a valid short language code such as en or ja.");
     }
     if (input.prompt && input.prompt.length > 4_000) {
@@ -327,7 +344,7 @@ export class OpenAICompatibleSpeechRuntime {
     form.append("file", new Blob([copied.buffer], { type: contentType }), filename);
     form.append("model", this.transcriptionModel);
     form.append("response_format", "json");
-    if (input.language) form.append("language", input.language);
+    if (language) form.append("language", language);
     if (input.prompt?.trim()) form.append("prompt", input.prompt.trim());
 
     const startedAt = Date.now();
@@ -372,7 +389,8 @@ export class OpenAICompatibleSpeechRuntime {
       voice,
       response_format: format,
     };
-    if (input.instructions?.trim()) body.instructions = input.instructions.trim();
+    const instructions = input.instructions?.trim() || this.synthesisInstructions;
+    if (instructions) body.instructions = instructions;
     const startedAt = Date.now();
     const response = await this.request(
       endpoint(this.synthesisBaseUrl, "/audio/speech"),
