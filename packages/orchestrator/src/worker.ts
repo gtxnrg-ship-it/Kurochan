@@ -214,7 +214,10 @@ export class TaskWorker {
   private readonly profile: RouteProfile;
   private stopping = false;
   private loopPromise: Promise<void> | undefined;
-  private readonly activeTasks = new Map<string, { runId: string; controller: AbortController }>();
+  private readonly activeTasks = new Map<
+    string,
+    { runId: string; controller: AbortController }
+  >();
   private readonly finalizationControllers = new Map<string, AbortController>();
   private readonly concurrency: number;
 
@@ -246,7 +249,11 @@ export class TaskWorker {
       this.maxToolRounds > 12
     )
       throw new Error("maxToolRounds must be between 1 and 12.");
-    if (!Number.isInteger(this.concurrency) || this.concurrency < 1 || this.concurrency > 32)
+    if (
+      !Number.isInteger(this.concurrency) ||
+      this.concurrency < 1 ||
+      this.concurrency > 32
+    )
       throw new Error("concurrency must be between 1 and 32.");
   }
 
@@ -294,18 +301,23 @@ export class TaskWorker {
     metadata: Record<string, unknown> = {},
   ): void {
     try {
-      const activeTasks = [...this.activeTasks.entries()].map(([taskId, task]) => ({
-        taskId,
-        runId: task.runId,
-      }));
-      const effectiveState = this.stopping || state === "stopping"
-        ? "stopping"
-        : activeTasks.length > 0
-          ? "busy"
-          : state;
-      const effectiveTaskId = activeTasks.some((task) => task.taskId === currentTaskId)
+      const activeTasks = [...this.activeTasks.entries()].map(
+        ([taskId, task]) => ({
+          taskId,
+          runId: task.runId,
+        }),
+      );
+      const effectiveState =
+        this.stopping || state === "stopping"
+          ? "stopping"
+          : activeTasks.length > 0
+            ? "busy"
+            : state;
+      const effectiveTaskId = activeTasks.some(
+        (task) => task.taskId === currentTaskId,
+      )
         ? currentTaskId
-        : activeTasks[0]?.taskId ?? currentTaskId;
+        : (activeTasks[0]?.taskId ?? currentTaskId);
       this.options.store.recordWorkerHeartbeat(
         this.workerId,
         effectiveState,
@@ -540,7 +552,10 @@ export class TaskWorker {
       clearInterval(heartbeat);
       this.activeTasks.delete(task.id);
       const nextActiveTaskId = this.activeTasks.keys().next().value;
-      this.writeHeartbeat(this.stopping ? "stopping" : "idle", nextActiveTaskId);
+      this.writeHeartbeat(
+        this.stopping ? "stopping" : "idle",
+        nextActiveTaskId,
+      );
     }
   }
 
@@ -1037,9 +1052,10 @@ export class TaskWorker {
 
   private async loop(): Promise<void> {
     const inFlight = new Set<Promise<void>>();
-    const delay = () => new Promise<void>((resolveDelay) =>
-      setTimeout(resolveDelay, this.pollIntervalMs),
-    );
+    const delay = () =>
+      new Promise<void>((resolveDelay) =>
+        setTimeout(resolveDelay, this.pollIntervalMs),
+      );
     const runSlot = async (): Promise<void> => {
       try {
         const result = await this.runOnce();

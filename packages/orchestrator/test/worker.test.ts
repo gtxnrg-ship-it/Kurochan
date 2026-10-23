@@ -222,7 +222,8 @@ describe("TaskWorker", () => {
           {
             key: "research",
             agentId: "engineering/engineering-test-agent",
-            objective: "Independently summarize the requested project structure.",
+            objective:
+              "Independently summarize the requested project structure.",
           },
           {
             key: "implementation",
@@ -232,44 +233,58 @@ describe("TaskWorker", () => {
         ],
       });
 
-      const fakeProvider = provider(async (input: ChatCompletionInput): Promise<ChatCompletionOutput> => {
-        if ((input.systemPrompt ?? "").includes("independent consistency reviewer")) {
+      const fakeProvider = provider(
+        async (input: ChatCompletionInput): Promise<ChatCompletionOutput> => {
+          if (
+            (input.systemPrompt ?? "").includes(
+              "independent consistency reviewer",
+            )
+          ) {
+            return {
+              providerId: "openrouter",
+              model: "test-model",
+              content: JSON.stringify({
+                passed: true,
+                summary: "Both independent specialist outputs are present.",
+                checks: [
+                  {
+                    name: "Both tasks completed",
+                    passed: true,
+                    notes: "Both task records reached succeeded before review.",
+                  },
+                ],
+                blockers: [],
+              }),
+              latencyMs: 1,
+            };
+          }
+
+          workStarted += 1;
+          activeWork += 1;
+          maxConcurrentWork = Math.max(maxConcurrentWork, activeWork);
+          if (workStarted === 2) markBothStarted?.();
+          try {
+            await gate;
+          } finally {
+            activeWork -= 1;
+          }
           return {
             providerId: "openrouter",
             model: "test-model",
             content: JSON.stringify({
-              passed: true,
-              summary: "Both independent specialist outputs are present.",
-              checks: [{ name: "Both tasks completed", passed: true, notes: "Both task records reached succeeded before review." }],
-              blockers: [],
+              status: "completed",
+              summary: "Produced an independent workstream result.",
+              toolCalls: [],
+              evidence: [],
             }),
             latencyMs: 1,
           };
-        }
-
-        workStarted += 1;
-        activeWork += 1;
-        maxConcurrentWork = Math.max(maxConcurrentWork, activeWork);
-        if (workStarted === 2) markBothStarted?.();
-        try {
-          await gate;
-        } finally {
-          activeWork -= 1;
-        }
-        return {
-          providerId: "openrouter",
-          model: "test-model",
-          content: JSON.stringify({
-            status: "completed",
-            summary: "Produced an independent workstream result.",
-            toolCalls: [],
-            evidence: [],
-          }),
-          latencyMs: 1,
-        };
-      });
+        },
+      );
       const router = new OmniRouter({
-        providers: new Map<ProviderId, ChatProvider>([["openrouter", fakeProvider]]),
+        providers: new Map<ProviderId, ChatProvider>([
+          ["openrouter", fakeProvider],
+        ]),
       });
       const worker = new TaskWorker({
         store,
@@ -283,15 +298,25 @@ describe("TaskWorker", () => {
       worker.start();
       await Promise.race([
         bothStarted,
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Second independent task did not start.")), 3_000)),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error("Second independent task did not start.")),
+            3_000,
+          ),
+        ),
       ]);
       expect(workStarted).toBe(2);
       expect(maxConcurrentWork).toBe(2);
       releaseGate?.();
-      await vi.waitFor(() => {
-        expect(store.getRun(runId)?.status).toBe("completed");
-      }, { timeout: 5_000 });
-      expect(store.listTasks(runId).every((task) => task.status === "succeeded")).toBe(true);
+      await vi.waitFor(
+        () => {
+          expect(store.getRun(runId)?.status).toBe("completed");
+        },
+        { timeout: 5_000 },
+      );
+      expect(
+        store.listTasks(runId).every((task) => task.status === "succeeded"),
+      ).toBe(true);
     } finally {
       releaseGate?.();
       store.close();
