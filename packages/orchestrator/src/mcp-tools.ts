@@ -91,10 +91,10 @@ type ServerState = {
   readonly config: McpServerConfig;
   readonly client: McpClientAdapter;
   readonly connectedAt: number;
-  tools?: readonly McpToolDescriptor[];
-  listPromise?: Promise<readonly McpToolDescriptor[]>;
-  lastError?: string;
-  lastUsedAt?: number;
+  tools: readonly McpToolDescriptor[] | undefined;
+  listPromise: Promise<readonly McpToolDescriptor[]> | undefined;
+  lastError: string | undefined;
+  lastUsedAt: number | undefined;
 };
 
 export class McpToolError extends Error {
@@ -394,7 +394,7 @@ export class McpToolRuntime {
     const existing = this.servers.get(config.id);
     if (existing) return existing;
     const client = this.connectorFactory(config, this.environment);
-    const state: ServerState = { config, client, connectedAt: Date.now() };
+    const state: ServerState = { config, client, connectedAt: Date.now(), tools: undefined, listPromise: undefined, lastError: undefined, lastUsedAt: undefined };
     this.servers.set(config.id, state);
     try {
       const connecting = client.connect();
