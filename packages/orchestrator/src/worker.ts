@@ -71,6 +71,7 @@ export interface TaskWorkerOptions {
   readonly leaseMs?: number;
   readonly pollIntervalMs?: number;
   readonly maxToolRounds?: number;
+  readonly concurrency?: number;
   readonly onError?: (error: unknown) => void;
 }
 
@@ -213,10 +214,9 @@ export class TaskWorker {
   private readonly profile: RouteProfile;
   private stopping = false;
   private loopPromise: Promise<void> | undefined;
-  private activeAbortController: AbortController | undefined;
-  private activeTaskId: string | undefined;
-  private activeRunId: string | undefined;
+  private readonly activeTasks = new Map<string, { runId: string; controller: AbortController }>();
   private readonly finalizationControllers = new Map<string, AbortController>();
+  private readonly concurrency: number;
 
   constructor(private readonly options: TaskWorkerOptions) {
     this.workerId = options.workerId ?? "worker-" + randomUUID();
@@ -226,6 +226,7 @@ export class TaskWorker {
     this.leaseMs = options.leaseMs ?? 120_000;
     this.pollIntervalMs = options.pollIntervalMs ?? 1000;
     this.maxToolRounds = options.maxToolRounds ?? 6;
+    this.concurrency = options.concurrency ?? 4;
     this.profile = options.profile ?? "balanced";
     if (
       !Number.isInteger(this.leaseMs) ||
@@ -245,6 +246,8 @@ export class TaskWorker {
       this.maxToolRounds > 12
     )
       throw new Error("maxToolRounds must be between 1 and 12.");
+    if (!Number.isInteger(this.concurrency) || this.concurrency < 1 || this.concurrency > 32)
+      throw new Error("concurrency must be between 1 and 32.");
   }
 
   get isRunning(): boolean {
@@ -265,18 +268,23 @@ export class TaskWorker {
 
   async stop(): Promise<void> {
     this.stopping = true;
-    this.writeHeartbeat("stopping", this.activeTaskId);
-    this.activeAbortController?.abort(new Error("Worker shutdown requested."));
+    const error = Object.assign(new Error("Worker shutdown requested."), {
+      code: "worker_shutdown",
+      retryable: true,
+    });
+    for (const task of this.activeTasks.values()) task.controller.abort(error);
+    this.writeHeartbeat("stopping", this.activeTasks.keys().next().value);
     await this.loopPromise;
   }
 
   cancelRun(runId: string): void {
-    if (this.activeRunId !== runId) return;
     const error = Object.assign(new Error("Run cancelled by the user."), {
       code: "run_cancelled",
       retryable: false,
     });
-    if (this.activeRunId === runId) this.activeAbortController?.abort(error);
+    for (const task of this.activeTasks.values()) {
+      if (task.runId === runId) task.controller.abort(error);
+    }
     this.finalizationControllers.get(runId)?.abort(error);
   }
 
@@ -286,14 +294,30 @@ export class TaskWorker {
     metadata: Record<string, unknown> = {},
   ): void {
     try {
+      const activeTasks = [...this.activeTasks.entries()].map(([taskId, task]) => ({
+        taskId,
+        runId: task.runId,
+      }));
+      const effectiveState = this.stopping || state === "stopping"
+        ? "stopping"
+        : activeTasks.length > 0
+          ? "busy"
+          : state;
+      const effectiveTaskId = activeTasks.some((task) => task.taskId === currentTaskId)
+        ? currentTaskId
+        : activeTasks[0]?.taskId ?? currentTaskId;
       this.options.store.recordWorkerHeartbeat(
         this.workerId,
-        state,
-        currentTaskId,
+        effectiveState,
+        effectiveTaskId,
         {
           service: "kurochan-worker",
           sandboxEnabled: Boolean(this.options.sandbox),
+          webResearchEnabled: this.webResearch.isConfigured,
           configuredProviders: this.options.router.hasConfiguredProviders,
+          activeTasks,
+          activeRunIds: [...new Set(activeTasks.map((task) => task.runId))],
+          concurrency: this.concurrency,
           ...metadata,
         },
       );
@@ -350,15 +374,13 @@ export class TaskWorker {
       };
     }
 
-    this.activeTaskId = task.id;
-    this.activeRunId = task.runId;
+    const controller = new AbortController();
+    this.activeTasks.set(task.id, { runId: task.runId, controller });
     this.writeHeartbeat("busy", task.id, {
       runId: task.runId,
       planKey: task.planKey,
       attempt: task.attempts,
     });
-    const controller = new AbortController();
-    this.activeAbortController = controller;
     let leaseFailure: unknown;
     const heartbeatInterval = Math.max(
       250,
@@ -516,11 +538,9 @@ export class TaskWorker {
       };
     } finally {
       clearInterval(heartbeat);
-      if (this.activeAbortController === controller)
-        this.activeAbortController = undefined;
-      if (this.activeTaskId === task.id) this.activeTaskId = undefined;
-      if (this.activeRunId === task.runId) this.activeRunId = undefined;
-      this.writeHeartbeat(this.stopping ? "stopping" : "idle");
+      this.activeTasks.delete(task.id);
+      const nextActiveTaskId = this.activeTasks.keys().next().value;
+      this.writeHeartbeat(this.stopping ? "stopping" : "idle", nextActiveTaskId);
     }
   }
 
@@ -1016,19 +1036,29 @@ export class TaskWorker {
   }
 
   private async loop(): Promise<void> {
-    while (!this.stopping) {
+    const inFlight = new Set<Promise<void>>();
+    const delay = () => new Promise<void>((resolveDelay) =>
+      setTimeout(resolveDelay, this.pollIntervalMs),
+    );
+    const runSlot = async (): Promise<void> => {
       try {
         const result = await this.runOnce();
-        if (result.kind === "idle")
-          await new Promise((resolve) =>
-            setTimeout(resolve, this.pollIntervalMs),
-          );
+        if (result.kind === "idle") await delay();
       } catch (error) {
         this.options.onError?.(error);
-        await new Promise((resolve) =>
-          setTimeout(resolve, this.pollIntervalMs),
-        );
+        await delay();
       }
+    };
+
+    while (!this.stopping) {
+      while (!this.stopping && inFlight.size < this.concurrency) {
+        let slot!: Promise<void>;
+        slot = runSlot().finally(() => inFlight.delete(slot));
+        inFlight.add(slot);
+      }
+      if (inFlight.size === 0) break;
+      await Promise.race(inFlight);
     }
+    await Promise.allSettled(inFlight);
   }
 }
