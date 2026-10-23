@@ -427,7 +427,7 @@ export class RunStore {
 
   listTasks(runId: string): readonly TaskRecord[] {
     const rows = this.db
-      .prepare("SELECT * FROM tasks WHERE run_id=? ORDER BY created_at, id")
+      .prepare("SELECT * FROM tasks WHERE run_id=? ORDER BY rowid")
       .all(runId) as TaskRow[];
     return rows.map((row) => {
       const deps = this.db
