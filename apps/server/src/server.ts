@@ -110,7 +110,16 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       10,
     ),
   });
-  const planner = options.planner ?? new PlanService({ catalog, router });
+  const planner = options.planner ?? new PlanService({
+    catalog,
+    router,
+    maxCandidates: parseBoundedInteger(
+      env.KUROCHAN_PLANNER_MAX_CANDIDATES,
+      96,
+      16,
+      1000,
+    ),
+  });
 
   const app = Fastify({
     logger: options.logger ?? {
