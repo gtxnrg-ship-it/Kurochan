@@ -723,6 +723,7 @@ export class TaskWorker {
       }
       const response = await this.options.router.complete({
         profile: run.profile ?? this.profile,
+        context: { operation: "task", runId: run.id, taskId: task.id },
         messages,
         systemPrompt: workerSystemPrompt(
           { id: agent.id, name: agent.name },
@@ -1016,6 +1017,7 @@ export class TaskWorker {
       const response = await this.options.router
         .complete({
           profile: "quality",
+          context: { operation: "verification", runId: run.id },
           systemPrompt: [
             "You are Kuro-chan's independent consistency reviewer.",
             "Review the completed specialist task outputs for completeness against the stated goal, contradictions, missing handoffs, and unsupported completion claims.",
