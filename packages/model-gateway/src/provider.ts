@@ -22,6 +22,10 @@ export interface ChatCompletionUsage {
   readonly totalTokens?: number;
 }
 
+export interface ChatCompletionStreamChunk {
+  readonly content: string;
+}
+
 export interface ChatCompletionOutput {
   readonly providerId: ProviderId;
   readonly model: string;
@@ -38,6 +42,8 @@ export interface ChatProvider {
   /** Missing flags are conservatively treated as false except for text. */
   readonly capabilities?: Partial<ProviderCapabilities>;
   complete(input: ChatCompletionInput): Promise<ChatCompletionOutput>;
+  /** Available only when the provider's selected model is configured for streaming. */
+  stream?(input: ChatCompletionInput): Promise<AsyncIterable<ChatCompletionStreamChunk>>;
 }
 
 export type ProviderErrorCode =
