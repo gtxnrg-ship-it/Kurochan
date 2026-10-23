@@ -122,6 +122,7 @@ export class TaskWorker {
   private stopping = false;
   private loopPromise: Promise<void> | undefined;
   private activeAbortController: AbortController | undefined;
+  private activeTaskId: string | undefined;
 
   constructor(private readonly options: TaskWorkerOptions) {
     this.workerId = options.workerId ?? "worker-" + randomUUID();
@@ -143,20 +144,56 @@ export class TaskWorker {
   start(): void {
     if (this.loopPromise) return;
     this.stopping = false;
-    this.loopPromise = this.loop().finally(() => { this.loopPromise = undefined; });
+    this.writeHeartbeat("idle", undefined, { configuredProviders: this.options.router.hasConfiguredProviders });
+    this.loopPromise = this.loop().finally(() => {
+      this.loopPromise = undefined;
+      this.writeHeartbeat(this.stopping ? "stopping" : "idle");
+    });
   }
 
   async stop(): Promise<void> {
     this.stopping = true;
+    this.writeHeartbeat("stopping", this.activeTaskId);
     this.activeAbortController?.abort(new Error("Worker shutdown requested."));
     await this.loopPromise;
   }
 
+  private writeHeartbeat(
+    state: "idle" | "busy" | "waiting_for_approval" | "stopping",
+    currentTaskId?: string,
+    metadata: Record<string, unknown> = {},
+  ): void {
+    try {
+      this.options.store.recordWorkerHeartbeat(
+        this.workerId,
+        state,
+        currentTaskId,
+        {
+          service: "kurochan-worker",
+          sandboxEnabled: Boolean(this.options.sandbox),
+          configuredProviders: this.options.router.hasConfiguredProviders,
+          ...metadata,
+        },
+      );
+    } catch (error) {
+      this.options.onError?.(error);
+    }
+  }
+
   async runOnce(): Promise<WorkerTickResult> {
     // Do not claim work that cannot be executed because no provider is configured.
-    if (!this.options.router.hasConfiguredProviders) return { kind: "idle" };
+    if (!this.options.router.hasConfiguredProviders) {
+      this.writeHeartbeat("idle", undefined, { reason: "no_configured_provider" });
+      return { kind: "idle" };
+    }
     const task = this.options.store.claimNextTask(this.workerId, { leaseMs: this.leaseMs });
     if (!task) {
+      const runs = this.options.store.listRuns(200);
+      const waitingForApproval = runs.some((run) =>
+        run.status === "waiting_for_approval" ||
+        this.options.store.listTasks(run.id).some((candidate) => candidate.status === "waiting_for_approval"),
+      );
+      this.writeHeartbeat(waitingForApproval ? "waiting_for_approval" : "idle");
       await this.finalizePendingRuns();
       return { kind: "idle" };
     }
@@ -167,9 +204,12 @@ export class TaskWorker {
         approvalType: "task-level",
         warning: "Approval is required before this task can begin.",
       });
+      this.writeHeartbeat("waiting_for_approval", task.id, { runId: task.runId, planKey: task.planKey });
       return { kind: "waiting_for_approval", runId: task.runId, taskId: task.id, summary: "Waiting for explicit approval." };
     }
 
+    this.activeTaskId = task.id;
+    this.writeHeartbeat("busy", task.id, { runId: task.runId, planKey: task.planKey, attempt: task.attempts });
     const controller = new AbortController();
     this.activeAbortController = controller;
     let leaseFailure: unknown;
@@ -181,7 +221,9 @@ export class TaskWorker {
         leaseFailure = error;
         controller.abort(error);
         clearInterval(heartbeat);
+        return;
       }
+      this.writeHeartbeat("busy", task.id, { runId: task.runId, planKey: task.planKey, attempt: task.attempts });
     }, heartbeatInterval);
     heartbeat.unref?.();
 
@@ -236,6 +278,8 @@ export class TaskWorker {
     } finally {
       clearInterval(heartbeat);
       if (this.activeAbortController === controller) this.activeAbortController = undefined;
+      if (this.activeTaskId === task.id) this.activeTaskId = undefined;
+      this.writeHeartbeat(this.stopping ? "stopping" : "idle");
     }
   }
 
