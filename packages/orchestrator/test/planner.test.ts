@@ -193,10 +193,11 @@ describe("PlanService", () => {
       }),
     );
     const planner = new PlanService({ catalog, router });
-    await planner.createPlan({
+    const plan = await planner.createPlan({
       goal: "Build a startup MVP service",
       profile: "balanced",
     });
+    expect(plan.selectedAgents.some((agent) => agent.id === unseen.id)).toBe(true);
 
     const prompt = JSON.parse(
       router.complete.mock.calls[0]![0].messages[0]!.content,
