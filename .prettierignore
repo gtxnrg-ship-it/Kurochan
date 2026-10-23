@@ -1,0 +1,8 @@
+# Pinned upstream content must remain byte-for-byte unchanged.
+packages/agent-catalog/vendor/**
+# Generated dependency lockfiles are maintained by pnpm, not Prettier.
+pnpm-lock.yaml
+# Runtime data and generated outputs.
+data/
+dist/
+coverage/

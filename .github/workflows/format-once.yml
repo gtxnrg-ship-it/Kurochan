@@ -1,0 +1,41 @@
+name: One-time repository formatting
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/format-once.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: one-time-format-main
+  cancel-in-progress: true
+
+jobs:
+  format-and-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm format
+      - name: Commit formatter output and remove this one-time workflow
+        run: |
+          git rm .github/workflows/format-once.yml
+          git add -A
+          if ! git diff --cached --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -m "style: format backend foundation and pin dependencies"
+            git push origin HEAD:main
+          fi
