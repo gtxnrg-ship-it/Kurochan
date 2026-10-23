@@ -139,28 +139,31 @@ function approvalGranted(
   const events = store
     .listEvents(task.runId, 0, 1000)
     .filter((event) => event.taskId === task.id);
-  const request = events
-    .filter((event) => event.type === "approval.requested")
-    .filter((event) => {
-      const payload = event.payload as {
-        action?: Record<string, unknown>;
-      };
-      const action = payload?.action ?? {};
-      const type = action.approvalType;
-      if (
-        type !== approvalType &&
-        !(type === undefined && approvalType === "task-level")
-      )
-        return false;
-      return Object.entries(expectedAction).every(
-        ([key, value]) => action[key] === value,
-      );
-    })
-    .at(-1);
+  const requests = events.filter((event) => event.type === "approval.requested");
+  const matches = (event: (typeof requests)[number]) => {
+    const payload = event.payload as { action?: Record<string, unknown> };
+    const action = payload?.action ?? {};
+    const type = action.approvalType;
+    if (
+      type !== approvalType &&
+      !(type === undefined && approvalType === "task-level")
+    ) return false;
+    return Object.entries(expectedAction).every(
+      ([key, value]) => action[key] === value,
+    );
+  };
+
+  // A later approval for an unrelated tool must never authorize an older request.
+  const request = approvalType === "external-write"
+    ? (requests.at(-1) && matches(requests.at(-1)!) ? requests.at(-1) : undefined)
+    : requests.filter(matches).at(-1);
   if (!request) return false;
-  return events.some(
-    (event) => event.type === "approval.granted" && event.id > request.id,
+  const decision = events.find(
+    (event) =>
+      event.id > request.id &&
+      (event.type === "approval.granted" || event.type === "approval.denied"),
   );
+  return decision?.type === "approval.granted";
 }
 
 function profileText(instructions: string): string {
