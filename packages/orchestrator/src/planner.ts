@@ -113,7 +113,7 @@ function safeAgentDescription(profile: AgentProfile): string {
 }
 
 function runbookScore(goal: string, runbook: AgentRunbook): number {
-  const terms = new Set(goal.toLowerCase().replace(/[^\\p{L}\\p{N}\\s-]/gu, " ").split(/\\s+/).filter((term) => term.length > 2));
+  const terms = new Set(goal.toLowerCase().replace(/[^\p{L}\p{N}\s-]/gu, " ").split(/\s+/).filter((term) => term.length > 2));
   if (terms.size === 0) return 0;
   const text = (runbook.slug + " " + runbook.title + " " + runbook.summary).toLowerCase();
   let score = 0;
