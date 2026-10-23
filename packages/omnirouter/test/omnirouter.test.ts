@@ -207,4 +207,50 @@ describe("OmniRouter", () => {
     release?.();
     await pending;
   });
+  it("routes streaming only to capable providers and fails over before the first chunk", async () => {
+    const firstStream = vi.fn(async () => {
+      throw new ProviderError("rate_limited", "limited", { retryable: true });
+    });
+    const secondStream = vi.fn(async () => (async function* () {
+      yield { content: "streamed" };
+    })());
+    const first = {
+      ...provider("openrouter", vi.fn(success), { text: true, streaming: true }),
+      stream: firstStream,
+    };
+    const second = {
+      ...provider("freellmapi", vi.fn(success), { text: true, streaming: true }),
+      stream: secondStream,
+    };
+    const router = new OmniRouter({
+      providers: new Map([
+        ["openrouter", first],
+        ["freellmapi", second],
+      ]),
+      routeOrder: { balanced: ["openrouter", "freellmapi"] },
+      maxAttempts: 2,
+    });
+    const routed = await router.stream({
+      profile: "balanced",
+      messages: [{ role: "user", content: "test" }],
+    });
+    const chunks: string[] = [];
+    for await (const chunk of routed.stream) chunks.push(chunk.content);
+    routed.close();
+    expect(chunks).toEqual(["streamed"]);
+    expect(firstStream).toHaveBeenCalledOnce();
+    expect(secondStream).toHaveBeenCalledOnce();
+    expect(routed.providerId).toBe("freellmapi");
+    expect(routed.providerErrors).toEqual([{ providerId: "openrouter", code: "rate_limited" }]);
+  });
+
+  it("rejects streaming when no configured provider advertises streaming", async () => {
+    const ordinary = provider("openrouter", vi.fn(success), { text: true, streaming: false });
+    const router = new OmniRouter({ providers: new Map([["openrouter", ordinary]]) });
+    await expect(router.stream({
+      profile: "balanced",
+      messages: [{ role: "user", content: "test" }],
+    })).rejects.toMatchObject({ code: "no_provider_available" });
+  });
+
 });
