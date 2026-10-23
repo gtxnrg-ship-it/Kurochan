@@ -208,9 +208,12 @@ describe("OmniRouter", () => {
     await pending;
   });
   it("routes streaming only to capable providers and fails over before the first chunk", async () => {
-    const firstStream = vi.fn(async () => {
-      throw new ProviderError("rate_limited", "limited", { retryable: true });
-    });
+    const firstStream = vi.fn(async () =>
+      (async function* () {
+        throw new ProviderError("rate_limited", "limited", { retryable: true });
+        yield { content: "unreachable" };
+      })(),
+    );
     const secondStream = vi.fn(async () =>
       (async function* () {
         yield { content: "streamed" };
