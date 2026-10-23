@@ -264,6 +264,7 @@ export class TaskWorker {
   >();
   private readonly finalizationControllers = new Map<string, AbortController>();
   private readonly finalizationPromises = new Map<string, Promise<void>>();
+  private readonly workspaceQueues = new Map<string, Promise<void>>();
   private readonly concurrency: number;
 
   constructor(private readonly options: TaskWorkerOptions) {
@@ -338,6 +339,28 @@ export class TaskWorker {
       if (task.runId === runId) task.controller.abort(error);
     }
     this.finalizationControllers.get(runId)?.abort(error);
+  }
+
+  private async withWorkspaceLock<T>(
+    runId: string,
+    action: () => Promise<T>,
+  ): Promise<T> {
+    const previous = this.workspaceQueues.get(runId) ?? Promise.resolve();
+    let release!: () => void;
+    const gate = new Promise<void>((resolveGate) => {
+      release = resolveGate;
+    });
+    const queued = previous.then(() => gate);
+    this.workspaceQueues.set(runId, queued);
+    await previous;
+    try {
+      return await action();
+    } finally {
+      release();
+      if (this.workspaceQueues.get(runId) === queued) {
+        this.workspaceQueues.delete(runId);
+      }
+    }
   }
 
   private writeHeartbeat(
@@ -767,10 +790,12 @@ export class TaskWorker {
               });
             }
             outcome = this.options.githubProject
-              ? await this.options.githubProject.execute(
-                  task.runId,
-                  call as GitHubProjectToolCall,
-                  signal,
+              ? await this.withWorkspaceLock(task.runId, () =>
+                  this.options.githubProject!.execute(
+                    task.runId,
+                    call as GitHubProjectToolCall,
+                    signal,
+                  ),
                 )
               : {
                   name: call.name as GitHubProjectToolCall["name"],
@@ -787,7 +812,9 @@ export class TaskWorker {
             );
           } else if (call.name === "sandbox.run") {
             outcome = this.options.sandbox
-              ? await this.options.sandbox.execute(task.runId, call.arguments, signal)
+              ? await this.withWorkspaceLock(task.runId, () =>
+                  this.options.sandbox!.execute(task.runId, call.arguments, signal),
+                )
               : {
                   name: "sandbox.run" as const,
                   ok: false,
@@ -797,9 +824,8 @@ export class TaskWorker {
                   },
                 };
           } else {
-            outcome = await this.tools.execute(
-              task.runId,
-              call as WorkspaceToolCall,
+            outcome = await this.withWorkspaceLock(task.runId, () =>
+              this.tools.execute(task.runId, call as WorkspaceToolCall),
             );
           }
           results.push(outcome);
