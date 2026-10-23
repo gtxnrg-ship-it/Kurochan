@@ -450,7 +450,6 @@ export class OmniRouter {
             release,
             request,
             routedModel,
-            attempts,
           );
           return {
             providerId: provider.id,
@@ -530,26 +529,33 @@ export class OmniRouter {
     release: () => void,
     request: OmniRouteRequest,
     model: string,
-    attempts: number,
   ): AsyncIterable<ChatCompletionStreamChunk> {
     const health = this.health.get(provider.id)!;
     const now = this.now;
     const failureThreshold = this.failureThreshold;
     const cooldownMs = this.circuitCooldownMs;
-    const emitUsage = (outcome: "success" | "failure", latencyMs: number, errorCode?: string) => {
+    const emitUsage = (
+      outcome: "success" | "failure",
+      latencyMs: number,
+      errorCode?: string,
+      usage?: ChatCompletionUsage,
+    ) => {
       this.emitUsage(request, {
         providerId: provider.id,
         model,
         latencyMs,
         outcome,
         ...(errorCode ? { errorCode } : {}),
+        ...(usage ? { usage } : {}),
       });
     };
     return (async function* () {
       let finished = false;
       let usageRecorded = false;
+      let reportedUsage: ChatCompletionUsage | undefined;
       try {
         for await (const chunk of source) {
+          if (chunk.usage) reportedUsage = chunk.usage;
           if (signal?.aborted) {
             throw new OmniRouterError(
               "cancelled",
@@ -565,18 +571,17 @@ export class OmniRouter {
         health.lastLatencyMs = now() - startedAt;
         health.lastErrorCode = undefined;
         health.successes += 1;
-        emitUsage("success", Math.max(0, now() - startedAt));
+        emitUsage("success", Math.max(0, now() - startedAt), undefined, reportedUsage);
         usageRecorded = true;
       } catch (error) {
         const providerError =
           error instanceof ProviderError ? error : undefined;
         const errorCode = providerError?.code ?? (error instanceof OmniRouterError ? error.code : "provider_error");
         emitUsage(
-          signal?.aborted || providerError?.code === "cancelled" || (error instanceof OmniRouterError && error.code === "cancelled")
-            ? "failure"
-            : "failure",
+          "failure",
           Math.max(0, now() - startedAt),
           errorCode,
+          reportedUsage,
         );
         usageRecorded = true;
         if (providerError?.code !== "cancelled" && !signal?.aborted) {
@@ -624,6 +629,7 @@ export class OmniRouter {
             "failure",
             Math.max(0, now() - startedAt),
             signal?.aborted ? "cancelled" : "stream_closed",
+            reportedUsage,
           );
         }
         release();
