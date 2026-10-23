@@ -155,14 +155,7 @@ export class RunStore {
   private readonly db: Database.Database;
 
   constructor(filename = "data/kurochan.sqlite") {
-    if (filename !== ":memory:") {
-      const directory = filename.slice(0, Math.max(filename.lastIndexOf("/"), filename.lastIndexOf("\\")));
-      if (directory) {
-        // Load at call time so this package works on POSIX and Windows paths.
-        const fs = requireFilesystem();
-        fs.mkdirSync(directory, { recursive: true });
-      }
-    }
+    if (filename !== ":memory:") mkdirSync(dirname(filename), { recursive: true });
     this.db = new Database(filename);
     this.db.pragma("foreign_keys = ON");
     this.db.pragma("journal_mode = WAL");
