@@ -6,6 +6,7 @@ import { OmniRouter, routeOrdersFromEnvironment } from "@kurochan/omnirouter";
 import {
   DockerSandboxRuntime,
   GitHubProjectRuntime,
+  McpToolRuntime,
   TaskWorker,
   WebResearchRuntime,
 } from "@kurochan/orchestrator";
@@ -98,6 +99,7 @@ const githubProject = new GitHubProjectRuntime({
   ),
 });
 
+const mcpTools = McpToolRuntime.fromEnvironment(process.env);
 const catalog = new AgentCatalog();
 const worker = new TaskWorker({
   store,
@@ -106,6 +108,7 @@ const worker = new TaskWorker({
   workspaceRoot,
   webResearch,
   githubProject,
+  mcpTools,
   ...(sandboxEnabled
     ? {
         sandbox: new DockerSandboxRuntime({
@@ -167,6 +170,7 @@ process.stdout.write(
     githubProjectConfigured: githubProject.isConfigured,
     githubProjectPublishingEnabled: githubProject.canPublish,
     githubAllowedRepositoryCount: githubAllowedRepositories.length,
+    mcpConfiguredServerCount: mcpTools.configuredServers().length,
   }) + "\n",
 );
 
