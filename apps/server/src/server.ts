@@ -881,7 +881,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           model: body.model,
         };
         const eventStream = Readable.from((async function* () {
-          const frame = (value: unknown) => "data: " + (value === "[DONE]" ? "[DONE]" : JSON.stringify(value)) + "\\n\\n";
+          const frame = (value: unknown) => "data: " + (value === "[DONE]" ? "[DONE]" : JSON.stringify(value)) + "\n\n";
           try {
             yield frame({
               ...chunkBase,
