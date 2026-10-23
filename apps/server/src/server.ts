@@ -1,4 +1,4 @@
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { resolve } from "node:path";
 import Fastify, { type FastifyInstance } from "fastify";
 import { Readable } from "node:stream";
@@ -1668,6 +1668,446 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
               typed.message ??
               "The assistant could not complete this reply. Your message is saved, so you can retry with the same clientMessageId.",
             retryable: typed.retryable ?? status >= 500,
+            requestId: request.id,
+          },
+        });
+      }
+    },
+  );
+
+  app.get("/v1/conversations/:conversationId/audio/:messageId", async (request, reply) => {
+    const { conversationId, messageId } = request.params as {
+      conversationId: string;
+      messageId: string;
+    };
+    const conversation = store.getConversation(conversationId);
+    if (!conversation || conversation.createdBy !== "local") {
+      return reply.code(404).send({
+        error: {
+          code: "conversation_not_found",
+          message: "Conversation was not found.",
+          retryable: false,
+          requestId: request.id,
+        },
+      });
+    }
+    const artifact = store.getConversationAudio(conversationId, messageId);
+    if (!artifact) {
+      return reply.code(404).send({
+        error: {
+          code: "audio_not_found",
+          message: "No saved audio reply exists for that assistant message.",
+          retryable: false,
+          requestId: request.id,
+        },
+      });
+    }
+    return reply
+      .header("cache-control", "no-store")
+      .header("x-content-type-options", "nosniff")
+      .header("content-length", String(artifact.bytes))
+      .type(artifact.contentType)
+      .send(Buffer.from(artifact.audio));
+  });
+
+  app.post(
+    "/v1/conversations/:conversationId/voice-turn",
+    { config: { rateLimit: { max: 8, timeWindow: "1 minute" } } },
+    async (request, reply) => {
+      const { conversationId } = request.params as { conversationId: string };
+      const conversation = store.getConversation(conversationId);
+      if (!conversation || conversation.createdBy !== "local") {
+        return reply.code(404).send({
+          error: {
+            code: "conversation_not_found",
+            message: "Conversation was not found.",
+            retryable: false,
+            requestId: request.id,
+          },
+        });
+      }
+      if (!speech.isTranscriptionConfigured || !speech.isSynthesisConfigured) {
+        return reply.code(503).send({
+          error: {
+            code: "speech_not_configured",
+            message: "Configure both KUROCHAN_STT_BASE_URL/KUROCHAN_STT_MODEL and KUROCHAN_TTS_BASE_URL/KUROCHAN_TTS_MODEL to use voice turns.",
+            retryable: false,
+            requestId: request.id,
+          },
+        });
+      }
+
+      let audio: Buffer | undefined;
+      let filename = "";
+      let contentType = "";
+      const fields: Record<string, string> = {};
+      try {
+        for await (const part of request.parts({
+          limits: {
+            files: 1,
+            fields: 8,
+            fieldNameSize: 100,
+            fieldSize: 4_000,
+            fileSize: 25 * 1024 * 1024,
+            parts: 9,
+          },
+        })) {
+          if (part.type === "file") {
+            if (audio) {
+              return reply.code(400).send({
+                error: {
+                  code: "invalid_audio",
+                  message: "Exactly one audio file is allowed.",
+                  retryable: false,
+                  requestId: request.id,
+                },
+              });
+            }
+            filename = part.filename;
+            contentType = part.mimetype;
+            audio = await part.toBuffer();
+          } else {
+            if (!["clientMessageId", "model", "language", "voice", "response_format", "instructions"].includes(part.fieldname)) {
+              return reply.code(400).send({
+                error: {
+                  code: "invalid_voice_field",
+                  message: "Voice turns accept only clientMessageId, model, language, voice, response_format, and instructions fields.",
+                  retryable: false,
+                  requestId: request.id,
+                },
+              });
+            }
+            if (fields[part.fieldname] !== undefined) {
+              return reply.code(400).send({
+                error: {
+                  code: "duplicate_voice_field",
+                  message: "Each voice-turn field may be supplied only once.",
+                  retryable: false,
+                  requestId: request.id,
+                },
+              });
+            }
+            fields[part.fieldname] = String(part.value ?? "");
+          }
+        }
+      } catch (error) {
+        const typed = error as { code?: unknown };
+        const tooLarge = typed.code === "FST_REQ_FILE_TOO_LARGE";
+        return reply.code(tooLarge ? 413 : 400).send({
+          error: {
+            code: tooLarge ? "audio_too_large" : "invalid_audio_upload",
+            message: tooLarge ? "Audio upload exceeds 25 MiB." : "Voice-turn multipart upload could not be read.",
+            retryable: false,
+            requestId: request.id,
+          },
+        });
+      }
+      if (!audio) {
+        return reply.code(400).send({
+          error: {
+            code: "missing_audio",
+            message: "Provide an audio file in the multipart request.",
+            retryable: false,
+            requestId: request.id,
+          },
+        });
+      }
+
+      const model = fields.model?.trim() || "omni/balanced";
+      const selection = modelSelection(model, registry);
+      if (!selection) {
+        return reply.code(400).send({
+          error: {
+            code: "unknown_model",
+            message: "Use omni/fast, omni/balanced, omni/quality, or a provider-qualified model.",
+            retryable: false,
+            requestId: request.id,
+          },
+        });
+      }
+      const clientMessageId = fields.clientMessageId?.trim();
+      if (clientMessageId && (clientMessageId.length > 200 || /[\r\n\0]/.test(clientMessageId))) {
+        return reply.code(400).send({
+          error: {
+            code: "invalid_client_message_id",
+            message: "clientMessageId must be a single line of at most 200 characters.",
+            retryable: false,
+            requestId: request.id,
+          },
+        });
+      }
+      const requestedFormat = fields.response_format?.trim();
+      if (requestedFormat && !["mp3", "opus", "aac", "flac", "wav", "pcm"].includes(requestedFormat)) {
+        return reply.code(400).send({
+          error: {
+            code: "invalid_speech_format",
+            message: "response_format must be mp3, opus, aac, flac, wav, or pcm.",
+            retryable: false,
+            requestId: request.id,
+          },
+        });
+      }
+      const voice = fields.voice?.trim();
+      const instructions = fields.instructions?.trim();
+      const language = fields.language?.trim() || speech.status.transcription.defaultLanguage || "en";
+      const audioSha256 = createHash("sha256").update(audio).digest("hex");
+      const abort = new AbortController();
+      request.raw.on("aborted", () => abort.abort());
+
+      try {
+        let userMessage: ReturnType<RunStore["findConversationMessageByClientId"]>;
+        let transcription: { text: string; model: string; latencyMs: number };
+        const previousInput = clientMessageId
+          ? store.findConversationMessageByClientId(conversationId, clientMessageId)
+          : undefined;
+        if (previousInput) {
+          const metadata = previousInput.metadata as {
+            voiceInput?: { audioSha256?: unknown; model?: unknown; language?: unknown };
+          } | undefined;
+          if (
+            previousInput.role !== "user" ||
+            metadata?.voiceInput?.audioSha256 !== audioSha256
+          ) {
+            return reply.code(409).send({
+              error: {
+                code: "voice_idempotency_conflict",
+                message: "clientMessageId was already used for a different audio recording.",
+                retryable: false,
+                requestId: request.id,
+              },
+            });
+          }
+          userMessage = previousInput;
+          transcription = {
+            text: previousInput.content,
+            model: typeof metadata?.voiceInput?.model === "string" ? metadata.voiceInput.model : "replayed-transcript",
+            latencyMs: 0,
+          };
+        } else {
+          const result = await speech.transcribe({
+            audio,
+            filename,
+            contentType,
+            language,
+            signal: abort.signal,
+          });
+          if (!result.text.trim()) {
+            return reply.code(422).send({
+              error: {
+                code: "empty_transcription",
+                message: "Speech recognition did not detect usable text. Try a clearer recording.",
+                retryable: false,
+                requestId: request.id,
+              },
+            });
+          }
+          transcription = result;
+          const appended = store.appendConversationMessage(conversationId, {
+            role: "user",
+            content: result.text,
+            ...(clientMessageId ? { clientMessageId } : {}),
+            metadata: {
+              kind: "voice_input",
+              voiceInput: {
+                audioSha256,
+                model: result.model,
+                language,
+                latencyMs: result.latencyMs,
+                rawAudioPersisted: false,
+              },
+            },
+          });
+          userMessage = appended.message;
+          if (!appended.inserted) {
+            const metadata = appended.message.metadata as {
+              voiceInput?: { audioSha256?: unknown; model?: unknown };
+            } | undefined;
+            if (metadata?.voiceInput?.audioSha256 !== audioSha256) {
+              return reply.code(409).send({
+                error: {
+                  code: "voice_idempotency_conflict",
+                  message: "clientMessageId was concurrently used for a different audio recording.",
+                  retryable: false,
+                  requestId: request.id,
+                },
+              });
+            }
+            transcription = {
+              text: appended.message.content,
+              model: typeof metadata?.voiceInput?.model === "string" ? metadata.voiceInput.model : result.model,
+              latencyMs: 0,
+            };
+          }
+        }
+
+        const allMessages = store.listConversationMessages(conversationId, { limit: 1000 });
+        const priorAssistant = allMessages.find((message) => {
+          if (message.sequence <= userMessage!.sequence || message.role !== "assistant") return false;
+          const metadata = message.metadata as { kind?: unknown; userMessageId?: unknown } | undefined;
+          return metadata?.kind === "voice_response" && metadata.userMessageId === userMessage!.id;
+        });
+
+        let assistantMessage: NonNullable<ReturnType<RunStore["listConversationMessages"]>[number]> | undefined = priorAssistant;
+        let provider: Record<string, unknown> | undefined;
+        if (!assistantMessage) {
+          const history = allMessages
+            .filter((message) => message.sequence <= userMessage!.sequence)
+            .slice(-40)
+            .map((message) => ({ role: message.role, content: message.content }));
+          const result = await router.complete({
+            profile: selection.profile,
+            context: { operation: "chat" },
+            ...(selection.preferredProvider ? { preferredProvider: selection.preferredProvider, lockProvider: true } : {}),
+            ...(selection.providerModel ? { model: selection.providerModel } : {}),
+            messages: history,
+            maxTokens: 1024,
+            temperature: 0.2,
+            timeoutMs: 60_000,
+            signal: abort.signal,
+            requiredCapabilities: ["text"],
+          });
+          if (!result.content.trim() || result.content.length > 200_000) {
+            return reply.code(502).send({
+              error: {
+                code: "invalid_provider_response",
+                message: "The chat model returned an empty or oversized voice-turn response.",
+                retryable: true,
+                requestId: request.id,
+              },
+            });
+          }
+          const appended = store.appendConversationMessage(conversationId, {
+            role: "assistant",
+            content: result.content,
+            providerId: result.providerId,
+            model: result.model,
+            ...(result.usage ? { usage: result.usage } : {}),
+            metadata: {
+              kind: "voice_response",
+              userMessageId: userMessage!.id,
+              routeProfile: result.routeProfile,
+              voice: voice ?? speech.status.synthesis.voice,
+              format: requestedFormat ?? speech.status.synthesis.format,
+              transcriptionModel: transcription.model,
+            },
+          });
+          assistantMessage = appended.message;
+          provider = {
+            id: result.providerId,
+            model: result.model,
+            profile: result.routeProfile,
+            attempts: result.attempts,
+            latencyMs: result.latencyMs,
+            providerErrors: result.providerErrors,
+          };
+          try {
+            store.recordProviderUsage({
+              providerId: result.providerId,
+              model: result.model,
+              profile: result.routeProfile,
+              operation: "chat",
+              latencyMs: result.latencyMs,
+              outcome: "success",
+              ...(result.usage ? { usage: result.usage } : {}),
+            });
+          } catch (usageError) {
+            request.log.warn({ requestId: request.id }, "Could not record voice-turn model usage");
+          }
+        }
+
+        let savedAudio = store.getConversationAudio(conversationId, assistantMessage.id);
+        let synthesis = {
+          model: speech.status.synthesis.model ?? "configured-speech-model",
+          format: requestedFormat ?? speech.status.synthesis.format,
+          contentType: savedAudio?.contentType ?? "audio/mpeg",
+          latencyMs: 0,
+        };
+        if (!savedAudio) {
+          const audioResult = await speech.synthesize({
+            text: assistantMessage.content,
+            ...(voice ? { voice } : {}),
+            ...(requestedFormat ? { responseFormat: requestedFormat as "mp3" | "opus" | "aac" | "flac" | "wav" | "pcm" } : {}),
+            ...(instructions ? { instructions } : {}),
+            signal: abort.signal,
+          });
+          savedAudio = store.getConversationAudio(conversationId, assistantMessage.id);
+          if (!savedAudio) {
+            savedAudio = undefined;
+            const record = store.saveConversationAudio({
+              conversationId,
+              messageId: assistantMessage.id,
+              contentType: audioResult.contentType,
+              format: audioResult.format,
+              audio: audioResult.audio,
+            });
+            synthesis = {
+              model: audioResult.model,
+              format: record.format,
+              contentType: record.contentType,
+              latencyMs: audioResult.latencyMs,
+            };
+          } else {
+            synthesis = {
+              model: audioResult.model,
+              format: savedAudio.format,
+              contentType: savedAudio.contentType,
+              latencyMs: audioResult.latencyMs,
+            };
+          }
+        } else {
+          const metadata = assistantMessage.metadata as { synthesisModel?: unknown } | undefined;
+          synthesis = {
+            model: typeof metadata?.synthesisModel === "string" ? metadata.synthesisModel : synthesis.model,
+            format: savedAudio.format,
+            contentType: savedAudio.contentType,
+            latencyMs: 0,
+          };
+        }
+
+        return {
+          conversation: store.getConversation(conversationId),
+          transcript: {
+            text: transcription.text,
+            model: transcription.model,
+            latencyMs: transcription.latencyMs,
+            language,
+          },
+          userMessage,
+          assistantMessage,
+          provider,
+          synthesis,
+          audio: {
+            url: `/v1/conversations/${conversationId}/audio/${assistantMessage.id}`,
+            messageId: assistantMessage.id,
+            contentType: synthesis.contentType,
+            format: synthesis.format,
+            bytes: savedAudio?.bytes ?? 0,
+          },
+          idempotentReplay: Boolean(previousInput),
+        };
+      } catch (error) {
+        const typed = error as { code?: unknown; message?: unknown; retryable?: unknown };
+        const code = error instanceof SpeechProviderError
+          ? error.code
+          : typeof typed.code === "string"
+            ? typed.code
+            : "voice_turn_failed";
+        const status = code === "not_configured" ? 503
+          : code === "cancelled" ? 499
+          : code === "rate_limited" ? 429
+          : code === "invalid_audio" ? 400
+          : code === "audio_too_large" ? 413
+          : code === "text_too_large" ? 413
+          : code === "invalid_configuration" ? 500
+          : 502;
+        request.log.warn({ code, requestId: request.id }, "Voice turn failed");
+        return reply.code(status).send({
+          error: {
+            code,
+            message: error instanceof SpeechProviderError
+              ? error.message
+              : "Voice turn failed. Retry with the same clientMessageId to resume from persisted transcript/reply state.",
+            retryable: error instanceof SpeechProviderError ? error.retryable : status >= 500,
             requestId: request.id,
           },
         });
