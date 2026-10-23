@@ -154,6 +154,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     ? new DockerSandboxRuntime({
         workspaceRoot,
         ...(env.KUROCHAN_SANDBOX_IMAGE?.trim() ? { image: env.KUROCHAN_SANDBOX_IMAGE.trim() } : {}),
+        ...(env.DOCKER_BINARY?.trim() ? { dockerBinary: env.DOCKER_BINARY.trim() } : {}),
         network: configuredSandboxNetwork === "bridge" ? "bridge" : "none",
         timeoutMs: parseBoundedInteger(env.KUROCHAN_SANDBOX_TIMEOUT_MS, 30_000, 1_000, 120_000),
         maxOutputBytes: parseBoundedInteger(env.KUROCHAN_SANDBOX_MAX_OUTPUT_BYTES, 40_000, 1_024, 200_000),
