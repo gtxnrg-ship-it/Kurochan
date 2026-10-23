@@ -202,7 +202,7 @@ export class PlanService {
           maxTokens: 3000,
           temperature: 0.1,
           timeoutMs: this.options.timeoutMs ?? 45_000,
-          signal: request.signal,
+          ...(request.signal ? { signal: request.signal } : {}),
         });
       } catch (error) {
         const candidate = error as { code?: string; message?: string; retryable?: boolean };
