@@ -21,6 +21,7 @@ export interface OpenAICompatibleProviderOptions {
   readonly capabilities?: Partial<ProviderCapabilities>;
   readonly timeoutMs?: number;
   readonly maxResponseBytes?: number;
+  readonly includeStreamUsage?: boolean;
   readonly fetchImpl?: typeof fetch;
   readonly extraHeaders?: Readonly<Record<string, string>>;
 }
@@ -134,7 +135,14 @@ function parseStreamEvent(event: string): {
     );
   }
   const content = streamDeltaFrom(payload);
-  return { done: false, chunks: content ? [{ content }] : [] };
+  const usage = usageFrom(payload);
+  return {
+    done: false,
+    chunks:
+      content !== undefined || usage
+        ? [{ content: content ?? "", ...(usage ? { usage } : {}) }]
+        : [],
+  };
 }
 
 function safeEndpoint(baseUrl: string): string {
@@ -213,6 +221,7 @@ export class OpenAICompatibleChatProvider implements ChatProvider {
   private readonly apiKey: string | undefined;
   private readonly timeoutMs: number;
   private readonly maxResponseBytes: number;
+  private readonly includeStreamUsage: boolean;
   private readonly fetchImpl: typeof fetch;
   private readonly extraHeaders: Readonly<Record<string, string>>;
 
@@ -224,6 +233,7 @@ export class OpenAICompatibleChatProvider implements ChatProvider {
     this.defaultModel = options.defaultModel?.trim() || undefined;
     this.timeoutMs = options.timeoutMs ?? 60_000;
     this.maxResponseBytes = options.maxResponseBytes ?? 2_000_000;
+    this.includeStreamUsage = options.includeStreamUsage ?? false;
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.extraHeaders = options.extraHeaders ?? {};
     this.capabilities = { ...DEFAULT_CAPABILITIES, ...options.capabilities };
@@ -313,6 +323,9 @@ export class OpenAICompatibleChatProvider implements ChatProvider {
           max_tokens: input.maxTokens ?? 1024,
           temperature: input.temperature ?? 0.2,
           stream: true,
+          ...(this.includeStreamUsage
+            ? { stream_options: { include_usage: true } }
+            : {}),
         }),
         signal,
       });
