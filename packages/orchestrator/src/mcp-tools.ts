@@ -69,10 +69,12 @@ export interface McpClientAdapter {
   close(): Promise<void>;
 }
 
+export type McpEnvironment = Readonly<Record<string, string | undefined>>;
+
 export interface McpToolRuntimeOptions {
   readonly servers: readonly unknown[];
-  readonly environment?: NodeJS.ProcessEnv;
-  readonly connectorFactory?: (server: McpServerConfig, environment: NodeJS.ProcessEnv) => McpClientAdapter;
+  readonly environment?: McpEnvironment;
+  readonly connectorFactory?: (server: McpServerConfig, environment: McpEnvironment) => McpClientAdapter;
   readonly maxServers?: number;
   readonly maxToolsPerServer?: number;
   readonly maxResultCharacters?: number;
@@ -91,6 +93,8 @@ type ServerState = {
   readonly config: McpServerConfig;
   readonly client: McpClientAdapter;
   readonly connectedAt: number;
+  connected: boolean;
+  connectPromise: Promise<void> | undefined;
   tools: readonly McpToolDescriptor[] | undefined;
   listPromise: Promise<readonly McpToolDescriptor[]> | undefined;
   lastError: string | undefined;
@@ -147,6 +151,51 @@ function parseConfiguration(values: readonly unknown[], maxServers: number): Mcp
   });
 }
 
+function withMcpDeadlineAndAbort<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<T> {
+  return new Promise<T>((resolveResult, rejectResult) => {
+    const cleanup = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+    };
+    const onAbort = () => {
+      cleanup();
+      rejectResult(new McpToolError("cancelled", "MCP tool call was cancelled.", true));
+    };
+    const timer = setTimeout(() => {
+      cleanup();
+      rejectResult(new McpToolError("mcp_timeout", "MCP tool call exceeded its deadline.", true));
+    }, timeoutMs);
+    timer.unref?.();
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => { cleanup(); resolveResult(value); },
+      (error: unknown) => { cleanup(); rejectResult(error); },
+    );
+  });
+}
+
+function withMcpDeadline<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string,
+): Promise<T> {
+  return new Promise<T>((resolveResult, rejectResult) => {
+    const timer = setTimeout(() => {
+      rejectResult(new McpToolError("mcp_timeout", message, true));
+    }, timeoutMs);
+    timer.unref?.();
+    promise.then(resolveResult, rejectResult).finally(() => clearTimeout(timer));
+  });
+}
+
 function safeJson(value: unknown, maxCharacters: number): unknown {
   let serialized: string;
   try {
@@ -164,7 +213,7 @@ function validateSchemaSize(value: unknown): unknown {
   return safeJson(value ?? { type: "object", properties: {} }, 12_000);
 }
 
-function createSdkAdapter(config: McpServerConfig, environment: NodeJS.ProcessEnv): McpClientAdapter {
+function createSdkAdapter(config: McpServerConfig, environment: McpEnvironment): McpClientAdapter {
   let transport: StdioClientTransport | StreamableHTTPClientTransport;
   if (config.transport === "stdio") {
     const mappedEnvironment: Record<string, string> = {};
@@ -222,8 +271,9 @@ function createSdkAdapter(config: McpServerConfig, environment: NodeJS.ProcessEn
 export class McpToolRuntime {
   private readonly servers = new Map<string, ServerState>();
   private readonly configurations: readonly McpServerConfig[];
-  private readonly environment: NodeJS.ProcessEnv;
+  private readonly environment: McpEnvironment;
   private readonly connectorFactory: NonNullable<McpToolRuntimeOptions["connectorFactory"]>;
+  private readonly connectionErrors = new Map<string, string>();
   private readonly maxToolsPerServer: number;
   private readonly maxResultCharacters: number;
   private readonly timeoutMs: number;
@@ -251,7 +301,7 @@ export class McpToolRuntime {
   }
 
   static fromEnvironment(
-    environment: NodeJS.ProcessEnv = process.env,
+    environment: McpEnvironment = process.env,
     overrides: Partial<Pick<McpToolRuntimeOptions, "connectorFactory" | "timeoutMs" | "maxToolsPerServer" | "maxResultCharacters">> = {},
   ): McpToolRuntime {
     const raw = environment.KUROCHAN_MCP_SERVERS?.trim();
@@ -313,13 +363,14 @@ export class McpToolRuntime {
   }[] {
     return this.configurations.map((config) => {
       const state = this.servers.get(config.id);
+      const lastError = state?.lastError ?? this.connectionErrors.get(config.id);
       return {
         id: config.id,
         name: config.name,
         transport: config.transport,
-        connected: Boolean(state && !state.lastError),
+        connected: Boolean(state?.connected && !state.lastError),
         toolCount: state?.tools?.length ?? 0,
-        ...(state?.lastError ? { lastError: state.lastError } : {}),
+        ...(lastError ? { lastError } : {}),
         ...(state?.lastUsedAt ? { lastUsedAt: state.lastUsedAt } : {}),
       };
     });
@@ -349,20 +400,15 @@ export class McpToolRuntime {
     try {
       const state = await this.getState(config);
       const pending = state.client.callTool(parsed.data.toolName, parsed.data.arguments);
-      const result = await Promise.race([
+      const result = await withMcpDeadlineAndAbort(
         pending,
-        new Promise<never>((_, reject) => {
-          const timer = setTimeout(() => reject(new McpToolError("mcp_timeout", "MCP tool call exceeded its deadline.", true)), this.timeoutMs);
-          timer.unref?.();
-        }),
-        ...(signal ? [new Promise<never>((_, reject) => {
-          const onAbort = () => reject(new McpToolError("cancelled", "MCP tool call was cancelled.", true));
-          signal.addEventListener("abort", onAbort, { once: true });
-        })] : []),
-      ]);
+        this.timeoutMs,
+        signal,
+      );
       const safeResult = safeJson(result, this.maxResultCharacters);
       state.lastUsedAt = Date.now();
       state.lastError = undefined;
+      this.connectionErrors.delete(config.id);
       const isError = Boolean(safeResult && typeof safeResult === "object" && "isError" in safeResult && (safeResult as { isError?: unknown }).isError === true);
       return {
         name: "mcp.call",
@@ -392,34 +438,56 @@ export class McpToolRuntime {
 
   private async getState(config: McpServerConfig): Promise<ServerState> {
     const existing = this.servers.get(config.id);
-    if (existing) return existing;
+    if (existing) {
+      if (existing.connectPromise) await existing.connectPromise;
+      if (!existing.connected) {
+        throw new McpToolError("mcp_connect_failed", `MCP server "${config.id}" is not connected.`, true);
+      }
+      return existing;
+    }
     const client = this.connectorFactory(config, this.environment);
-    const state: ServerState = { config, client, connectedAt: Date.now(), tools: undefined, listPromise: undefined, lastError: undefined, lastUsedAt: undefined };
+    const state: ServerState = {
+      config,
+      client,
+      connectedAt: Date.now(),
+      connected: false,
+      connectPromise: undefined,
+      tools: undefined,
+      listPromise: undefined,
+      lastError: undefined,
+      lastUsedAt: undefined,
+    };
     this.servers.set(config.id, state);
+    const connecting = withMcpDeadline(
+      client.connect(),
+      this.timeoutMs,
+      "MCP server connection exceeded its deadline.",
+    );
+    state.connectPromise = connecting;
     try {
-      const connecting = client.connect();
-      await Promise.race([
-        connecting,
-        new Promise<never>((_, reject) => {
-          const timer = setTimeout(() => reject(new McpToolError("mcp_timeout", "MCP server connection exceeded its deadline.", true)), this.timeoutMs);
-          timer.unref?.();
-        }),
-      ]);
+      await connecting;
+      state.connected = true;
+      state.lastError = undefined;
+      this.connectionErrors.delete(config.id);
       return state;
     } catch (error) {
-      state.lastError = error instanceof Error ? error.message.slice(0, 500) : "MCP server connection failed.";
+      const message = error instanceof Error ? error.message.slice(0, 500) : "MCP server connection failed.";
+      state.lastError = message;
+      this.connectionErrors.set(config.id, message);
       this.servers.delete(config.id);
       await client.close().catch(() => undefined);
       throw new McpToolError("mcp_connect_failed", `MCP server "${config.id}" could not be connected.`, true, { cause: error });
+    } finally {
+      state.connectPromise = undefined;
     }
   }
 
   private async fetchTools(state: ServerState): Promise<readonly McpToolDescriptor[]> {
-    const timeout = new Promise<never>((_, reject) => {
-      const timer = setTimeout(() => reject(new McpToolError("mcp_timeout", "MCP listTools exceeded its deadline.", true)), this.timeoutMs);
-      timer.unref?.();
-    });
-    const result = await Promise.race([state.client.listTools(), timeout]);
+    const result = await withMcpDeadline(
+      state.client.listTools(),
+      this.timeoutMs,
+      "MCP listTools exceeded its deadline.",
+    );
     if (result.tools.length > this.maxToolsPerServer) {
       throw new McpToolError("too_many_tools", `MCP server "${state.config.id}" exposed more than ${this.maxToolsPerServer} tools.`);
     }
