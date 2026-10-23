@@ -6,6 +6,19 @@ export type ProviderId = z.infer<typeof ProviderIdSchema>;
 export const RouteProfileSchema = z.enum(["fast", "balanced", "quality"]);
 export type RouteProfile = z.infer<typeof RouteProfileSchema>;
 
+export const CapabilitySchema = z.enum(["text", "vision", "tools", "json", "streaming", "reasoning"]);
+export type Capability = z.infer<typeof CapabilitySchema>;
+
+export const ProviderCapabilitiesSchema = z.object({
+  text: z.boolean(),
+  vision: z.boolean(),
+  tools: z.boolean(),
+  json: z.boolean(),
+  streaming: z.boolean(),
+  reasoning: z.boolean(),
+});
+export type ProviderCapabilities = z.infer<typeof ProviderCapabilitiesSchema>;
+
 export const ChatRoleSchema = z.enum(["system", "user", "assistant"]);
 export const ChatMessageSchema = z.object({
   role: ChatRoleSchema,
@@ -14,7 +27,7 @@ export const ChatMessageSchema = z.object({
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 
 export const ChatCompletionRequestSchema = z.object({
-  model: z.enum(["omni/fast", "omni/balanced", "omni/quality"]).default("omni/balanced"),
+  model: z.string().trim().min(1).max(200).default("omni/balanced"),
   messages: z.array(ChatMessageSchema).min(1).max(100),
   max_tokens: z.number().int().min(1).max(8192).optional(),
   temperature: z.number().min(0).max(2).optional(),
@@ -49,6 +62,7 @@ export const ProviderStatusSchema = z.object({
   configured: z.boolean(),
   defaultModel: z.string().optional(),
   capabilityNotes: z.array(z.string()),
+  capabilities: ProviderCapabilitiesSchema.optional(),
 });
 export type ProviderStatus = z.infer<typeof ProviderStatusSchema>;
 

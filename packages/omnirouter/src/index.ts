@@ -1,4 +1,6 @@
-import type { ProviderId, RouteProfile, ProviderStatus } from "@kurochan/contracts";
+import type {
+  Capability, ProviderId, ProviderStatus, RouteProfile,
+} from "@kurochan/contracts";
 import type { ChatCompletionInput, ChatCompletionOutput, ChatProvider } from "@kurochan/model-gateway";
 import { ProviderError } from "@kurochan/model-gateway";
 
@@ -6,18 +8,22 @@ export type { ProviderId, RouteProfile };
 
 export interface OmniRouteRequest extends ChatCompletionInput {
   readonly profile: RouteProfile;
-  readonly requiredCapabilities?: readonly string[];
+  readonly preferredProvider?: ProviderId;
+  readonly lockProvider?: boolean;
+  readonly requiredCapabilities?: readonly Capability[];
 }
 
 export interface OmniRouteResult extends ChatCompletionOutput {
   readonly routeProfile: RouteProfile;
   readonly attempts: number;
+  readonly providerErrors: readonly { providerId: ProviderId; code: string }[];
 }
 
 export interface OmniRouterOptions {
   readonly providers: ReadonlyMap<ProviderId, ChatProvider>;
   readonly routeOrder?: Partial<Record<RouteProfile, readonly ProviderId[]>>;
   readonly maxAttempts?: number;
+  readonly maxConcurrentRequests?: number;
   readonly failureThreshold?: number;
   readonly circuitCooldownMs?: number;
   readonly now?: () => number;
@@ -35,8 +41,10 @@ export interface ProviderHealth {
 interface MutableProviderHealth {
   consecutiveFailures: number;
   openUntil: number;
-  lastLatencyMs: number | undefined;
-  lastErrorCode: string | undefined;
+  lastLatencyMs?: number;
+  lastErrorCode?: string;
+  successes: number;
+  failures: number;
 }
 
 const DEFAULT_ROUTES: Record<RouteProfile, readonly ProviderId[]> = {
@@ -84,14 +92,20 @@ export function routeOrdersFromEnvironment(env: Readonly<Record<string, string |
   };
 }
 
+function providerSupports(provider: ChatProvider, required: readonly Capability[]): boolean {
+  return required.every((capability) => capability === "text" || provider.capabilities?.[capability] === true);
+}
+
 export class OmniRouter {
   private readonly providers: ReadonlyMap<ProviderId, ChatProvider>;
   private readonly routeOrder: Record<RouteProfile, readonly ProviderId[]>;
   private readonly maxAttempts: number;
+  private readonly maxConcurrentRequests: number;
   private readonly failureThreshold: number;
   private readonly circuitCooldownMs: number;
   private readonly now: () => number;
   private readonly health = new Map<ProviderId, MutableProviderHealth>();
+  private activeRequests = 0;
 
   constructor(options: OmniRouterOptions) {
     this.providers = options.providers;
@@ -101,50 +115,96 @@ export class OmniRouter {
       quality: options.routeOrder?.quality ?? DEFAULT_ROUTES.quality,
     };
     this.maxAttempts = options.maxAttempts ?? 2;
+    this.maxConcurrentRequests = options.maxConcurrentRequests ?? 24;
     this.failureThreshold = options.failureThreshold ?? 3;
     this.circuitCooldownMs = options.circuitCooldownMs ?? 30_000;
     this.now = options.now ?? Date.now;
     if (!Number.isInteger(this.maxAttempts) || this.maxAttempts < 1 || this.maxAttempts > 5) throw new Error("maxAttempts must be between 1 and 5");
+    if (!Number.isInteger(this.maxConcurrentRequests) || this.maxConcurrentRequests < 1 || this.maxConcurrentRequests > 256) throw new Error("maxConcurrentRequests must be between 1 and 256");
     if (!Number.isInteger(this.failureThreshold) || this.failureThreshold < 1 || this.failureThreshold > 20) throw new Error("failureThreshold must be between 1 and 20");
-    if (!Number.isInteger(this.circuitCooldownMs) || this.circuitCooldownMs < 1_000) throw new Error("circuitCooldownMs must be at least 1000");
-    for (const id of options.providers.keys()) this.health.set(id, { consecutiveFailures: 0, openUntil: 0, lastLatencyMs: undefined, lastErrorCode: undefined });
+    if (!Number.isInteger(this.circuitCooldownMs) || this.circuitCooldownMs < 1_000 || this.circuitCooldownMs > 300_000) throw new Error("circuitCooldownMs must be between 1000 and 300000");
+    for (const id of options.providers.keys()) {
+      this.health.set(id, { consecutiveFailures: 0, openUntil: 0, successes: 0, failures: 0 });
+    }
   }
 
   async complete(request: OmniRouteRequest): Promise<OmniRouteResult> {
     if (request.signal?.aborted) throw new OmniRouterError("cancelled", "The request was cancelled before routing.", 0);
-    const order = this.routeOrder[request.profile];
-    const candidates = order
+    if (this.activeRequests >= this.maxConcurrentRequests) {
+      throw new OmniRouterError("router_overloaded", "OmniRouter reached its concurrent request limit. Retry shortly.", 0, [], true);
+    }
+    this.activeRequests += 1;
+    try {
+      return await this.route(request);
+    } finally {
+      this.activeRequests -= 1;
+    }
+  }
+
+  private async route(request: OmniRouteRequest): Promise<OmniRouteResult> {
+    const required = [...new Set<Capability>(request.requiredCapabilities?.length ? request.requiredCapabilities : ["text"])];
+    const configuredOrder = this.routeOrder[request.profile];
+    const orderedIds = request.preferredProvider
+      ? request.lockProvider
+        ? [request.preferredProvider]
+        : [request.preferredProvider, ...configuredOrder.filter((id) => id !== request.preferredProvider)]
+      : [...configuredOrder];
+    const configured = orderedIds
       .map((id) => this.providers.get(id))
-      .filter((provider): provider is ChatProvider => Boolean(provider?.isConfigured))
-      .slice(0, this.maxAttempts);
+      .filter((provider): provider is ChatProvider => Boolean(provider?.isConfigured));
+    const candidates = configured.filter((provider) => providerSupports(provider, required));
     if (candidates.length === 0) {
-      throw new OmniRouterError("no_provider_available", "No configured provider is available for OmniRouter. Configure at least one supported provider and model.", 0, [], true);
+      const message = configured.length === 0
+        ? "No configured provider is available for OmniRouter. Configure at least one supported provider and model."
+        : "No configured provider satisfies the required capabilities for this request.";
+      throw new OmniRouterError("no_provider_available", message, 0, [], true);
     }
 
     const providerErrors: Array<{ providerId: ProviderId; code: string }> = [];
     let attempts = 0;
     let lastError: unknown;
     for (const provider of candidates) {
+      if (attempts >= this.maxAttempts) break;
       if (request.signal?.aborted) throw new OmniRouterError("cancelled", "The request was cancelled.", attempts, providerErrors);
-      const health = this.health.get(provider.id) ?? { consecutiveFailures: 0, openUntil: 0 };
+      const health = this.health.get(provider.id) ?? { consecutiveFailures: 0, openUntil: 0, successes: 0, failures: 0 };
       this.health.set(provider.id, health);
       if (health.openUntil > this.now()) {
         providerErrors.push({ providerId: provider.id, code: "circuit_open" });
         continue;
       }
       attempts += 1;
+      const beganAt = this.now();
       try {
-        const result = await provider.complete(request);
+        const result = await provider.complete({
+          messages: request.messages,
+          ...(request.systemPrompt ? { systemPrompt: request.systemPrompt } : {}),
+          ...(request.maxTokens === undefined ? {} : { maxTokens: request.maxTokens }),
+          ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
+          ...(request.timeoutMs === undefined ? {} : { timeoutMs: request.timeoutMs }),
+          ...(request.signal ? { signal: request.signal } : {}),
+          requiredCapabilities: required,
+          // The explicit model override is passed only to the requested provider.
+          ...((request.preferredProvider === provider.id && request.model) || !request.preferredProvider
+            ? (request.model ? { model: request.model } : {})
+            : {}),
+        });
         health.consecutiveFailures = 0;
         health.openUntil = 0;
         health.lastLatencyMs = result.latencyMs;
         health.lastErrorCode = undefined;
-        return { ...result, providerId: provider.id, routeProfile: request.profile, attempts };
+        health.successes += 1;
+        return {
+          ...result,
+          routeProfile: request.profile,
+          attempts,
+          providerErrors,
+        };
       } catch (error) {
         lastError = error;
         const providerError = error instanceof ProviderError ? error : undefined;
         const code = providerError?.code ?? "provider_error";
         health.lastErrorCode = code;
+        health.failures += 1;
         providerErrors.push({ providerId: provider.id, code });
         if (providerError?.code === "cancelled" || request.signal?.aborted) {
           throw new OmniRouterError("cancelled", "The request was cancelled.", attempts, providerErrors);
@@ -158,7 +218,7 @@ export class OmniRouter {
       }
     }
 
-    if (attempts === 0) {
+    if (providerErrors.length === 0) {
       throw new OmniRouterError("no_provider_available", "All configured providers are temporarily excluded by circuit breakers.", attempts, providerErrors, true);
     }
     const finalCode = lastError instanceof ProviderError ? lastError.code : "upstream_unavailable";
@@ -169,7 +229,8 @@ export class OmniRouter {
     return statuses.map((status) => {
       const state = this.health.get(status.id);
       return {
-        id: status.id, configured: status.configured,
+        id: status.id,
+        configured: status.configured,
         circuitOpen: Boolean(state && state.openUntil > this.now()),
         consecutiveFailures: state?.consecutiveFailures ?? 0,
         ...(state?.lastLatencyMs === undefined ? {} : { lastLatencyMs: state.lastLatencyMs }),

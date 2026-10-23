@@ -1,4 +1,4 @@
-import type { ChatMessage, ProviderId } from "@kurochan/contracts";
+import type { Capability, ChatMessage, ProviderCapabilities, ProviderId } from "@kurochan/contracts";
 
 export interface ChatCompletionInput {
   readonly messages: readonly ChatMessage[];
@@ -6,7 +6,9 @@ export interface ChatCompletionInput {
   readonly systemPrompt?: string;
   readonly maxTokens?: number;
   readonly temperature?: number;
+  readonly timeoutMs?: number;
   readonly signal?: AbortSignal;
+  readonly requiredCapabilities?: readonly Capability[];
 }
 
 export interface ChatCompletionUsage {
@@ -28,6 +30,8 @@ export interface ChatProvider {
   readonly displayName: string;
   readonly defaultModel?: string;
   readonly isConfigured: boolean;
+  /** Missing flags are conservatively treated as false except for text. */
+  readonly capabilities?: Partial<ProviderCapabilities>;
   complete(input: ChatCompletionInput): Promise<ChatCompletionOutput>;
 }
 

@@ -1,4 +1,4 @@
-import type { ProviderId } from "@kurochan/contracts";
+import type { Capability, ProviderCapabilities, ProviderId } from "@kurochan/contracts";
 import {
   ProviderError,
   type ChatCompletionInput,
@@ -13,11 +13,16 @@ export interface OpenAICompatibleProviderOptions {
   readonly baseUrl: string;
   readonly apiKey?: string;
   readonly defaultModel?: string;
+  readonly capabilities?: Partial<ProviderCapabilities>;
   readonly timeoutMs?: number;
   readonly maxResponseBytes?: number;
   readonly fetchImpl?: typeof fetch;
   readonly extraHeaders?: Readonly<Record<string, string>>;
 }
+
+const DEFAULT_CAPABILITIES: ProviderCapabilities = {
+  text: true, vision: false, tools: false, json: false, streaming: false, reasoning: false,
+};
 
 function optionalNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
@@ -72,11 +77,44 @@ function safeEndpoint(baseUrl: string): string {
   return url.toString().replace(/\/+$/, "");
 }
 
+async function readBoundedBody(response: Response, maximumBytes: number): Promise<string> {
+  const declaredLength = Number(response.headers.get("content-length") ?? 0);
+  if (Number.isFinite(declaredLength) && declaredLength > maximumBytes) {
+    throw new ProviderError("invalid_response", "Provider response exceeded the configured size limit.");
+  }
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const item = await reader.read();
+      if (item.done) break;
+      totalBytes += item.value.byteLength;
+      if (totalBytes > maximumBytes) {
+        await reader.cancel("provider response too large");
+        throw new ProviderError("invalid_response", "Provider response exceeded the configured size limit.");
+      }
+      chunks.push(item.value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const output = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    output.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(output);
+}
+
 export class OpenAICompatibleChatProvider implements ChatProvider {
   readonly id: ProviderId;
   readonly displayName: string;
   readonly defaultModel?: string;
   readonly isConfigured: boolean;
+  readonly capabilities: ProviderCapabilities;
   private readonly endpoint: string;
   private readonly apiKey?: string;
   private readonly timeoutMs: number;
@@ -94,12 +132,12 @@ export class OpenAICompatibleChatProvider implements ChatProvider {
     this.maxResponseBytes = options.maxResponseBytes ?? 2_000_000;
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.extraHeaders = options.extraHeaders ?? {};
+    this.capabilities = { ...DEFAULT_CAPABILITIES, ...options.capabilities };
     this.isConfigured = Boolean(this.apiKey && this.defaultModel);
-
     if (!Number.isInteger(this.timeoutMs) || this.timeoutMs < 1_000 || this.timeoutMs > 300_000) {
       throw new ProviderError("invalid_configuration", "Provider timeout must be between 1000 and 300000 milliseconds.");
     }
-    if (!Number.isInteger(this.maxResponseBytes) || this.maxResponseBytes < 1_024 || this.maxResponseBytes > 10_000_000) {
+    if (!Number.isInteger(this.maxResponseBytes) || this.maxResponseBytes < 1024 || this.maxResponseBytes > 10_000_000) {
       throw new ProviderError("invalid_configuration", "Provider response limit must be between 1024 and 10000000 bytes.");
     }
   }
@@ -108,22 +146,34 @@ export class OpenAICompatibleChatProvider implements ChatProvider {
     if (!this.apiKey) throw new ProviderError("not_configured", `${this.displayName} is missing its server-side API key.`);
     const model = input.model?.trim() || this.defaultModel;
     if (!model) throw new ProviderError("not_configured", `${this.displayName} has no model configured.`);
+    const requiredCapabilities: readonly Capability[] = input.requiredCapabilities ?? ["text"];
+    const missingCapability = requiredCapabilities.find((capability) => !this.capabilities[capability]);
+    if (missingCapability) {
+      throw new ProviderError("upstream_rejected", `${this.displayName} is not configured for the required ${missingCapability} capability.`);
+    }
     if (input.messages.length === 0) throw new ProviderError("invalid_response", "At least one chat message is required.");
 
     const messages = [
       ...(input.systemPrompt?.trim() ? [{ role: "system", content: input.systemPrompt.trim() }] : []),
       ...input.messages.map((message) => ({ role: message.role, content: message.content })),
     ];
-    const payload = { model, messages, max_tokens: input.maxTokens ?? 1024, temperature: input.temperature ?? 0.2, stream: false };
+    const payload = {
+      model, messages, max_tokens: input.maxTokens ?? 1024,
+      temperature: input.temperature ?? 0.2, stream: false,
+    };
     const startedAt = Date.now();
-    const timeoutSignal = AbortSignal.timeout(this.timeoutMs);
+    const timeoutSignal = AbortSignal.timeout(Math.min(input.timeoutMs ?? this.timeoutMs, this.timeoutMs));
     const signal = input.signal ? AbortSignal.any([input.signal, timeoutSignal]) : timeoutSignal;
-
     let response: Response;
     try {
       response = await this.fetchImpl(`${this.endpoint}/chat/completions`, {
         method: "POST",
-        headers: { authorization: `Bearer ${this.apiKey}`, "content-type": "application/json", accept: "application/json", ...this.extraHeaders },
+        headers: {
+          authorization: `Bearer ${this.apiKey}`,
+          "content-type": "application/json",
+          accept: "application/json",
+          ...this.extraHeaders,
+        },
         body: JSON.stringify(payload),
         signal,
       });
@@ -133,20 +183,12 @@ export class OpenAICompatibleChatProvider implements ChatProvider {
       throw new ProviderError("upstream_unavailable", `${this.displayName} could not be reached.`, { retryable: true, cause: error });
     }
 
-    const declaredLength = Number(response.headers.get("content-length") ?? 0);
-    if (Number.isFinite(declaredLength) && declaredLength > this.maxResponseBytes) {
-      throw new ProviderError("invalid_response", "Provider response exceeded the configured size limit.");
-    }
-    let body: string;
-    try { body = await response.text(); }
-    catch (error) { throw new ProviderError("invalid_response", "Provider response could not be read.", { cause: error }); }
-    if (new TextEncoder().encode(body).byteLength > this.maxResponseBytes) {
-      throw new ProviderError("invalid_response", "Provider response exceeded the configured size limit.");
-    }
-
+    const body = await readBoundedBody(response, this.maxResponseBytes);
     if (!response.ok) {
       if (response.status === 429) throw new ProviderError("rate_limited", `${this.displayName} rate-limited the request.`, { retryable: true, statusCode: 429 });
-      if (response.status === 408 || response.status >= 500) throw new ProviderError("upstream_unavailable", `${this.displayName} returned an upstream error.`, { retryable: true, statusCode: response.status });
+      if (response.status === 408 || response.status >= 500) {
+        throw new ProviderError("upstream_unavailable", `${this.displayName} returned an upstream error.`, { retryable: true, statusCode: response.status });
+      }
       throw new ProviderError("upstream_rejected", `${this.displayName} rejected the request (HTTP ${response.status}).`, { statusCode: response.status });
     }
 
