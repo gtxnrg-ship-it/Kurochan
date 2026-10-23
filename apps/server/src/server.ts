@@ -563,7 +563,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     }
     const beforeRaw = query.before;
     const before =
-      typeof beforeRaw === "string" && /^\\d+$/.test(beforeRaw)
+      typeof beforeRaw === "string" && /^\d+$/.test(beforeRaw)
         ? Number(beforeRaw)
         : undefined;
     if (beforeRaw !== undefined && before === undefined)
@@ -917,7 +917,7 @@ function parseBoundedInteger(
       ? fallback
       : typeof value === "number"
         ? value
-        : typeof value === "string" && /^\\d+$/.test(value)
+        : typeof value === "string" && /^\d+$/.test(value)
           ? Number(value)
           : Number.NaN;
   if (!Number.isInteger(parsed) || parsed < min || parsed > max)
