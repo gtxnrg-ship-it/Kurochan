@@ -378,8 +378,8 @@ export class OmniRouter {
           continue;
         }
         attempts += 1;
+        const startedAt = this.now();
         try {
-          const startedAt = this.now();
           const chunks = await provider.stream!({
             messages: request.messages,
             ...(request.systemPrompt
@@ -436,21 +436,25 @@ export class OmniRouter {
               }
             },
           };
+          const routedModel =
+            request.model &&
+            (!request.preferredProvider ||
+              request.preferredProvider === provider.id)
+              ? request.model
+              : (provider.defaultModel ?? "");
           const observed = this.observeStream(
             provider,
             prefetched,
             startedAt,
             request.signal,
             release,
+            request,
+            routedModel,
+            attempts,
           );
           return {
             providerId: provider.id,
-            model:
-              request.model &&
-              (!request.preferredProvider ||
-                request.preferredProvider === provider.id)
-                ? request.model
-                : (provider.defaultModel ?? ""),
+            model: routedModel,
             routeProfile: request.profile,
             attempts,
             providerErrors: [...providerErrors],
@@ -464,6 +468,18 @@ export class OmniRouter {
           const code = providerError?.code ?? "provider_error";
           health.lastErrorCode = code;
           health.failures += 1;
+          this.emitUsage(request, {
+            providerId: provider.id,
+            model:
+              request.model &&
+              (!request.preferredProvider ||
+                request.preferredProvider === provider.id)
+                ? request.model
+                : provider.defaultModel || "",
+            latencyMs: Math.max(0, this.now() - startedAt),
+            outcome: "failure",
+            errorCode: code,
+          });
           providerErrors.push({ providerId: provider.id, code });
           if (providerError?.code === "cancelled" || request.signal?.aborted) {
             throw new OmniRouterError(
@@ -512,13 +528,26 @@ export class OmniRouter {
     startedAt: number,
     signal: AbortSignal | undefined,
     release: () => void,
+    request: OmniRouteRequest,
+    model: string,
+    attempts: number,
   ): AsyncIterable<ChatCompletionStreamChunk> {
     const health = this.health.get(provider.id)!;
     const now = this.now;
     const failureThreshold = this.failureThreshold;
     const cooldownMs = this.circuitCooldownMs;
+    const emitUsage = (outcome: "success" | "failure", latencyMs: number, errorCode?: string) => {
+      this.emitUsage(request, {
+        providerId: provider.id,
+        model,
+        latencyMs,
+        outcome,
+        ...(errorCode ? { errorCode } : {}),
+      });
+    };
     return (async function* () {
       let finished = false;
+      let usageRecorded = false;
       try {
         for await (const chunk of source) {
           if (signal?.aborted) {
@@ -536,9 +565,20 @@ export class OmniRouter {
         health.lastLatencyMs = now() - startedAt;
         health.lastErrorCode = undefined;
         health.successes += 1;
+        emitUsage("success", Math.max(0, now() - startedAt));
+        usageRecorded = true;
       } catch (error) {
         const providerError =
           error instanceof ProviderError ? error : undefined;
+        const errorCode = providerError?.code ?? (error instanceof OmniRouterError ? error.code : "provider_error");
+        emitUsage(
+          signal?.aborted || providerError?.code === "cancelled" || (error instanceof OmniRouterError && error.code === "cancelled")
+            ? "failure"
+            : "failure",
+          Math.max(0, now() - startedAt),
+          errorCode,
+        );
+        usageRecorded = true;
         if (providerError?.code !== "cancelled" && !signal?.aborted) {
           const code =
             providerError?.code ??
@@ -579,8 +619,12 @@ export class OmniRouter {
           providerError?.retryable ?? true,
         );
       } finally {
-        if (!finished) {
-          // A downstream disconnect closes the iterator without turning it into a success.
+        if (!finished && !usageRecorded) {
+          emitUsage(
+            "failure",
+            Math.max(0, now() - startedAt),
+            signal?.aborted ? "cancelled" : "stream_closed",
+          );
         }
         release();
       }
