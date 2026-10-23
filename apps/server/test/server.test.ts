@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { buildServer, validateServerConfiguration } from "../src/server.js";
+import type { ProviderId } from "@kurochan/contracts";
+import type { ChatCompletionInput, ChatCompletionOutput, ChatProvider } from "@kurochan/model-gateway";
 
 describe("Kuro-chan API", () => {
   let app: FastifyInstance | undefined;
@@ -41,6 +43,50 @@ describe("Kuro-chan API", () => {
     expect(validateServerConfiguration({ HOST: "0.0.0.0", KUROCHAN_API_TOKEN: "token", PORT: "8080" }))
       .toEqual({ host: "0.0.0.0", port: 8080 });
     expect(() => validateServerConfiguration({ PORT: "90000" })).toThrow(/PORT/);
+  });
+
+  it("locks provider-qualified model IDs to the named provider", async () => {
+    const calls: Array<{ provider: ProviderId; model?: string }> = [];
+    const fakeProvider = (id: ProviderId, defaultModel: string): ChatProvider => ({
+      id,
+      displayName: id,
+      defaultModel,
+      isConfigured: true,
+      complete: async (input: ChatCompletionInput): Promise<ChatCompletionOutput> => {
+        calls.push({ provider: id, model: input.model });
+        return { providerId: id, model: input.model ?? defaultModel, content: "ok", latencyMs: 2 };
+      },
+    });
+    const providers = {
+      providers: new Map<ProviderId, ChatProvider>([
+        ["openrouter", fakeProvider("openrouter", "vendor/default-model")],
+        ["freellmapi", fakeProvider("freellmapi", "free-default")],
+      ]),
+      statuses: [
+        { id: "openrouter" as const, name: "OpenRouter", configured: true, defaultModel: "vendor/default-model", capabilityNotes: [] },
+        { id: "freellmapi" as const, name: "FreeLLMAPI", configured: true, defaultModel: "free-default", capabilityNotes: [] },
+      ],
+    };
+    app = buildServer({ env: {}, providers, logger: false });
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      payload: { model: "freellmapi/acme/model-v2", messages: [{ role: "user", content: "hello" }] },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(calls).toEqual([{ provider: "freellmapi", model: "acme/model-v2" }]);
+    expect(response.headers["x-omnirouter-provider"]).toBe("freellmapi");
+  });
+
+  it("rejects unknown model IDs instead of quietly changing route profiles", async () => {
+    app = buildServer({ env: {}, logger: false });
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      payload: { model: "invented-model", messages: [{ role: "user", content: "hello" }] },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: { code: "unknown_model" } });
   });
 
   it("validates malformed inference requests before contacting a provider", async () => {
