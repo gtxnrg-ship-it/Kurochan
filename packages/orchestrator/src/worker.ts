@@ -150,7 +150,8 @@ function approvalGranted(
       if (
         type !== approvalType &&
         !(type === undefined && approvalType === "task-level")
-      ) return false;
+      )
+        return false;
       return Object.entries(expectedAction).every(
         ([key, value]) => action[key] === value,
       );
@@ -233,17 +234,34 @@ function workerSystemPrompt(
 
 function selectMcpToolsForTask(
   goal: string,
-  agent: { readonly id: string; readonly name: string; readonly description: string; readonly tools: readonly string[] },
+  agent: {
+    readonly id: string;
+    readonly name: string;
+    readonly description: string;
+    readonly tools: readonly string[];
+  },
   tools: readonly McpToolDescriptor[],
   maxTools = 30,
 ): readonly McpToolDescriptor[] {
-  const terms = [...new Set(
-    (goal + " " + agent.id + " " + agent.name + " " + agent.description + " " + agent.tools.join(" "))
-      .toLowerCase()
-      .replace(/[^\\p{L}\\p{N}\\s-]/gu, " ")
-      .split(/\\s+/)
-      .filter((term) => term.length > 2),
-  )];
+  const terms = [
+    ...new Set(
+      (
+        goal +
+        " " +
+        agent.id +
+        " " +
+        agent.name +
+        " " +
+        agent.description +
+        " " +
+        agent.tools.join(" ")
+      )
+        .toLowerCase()
+        .replace(/[^\\p{L}\\p{N}\\s-]/gu, " ")
+        .split(/\\s+/)
+        .filter((term) => term.length > 2),
+    ),
+  ];
   return tools
     .map((tool, index) => {
       const name = tool.name.toLowerCase();
@@ -257,11 +275,12 @@ function selectMcpToolsForTask(
       }
       return { tool, index, score };
     })
-    .sort((a, b) =>
-      b.score - a.score ||
-      a.tool.serverId.localeCompare(b.tool.serverId) ||
-      a.tool.name.localeCompare(b.tool.name) ||
-      a.index - b.index,
+    .sort(
+      (a, b) =>
+        b.score - a.score ||
+        a.tool.serverId.localeCompare(b.tool.serverId) ||
+        a.tool.name.localeCompare(b.tool.name) ||
+        a.index - b.index,
     )
     .slice(0, maxTools)
     .map(({ tool }) => tool);
@@ -461,7 +480,10 @@ export class TaskWorker {
           sandboxEnabled: Boolean(this.options.sandbox),
           webResearchEnabled: this.webResearch.isConfigured,
           mcpConfigured: Boolean(this.options.mcpTools?.isConfigured),
-          mcpServerIds: this.options.mcpTools?.configuredServers().map((server) => server.id) ?? [],
+          mcpServerIds:
+            this.options.mcpTools
+              ?.configuredServers()
+              .map((server) => server.id) ?? [],
           configuredProviders: this.options.router.hasConfiguredProviders,
           activeTasks,
           activeRunIds: [...new Set(activeTasks.map((task) => task.runId))],
@@ -788,7 +810,9 @@ export class TaskWorker {
             description: tool.description,
             inputSchema: tool.inputSchema,
             readOnly: tool.readOnly,
-            ...(tool.destructiveHint === undefined ? {} : { destructiveHint: tool.destructiveHint }),
+            ...(tool.destructiveHint === undefined
+              ? {}
+              : { destructiveHint: tool.destructiveHint }),
           })),
         }),
       },
@@ -925,56 +949,90 @@ export class TaskWorker {
                 },
               };
             } else {
-              const parsedMcpCall = z.object({
-                serverId: z.string().trim().min(1).max(80),
-                toolName: z.string().trim().min(1).max(200),
-                arguments: z.record(z.unknown()).default({}),
-              }).strict().safeParse(call.arguments);
+              const parsedMcpCall = z
+                .object({
+                  serverId: z.string().trim().min(1).max(80),
+                  toolName: z.string().trim().min(1).max(200),
+                  arguments: z.record(z.unknown()).default({}),
+                })
+                .strict()
+                .safeParse(call.arguments);
               if (!parsedMcpCall.success) {
                 outcome = {
                   name: "mcp.call" as const,
                   ok: false,
                   error: {
                     code: "invalid_arguments",
-                    message: "MCP tool arguments did not match the required serverId/toolName/arguments shape.",
+                    message:
+                      "MCP tool arguments did not match the required serverId/toolName/arguments shape.",
                   },
                 };
               } else {
-                const { serverId, toolName, arguments: mcpArguments } = parsedMcpCall.data;
-                const descriptor = await this.options.mcpTools.getTool(serverId, toolName);
+                const {
+                  serverId,
+                  toolName,
+                  arguments: mcpArguments,
+                } = parsedMcpCall.data;
+                const descriptor = await this.options.mcpTools.getTool(
+                  serverId,
+                  toolName,
+                );
                 if (!descriptor) {
                   outcome = {
                     name: "mcp.call" as const,
                     ok: false,
-                    error: { code: "unknown_tool", message: "The server/tool pair is not in the live MCP tool catalog." },
+                    error: {
+                      code: "unknown_tool",
+                      message:
+                        "The server/tool pair is not in the live MCP tool catalog.",
+                    },
                   };
-                } else if (!descriptor.readOnly && !approvalGranted(
-                  this.options.store,
-                  task,
-                  "external-write",
-                  { mcpServerId: descriptor.serverId, mcpToolName: descriptor.name },
-                )) {
+                } else if (
+                  !descriptor.readOnly &&
+                  !approvalGranted(this.options.store, task, "external-write", {
+                    mcpServerId: descriptor.serverId,
+                    mcpToolName: descriptor.name,
+                  })
+                ) {
                   let preview: string;
                   try {
                     preview = JSON.stringify(mcpArguments).slice(0, 2000);
                   } catch {
                     preview = "[Arguments could not be serialized]";
                   }
-                  this.options.store.requestTaskApproval(task.runId, task.id, this.workerId, {
-                    description: "Run MCP tool " + descriptor.serverName + "/" + descriptor.name,
-                    taskId: task.id,
-                    approvalType: "external-write",
-                    mcpServerId: descriptor.serverId,
-                    mcpToolName: descriptor.name,
-                    argumentsPreview: preview,
-                    warning: "This MCP tool is not explicitly marked read-only. Review the configured server, tool, and arguments before approving its possible external side effects.",
-                  });
-                  throw Object.assign(new Error("Waiting for explicit approval before running this MCP tool."), {
-                    code: "approval_paused",
-                    retryable: false,
-                  });
+                  this.options.store.requestTaskApproval(
+                    task.runId,
+                    task.id,
+                    this.workerId,
+                    {
+                      description:
+                        "Run MCP tool " +
+                        descriptor.serverName +
+                        "/" +
+                        descriptor.name,
+                      taskId: task.id,
+                      approvalType: "external-write",
+                      mcpServerId: descriptor.serverId,
+                      mcpToolName: descriptor.name,
+                      argumentsPreview: preview,
+                      warning:
+                        "This MCP tool is not explicitly marked read-only. Review the configured server, tool, and arguments before approving its possible external side effects.",
+                    },
+                  );
+                  throw Object.assign(
+                    new Error(
+                      "Waiting for explicit approval before running this MCP tool.",
+                    ),
+                    {
+                      code: "approval_paused",
+                      retryable: false,
+                    },
+                  );
                 } else {
-                  outcome = await this.options.mcpTools.execute(call.arguments, signal);
+                  outcome = await this.options.mcpTools.execute(
+                    call.arguments,
+                    signal,
+                  );
                 }
               }
             }
@@ -1008,11 +1066,19 @@ export class TaskWorker {
           }
           results.push(outcome);
           if (outcome.ok && call.name === "mcp.call" && evidence.length < 20) {
-            const mcpOutcome = outcome as { tool?: McpToolDescriptor; result?: unknown };
+            const mcpOutcome = outcome as {
+              tool?: McpToolDescriptor;
+              result?: unknown;
+            };
             if (mcpOutcome.tool) {
               evidence.push({
                 kind: "mcp_tool_result",
-                summary: "MCP tool " + mcpOutcome.tool.serverId + "/" + mcpOutcome.tool.name + " returned a result.",
+                summary:
+                  "MCP tool " +
+                  mcpOutcome.tool.serverId +
+                  "/" +
+                  mcpOutcome.tool.name +
+                  " returned a result.",
                 metadata: {
                   serverId: mcpOutcome.tool.serverId,
                   toolName: mcpOutcome.tool.name,

@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { buildServer, validateServerConfiguration } from "../src/server.js";
-import { McpToolRuntime, type McpClientAdapter, type McpServerConfig, type PlanService } from "@kurochan/orchestrator";
+import {
+  McpToolRuntime,
+  type McpClientAdapter,
+  type McpServerConfig,
+  type PlanService,
+} from "@kurochan/orchestrator";
 import { RunStore } from "@kurochan/storage";
 import type { ProviderId } from "@kurochan/contracts";
 import type {
@@ -305,22 +310,26 @@ describe("Kuro-chan API", () => {
     app = buildServer({
       env: {},
       providers: {
-        providers: new Map<ProviderId, ChatProvider>([["freellmapi", freellmapi]]),
-        statuses: [{
-          id: "freellmapi",
-          name: "FreeLLMAPI",
-          configured: true,
-          defaultModel: "auto",
-          capabilityNotes: [],
-          capabilities: {
-            text: true,
-            vision: false,
-            tools: false,
-            json: false,
-            streaming: true,
-            reasoning: false,
+        providers: new Map<ProviderId, ChatProvider>([
+          ["freellmapi", freellmapi],
+        ]),
+        statuses: [
+          {
+            id: "freellmapi",
+            name: "FreeLLMAPI",
+            configured: true,
+            defaultModel: "auto",
+            capabilityNotes: [],
+            capabilities: {
+              text: true,
+              vision: false,
+              tools: false,
+              json: false,
+              streaming: true,
+              reasoning: false,
+            },
           },
-        }],
+        ],
       },
       logger: false,
       store,
@@ -348,7 +357,10 @@ describe("Kuro-chan API", () => {
     expect(stream).toHaveBeenCalledOnce();
 
     const history = store.listConversationMessages(conversationId);
-    expect(history.map((message) => message.role)).toEqual(["user", "assistant"]);
+    expect(history.map((message) => message.role)).toEqual([
+      "user",
+      "assistant",
+    ]);
     expect(history[1]).toMatchObject({
       content: "Hello from Kuro-chan.",
       providerId: "freellmapi",
@@ -442,16 +454,18 @@ describe("Kuro-chan API", () => {
     const mcpClient: McpClientAdapter = {
       connect: vi.fn(async () => undefined),
       listTools: vi.fn(async () => ({
-        tools: [{
-          name: "search_notes",
-          description: "Search notes without changing them",
-          inputSchema: {
-            type: "object",
-            properties: { query: { type: "string" } },
-            required: ["query"],
+        tools: [
+          {
+            name: "search_notes",
+            description: "Search notes without changing them",
+            inputSchema: {
+              type: "object",
+              properties: { query: { type: "string" } },
+              required: ["query"],
+            },
+            annotations: { readOnlyHint: true },
           },
-          annotations: { readOnlyHint: true },
-        }],
+        ],
       })),
       callTool: vi.fn(async () => ({ content: [] })),
       close: vi.fn(async () => undefined),
@@ -478,11 +492,13 @@ describe("Kuro-chan API", () => {
         callsWithNoExplicitReadOnlyAnnotationRequireApproval: true,
         serverConfigurationIsModelControlled: false,
       },
-      servers: [{
-        id: "local-utilities",
-        transport: "stdio",
-        connected: false,
-      }],
+      servers: [
+        {
+          id: "local-utilities",
+          transport: "stdio",
+          connected: false,
+        },
+      ],
     });
     expect(mcpClient.connect).not.toHaveBeenCalled();
 
@@ -494,11 +510,13 @@ describe("Kuro-chan API", () => {
     expect(probe.json()).toMatchObject({
       probed: true,
       discoveredToolCount: 1,
-      tools: [{
-        serverId: "local-utilities",
-        name: "search_notes",
-        readOnly: true,
-      }],
+      tools: [
+        {
+          serverId: "local-utilities",
+          name: "search_notes",
+          readOnly: true,
+        },
+      ],
       servers: [{ id: "local-utilities", connected: true, toolCount: 1 }],
     });
     expect(mcpClient.connect).toHaveBeenCalledOnce();

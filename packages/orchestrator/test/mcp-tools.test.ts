@@ -23,7 +23,10 @@ function adapter(
     inputSchema?: unknown;
     annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean };
   }[],
-  callTool: (name: string, args: Record<string, unknown>) => Promise<unknown> = async (name, args) => ({
+  callTool: (
+    name: string,
+    args: Record<string, unknown>,
+  ) => Promise<unknown> = async (name, args) => ({
     isError: false,
     content: [{ type: "text", text: name + ":" + JSON.stringify(args) }],
   }),
@@ -56,34 +59,52 @@ describe("McpToolRuntime", () => {
   });
 
   it("rejects unsafe remote endpoints, embedded credentials, duplicate IDs, and invalid stdio paths", () => {
-    expect(() => new McpToolRuntime({
-      servers: [{
-        id: "remote",
-        name: "Remote",
-        transport: "streamable-http",
-        url: "http://mcp.example.com/mcp",
-      }],
-    })).toThrow(/HTTPS/);
+    expect(
+      () =>
+        new McpToolRuntime({
+          servers: [
+            {
+              id: "remote",
+              name: "Remote",
+              transport: "streamable-http",
+              url: "http://mcp.example.com/mcp",
+            },
+          ],
+        }),
+    ).toThrow(/HTTPS/);
 
-    expect(() => new McpToolRuntime({
-      servers: [{
-        id: "remote",
-        name: "Remote",
-        transport: "streamable-http",
-        url: "https://user:secret@mcp.example.com/mcp",
-      }],
-    })).toThrow(/credentials/);
+    expect(
+      () =>
+        new McpToolRuntime({
+          servers: [
+            {
+              id: "remote",
+              name: "Remote",
+              transport: "streamable-http",
+              url: "https://user:secret@mcp.example.com/mcp",
+            },
+          ],
+        }),
+    ).toThrow(/credentials/);
 
-    expect(() => new McpToolRuntime({
-      servers: [serverConfig, serverConfig],
-    })).toThrow(/unique/);
+    expect(
+      () =>
+        new McpToolRuntime({
+          servers: [serverConfig, serverConfig],
+        }),
+    ).toThrow(/unique/);
 
-    expect(() => new McpToolRuntime({
-      servers: [{
-        ...serverConfig,
-        cwd: "relative/path",
-      }],
-    })).toThrow(/absolute path/);
+    expect(
+      () =>
+        new McpToolRuntime({
+          servers: [
+            {
+              ...serverConfig,
+              cwd: "relative/path",
+            },
+          ],
+        }),
+    ).toThrow(/absolute path/);
   });
 
   it("discovers schemas, reports explicit read-only annotations, and dispatches a selected tool", async () => {
@@ -92,10 +113,15 @@ describe("McpToolRuntime", () => {
       {
         name: "create_record",
         description: "Create a record",
-        inputSchema: { type: "object", properties: { title: { type: "string" } } },
+        inputSchema: {
+          type: "object",
+          properties: { title: { type: "string" } },
+        },
       },
     ]);
-    const factory = vi.fn((_config: McpServerConfig, _environment: NodeJS.ProcessEnv) => client);
+    const factory = vi.fn(
+      (_config: McpServerConfig, _environment: NodeJS.ProcessEnv) => client,
+    );
     const runtime = new McpToolRuntime({
       servers: [serverConfig],
       environment: { SERVICE_TOKEN: "a-secret-value" },
@@ -118,11 +144,13 @@ describe("McpToolRuntime", () => {
       },
     });
     expect(JSON.stringify(tools)).not.toContain("a-secret-value");
-    expect(runtime.status()).toContainEqual(expect.objectContaining({
-      id: "records",
-      connected: true,
-      toolCount: 2,
-    }));
+    expect(runtime.status()).toContainEqual(
+      expect.objectContaining({
+        id: "records",
+        connected: true,
+        toolCount: 2,
+      }),
+    );
 
     const result = await runtime.execute({
       serverId: "records",
@@ -138,7 +166,9 @@ describe("McpToolRuntime", () => {
         content: [{ text: 'search_records:{"query":"billing"}' }],
       },
     });
-    expect(client.callTool).toHaveBeenCalledWith("search_records", { query: "billing" });
+    expect(client.callTool).toHaveBeenCalledWith("search_records", {
+      query: "billing",
+    });
     await runtime.close();
     expect(client.close).toHaveBeenCalledOnce();
   });
@@ -199,16 +229,22 @@ describe("McpToolRuntime", () => {
 
   it("loads an operator-owned server list from environment JSON and enforces the config byte limit", () => {
     const raw = JSON.stringify([serverConfig]);
-    const runtime = McpToolRuntime.fromEnvironment({ KUROCHAN_MCP_SERVERS: raw });
+    const runtime = McpToolRuntime.fromEnvironment({
+      KUROCHAN_MCP_SERVERS: raw,
+    });
     expect(runtime.isConfigured).toBe(true);
-    expect(runtime.configuredServers()).toEqual([{
-      id: "records",
-      name: "Records MCP",
-      transport: "stdio",
-    }]);
+    expect(runtime.configuredServers()).toEqual([
+      {
+        id: "records",
+        name: "Records MCP",
+        transport: "stdio",
+      },
+    ]);
 
-    expect(() => McpToolRuntime.fromEnvironment({
-      KUROCHAN_MCP_SERVERS: "x".repeat(128_001),
-    })).toThrow(/128 KB/);
+    expect(() =>
+      McpToolRuntime.fromEnvironment({
+        KUROCHAN_MCP_SERVERS: "x".repeat(128_001),
+      }),
+    ).toThrow(/128 KB/);
   });
 });

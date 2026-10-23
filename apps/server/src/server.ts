@@ -538,17 +538,19 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       enabled: mcpTools.isConfigured,
       configuredServerCount: mcpTools.configuredServers().length,
       servers: mcpTools.status(),
-      ...(probe ? {
-        probed: true,
-        discoveredToolCount: tools.length,
-        tools: tools.map((tool) => ({
-          serverId: tool.serverId,
-          serverName: tool.serverName,
-          name: tool.name,
-          description: tool.description,
-          readOnly: tool.readOnly,
-        })),
-      } : { probed: false }),
+      ...(probe
+        ? {
+            probed: true,
+            discoveredToolCount: tools.length,
+            tools: tools.map((tool) => ({
+              serverId: tool.serverId,
+              serverName: tool.serverName,
+              name: tool.name,
+              description: tool.description,
+              readOnly: tool.readOnly,
+            })),
+          }
+        : { probed: false }),
       security: {
         credentialsInModelContext: false,
         callsWithNoExplicitReadOnlyAnnotationRequireApproval: true,
@@ -1149,13 +1151,22 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           if (parsed.data.stream) {
             const completionId = "chatcmpl_" + randomUUID().replaceAll("-", "");
             const created = Math.floor(Date.now() / 1000);
-            const messageMetadata = existingReply.metadata as { routeProfile?: unknown } | undefined;
+            const messageMetadata = existingReply.metadata as
+              { routeProfile?: unknown } | undefined;
             reply
               .header("content-type", "text/event-stream; charset=utf-8")
               .header("cache-control", "no-cache, no-transform")
               .header("connection", "keep-alive")
-              .header("x-omnirouter-provider", existingReply.providerId ?? "unknown")
-              .header("x-omnirouter-profile", typeof messageMetadata?.routeProfile === "string" ? messageMetadata.routeProfile : "balanced")
+              .header(
+                "x-omnirouter-provider",
+                existingReply.providerId ?? "unknown",
+              )
+              .header(
+                "x-omnirouter-profile",
+                typeof messageMetadata?.routeProfile === "string"
+                  ? messageMetadata.routeProfile
+                  : "balanced",
+              )
               .header("x-omnirouter-attempts", "0");
             const chunkBase = {
               id: completionId,
@@ -1166,15 +1177,29 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
             const replayStream = Readable.from(
               (async function* () {
                 const frame = (value: unknown) =>
-                  "data: " + (value === "[DONE]" ? "[DONE]" : JSON.stringify(value)) + "\n\n";
+                  "data: " +
+                  (value === "[DONE]" ? "[DONE]" : JSON.stringify(value)) +
+                  "\n\n";
                 yield frame({
                   ...chunkBase,
-                  choices: [{ index: 0, delta: { role: "assistant" }, finish_reason: null }],
+                  choices: [
+                    {
+                      index: 0,
+                      delta: { role: "assistant" },
+                      finish_reason: null,
+                    },
+                  ],
                 });
                 if (existingReply.content) {
                   yield frame({
                     ...chunkBase,
-                    choices: [{ index: 0, delta: { content: existingReply.content }, finish_reason: null }],
+                    choices: [
+                      {
+                        index: 0,
+                        delta: { content: existingReply.content },
+                        finish_reason: null,
+                      },
+                    ],
                   });
                 }
                 yield frame({
@@ -1250,29 +1275,49 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           const eventStream = Readable.from(
             (async function* () {
               const frame = (value: unknown) =>
-                "data: " + (value === "[DONE]" ? "[DONE]" : JSON.stringify(value)) + "\n\n";
+                "data: " +
+                (value === "[DONE]" ? "[DONE]" : JSON.stringify(value)) +
+                "\n\n";
               let content = "";
               let reportedUsage:
-                | { promptTokens?: number; completionTokens?: number; totalTokens?: number }
+                | {
+                    promptTokens?: number;
+                    completionTokens?: number;
+                    totalTokens?: number;
+                  }
                 | undefined;
               let responseTooLarge = false;
               try {
                 yield frame({
                   ...chunkBase,
-                  choices: [{ index: 0, delta: { role: "assistant" }, finish_reason: null }],
+                  choices: [
+                    {
+                      index: 0,
+                      delta: { role: "assistant" },
+                      finish_reason: null,
+                    },
+                  ],
                 });
                 for await (const chunk of routed.stream) {
                   if (abort.signal.aborted) return;
                   if (content.length + chunk.content.length > 200_000) {
                     responseTooLarge = true;
-                    abort.abort(new Error("Conversation reply exceeded the size limit."));
+                    abort.abort(
+                      new Error("Conversation reply exceeded the size limit."),
+                    );
                     break;
                   }
                   content += chunk.content;
                   if (chunk.usage) reportedUsage = chunk.usage;
                   yield frame({
                     ...chunkBase,
-                    choices: [{ index: 0, delta: { content: chunk.content }, finish_reason: null }],
+                    choices: [
+                      {
+                        index: 0,
+                        delta: { content: chunk.content },
+                        finish_reason: null,
+                      },
+                    ],
                   });
                 }
                 if (clientDisconnected) return;
@@ -1280,7 +1325,8 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
                   yield frame({
                     error: {
                       code: "response_too_large",
-                      message: "The assistant response exceeded the 200000-character limit and was not saved.",
+                      message:
+                        "The assistant response exceeded the 200000-character limit and was not saved.",
                       retryable: false,
                       requestId: request.id,
                     },
@@ -1293,7 +1339,8 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
                   yield frame({
                     error: {
                       code: "invalid_provider_response",
-                      message: "The configured model returned an empty response.",
+                      message:
+                        "The configured model returned an empty response.",
                       retryable: true,
                       requestId: request.id,
                     },
@@ -1320,16 +1367,23 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
                 });
                 yield frame("[DONE]");
               } catch (streamError) {
-                const streamFailure = streamError as { code?: string; retryable?: boolean };
+                const streamFailure = streamError as {
+                  code?: string;
+                  retryable?: boolean;
+                };
                 request.log.warn(
-                  { code: streamFailure.code ?? "stream_interrupted", requestId: request.id },
+                  {
+                    code: streamFailure.code ?? "stream_interrupted",
+                    requestId: request.id,
+                  },
                   "Conversation response stream ended before completion",
                 );
                 if (!abort.signal.aborted && !clientDisconnected) {
                   yield frame({
                     error: {
                       code: streamFailure.code ?? "stream_interrupted",
-                      message: "The assistant stream ended before it could be saved.",
+                      message:
+                        "The assistant stream ended before it could be saved.",
                       retryable: streamFailure.retryable ?? true,
                       requestId: request.id,
                     },
