@@ -48,6 +48,7 @@ const worker = new TaskWorker({
     sandbox: new DockerSandboxRuntime({
       workspaceRoot: resolve(process.env.KUROCHAN_WORKSPACE_ROOT?.trim() || "data/workspaces"),
       ...(process.env.KUROCHAN_SANDBOX_IMAGE?.trim() ? { image: process.env.KUROCHAN_SANDBOX_IMAGE.trim() } : {}),
+      ...(process.env.DOCKER_BINARY?.trim() ? { dockerBinary: process.env.DOCKER_BINARY.trim() } : {}),
       network: sandboxNetwork,
       timeoutMs: integerEnv("KUROCHAN_SANDBOX_TIMEOUT_MS", 30_000, 1_000, 120_000),
       maxOutputBytes: integerEnv("KUROCHAN_SANDBOX_MAX_OUTPUT_BYTES", 40_000, 1_024, 200_000),
