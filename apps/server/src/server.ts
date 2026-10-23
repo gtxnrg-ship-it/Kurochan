@@ -1,6 +1,7 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { resolve } from "node:path";
 import Fastify, { type FastifyInstance } from "fastify";
+import { Readable } from "node:stream";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
@@ -868,60 +869,46 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           .header("x-omnirouter-provider", routed.providerId)
           .header("x-omnirouter-profile", routed.routeProfile)
           .header("x-omnirouter-attempts", String(routed.attempts));
-        reply.hijack();
         const raw = reply.raw;
-        raw.flushHeaders();
         const onResponseClose = () => {
           if (!raw.writableEnded) abort.abort(new Error("Streaming client disconnected."));
         };
         raw.once("close", onResponseClose);
-        const writeEvent = async (value: unknown) => {
-          if (abort.signal.aborted || raw.destroyed || raw.writableEnded) return;
-          const data = value === "[DONE]" ? "[DONE]" : JSON.stringify(value);
-          const writable = raw.write("data: " + data + "\n\n");
-          if (!writable) {
-            await new Promise<void>((resolveDrain) => {
-              const done = () => {
-                raw.removeListener("drain", done);
-                raw.removeListener("close", done);
-                resolveDrain();
-              };
-              raw.once("drain", done);
-              raw.once("close", done);
-            });
-          }
-        };
         const chunkBase = {
           id: completionId,
           object: "chat.completion.chunk",
           created,
           model: body.model,
         };
-        try {
-          await writeEvent({
-            ...chunkBase,
-            choices: [{ index: 0, delta: { role: "assistant" }, finish_reason: null }],
-          });
-          for await (const chunk of routed.stream) {
-            await writeEvent({
+        const eventStream = Readable.from((async function* () {
+          const frame = (value: unknown) => "data: " + (value === "[DONE]" ? "[DONE]" : JSON.stringify(value)) + "\\n\\n";
+          try {
+            yield frame({
               ...chunkBase,
-              choices: [{ index: 0, delta: { content: chunk.content }, finish_reason: null }],
+              choices: [{ index: 0, delta: { role: "assistant" }, finish_reason: null }],
             });
-          }
-          await writeEvent({
-            ...chunkBase,
-            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
-          });
-          await writeEvent("[DONE]");
-        } catch (streamError) {
-          const error = streamError as { code?: string; retryable?: boolean };
-          request.log.warn(
-            { code: error.code ?? "stream_interrupted", requestId: request.id },
-            "OmniRouter stream ended before completion",
-          );
-          if (!abort.signal.aborted && !raw.destroyed && !raw.writableEnded) {
-            try {
-              await writeEvent({
+            for await (const chunk of routed.stream) {
+              if (abort.signal.aborted) return;
+              yield frame({
+                ...chunkBase,
+                choices: [{ index: 0, delta: { content: chunk.content }, finish_reason: null }],
+              });
+            }
+            if (!abort.signal.aborted) {
+              yield frame({
+                ...chunkBase,
+                choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+              });
+              yield frame("[DONE]");
+            }
+          } catch (streamError) {
+            const error = streamError as { code?: string; retryable?: boolean };
+            request.log.warn(
+              { code: error.code ?? "stream_interrupted", requestId: request.id },
+              "OmniRouter stream ended before completion",
+            );
+            if (!abort.signal.aborted) {
+              yield frame({
                 error: {
                   code: error.code ?? "stream_interrupted",
                   message: "The model stream ended before completion.",
@@ -929,17 +916,14 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
                   requestId: request.id,
                 },
               });
-              await writeEvent("[DONE]");
-            } catch {
-              // The client may have disconnected while the error was being sent.
+              yield frame("[DONE]");
             }
+          } finally {
+            routed.close();
+            raw.removeListener("close", onResponseClose);
           }
-        } finally {
-          routed.close();
-          raw.removeListener("close", onResponseClose);
-          if (!raw.writableEnded && !raw.destroyed) raw.end();
-        }
-        return reply;
+        })(), { objectMode: false });
+        return reply.send(eventStream);
       }
 
       const result = await router.complete({
