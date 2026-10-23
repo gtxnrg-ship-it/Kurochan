@@ -60,7 +60,7 @@ interface RepositoryData {
   readonly license: { readonly spdx_id: string | null; readonly name: string } | null;
   readonly topics?: readonly string[] | undefined;
   readonly updated_at: string;
-  readonly private?: boolean;
+  readonly private?: boolean | undefined;
 }
 
 const RepositoryDataSchema = z.object({
