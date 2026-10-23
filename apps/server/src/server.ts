@@ -827,17 +827,6 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       });
     }
     const body = parsed.data;
-    if (body.stream) {
-      return reply.code(501).send({
-        error: {
-          code: "streaming_not_supported_yet",
-          message:
-            "Streaming responses are not enabled in this backend build. Set stream to false.",
-          retryable: false,
-          requestId: request.id,
-        },
-      });
-    }
     const selection = modelSelection(body.model, registry);
     if (!selection) {
       return reply.code(400).send({
@@ -855,6 +844,104 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     request.raw.on("aborted", () => abort.abort());
 
     try {
+      if (body.stream) {
+        const routed = await router.stream({
+          profile: selection.profile,
+          ...(selection.preferredProvider
+            ? { preferredProvider: selection.preferredProvider, lockProvider: true }
+            : {}),
+          ...(selection.providerModel ? { model: selection.providerModel } : {}),
+          messages: body.messages,
+          maxTokens: body.max_tokens ?? 1024,
+          temperature: body.temperature ?? 0.2,
+          timeoutMs: body.timeout_ms ?? 60_000,
+          signal: abort.signal,
+          requiredCapabilities: ["text", "streaming"],
+        });
+        const completionId = "chatcmpl_" + randomUUID().replaceAll("-", "");
+        const created = Math.floor(Date.now() / 1000);
+        reply
+          .header("content-type", "text/event-stream; charset=utf-8")
+          .header("cache-control", "no-cache, no-transform")
+          .header("connection", "keep-alive")
+          .header("x-accel-buffering", "no")
+          .header("x-omnirouter-provider", routed.providerId)
+          .header("x-omnirouter-profile", routed.routeProfile)
+          .header("x-omnirouter-attempts", String(routed.attempts));
+        reply.hijack();
+        const raw = reply.raw;
+        raw.flushHeaders();
+        const onResponseClose = () => {
+          if (!raw.writableEnded) abort.abort(new Error("Streaming client disconnected."));
+        };
+        raw.once("close", onResponseClose);
+        const writeEvent = async (value: unknown) => {
+          if (abort.signal.aborted || raw.destroyed || raw.writableEnded) return;
+          const data = value === "[DONE]" ? "[DONE]" : JSON.stringify(value);
+          const writable = raw.write("data: " + data + "\n\n");
+          if (!writable) {
+            await new Promise<void>((resolveDrain) => {
+              const done = () => {
+                raw.removeListener("drain", done);
+                raw.removeListener("close", done);
+                resolveDrain();
+              };
+              raw.once("drain", done);
+              raw.once("close", done);
+            });
+          }
+        };
+        const chunkBase = {
+          id: completionId,
+          object: "chat.completion.chunk",
+          created,
+          model: body.model,
+        };
+        try {
+          await writeEvent({
+            ...chunkBase,
+            choices: [{ index: 0, delta: { role: "assistant" }, finish_reason: null }],
+          });
+          for await (const chunk of routed.stream) {
+            await writeEvent({
+              ...chunkBase,
+              choices: [{ index: 0, delta: { content: chunk.content }, finish_reason: null }],
+            });
+          }
+          await writeEvent({
+            ...chunkBase,
+            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+          });
+          await writeEvent("[DONE]");
+        } catch (streamError) {
+          const error = streamError as { code?: string; retryable?: boolean };
+          request.log.warn(
+            { code: error.code ?? "stream_interrupted", requestId: request.id },
+            "OmniRouter stream ended before completion",
+          );
+          if (!abort.signal.aborted && !raw.destroyed && !raw.writableEnded) {
+            try {
+              await writeEvent({
+                error: {
+                  code: error.code ?? "stream_interrupted",
+                  message: "The model stream ended before completion.",
+                  retryable: error.retryable ?? true,
+                  requestId: request.id,
+                },
+              });
+              await writeEvent("[DONE]");
+            } catch {
+              // The client may have disconnected while the error was being sent.
+            }
+          }
+        } finally {
+          routed.close();
+          raw.removeListener("close", onResponseClose);
+          if (!raw.writableEnded && !raw.destroyed) raw.end();
+        }
+        return reply;
+      }
+
       const result = await router.complete({
         profile: selection.profile,
         ...(selection.preferredProvider
