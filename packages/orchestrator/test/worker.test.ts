@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -120,5 +120,101 @@ describe("TaskWorker", () => {
     } finally {
       store.close();
     }
+  });  
+  it("executes sandbox tools through the injected runtime and records real command evidence", async () => {
+    const catalogRoot = await fakeCatalogRoot();
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "kuro-workspaces-"));
+    created.push(workspaceRoot);
+    const runId = "7cd74b5c-05b3-45ae-b07e-19b8b9060bc9";
+    const store = new RunStore(":memory:");
+    try {
+      store.createRun({
+        id: runId,
+        goal: "Run the project's tests",
+        profile: "balanced",
+        tasks: [{
+          key: "test",
+          agentId: "engineering/engineering-test-agent",
+          objective: "Run npm test and report its exit status.",
+        }],
+      });
+      let toolRequested = false;
+      const fakeProvider = provider(async (input: ChatCompletionInput): Promise<ChatCompletionOutput> => {
+        if ((input.systemPrompt ?? "").includes("independent consistency reviewer")) {
+          return {
+            providerId: "openrouter",
+            model: "test-model",
+            content: JSON.stringify({
+              passed: true,
+              summary: "The task output matches the observed sandbox evidence.",
+              checks: [{ name: "Command evidence is present", passed: true, notes: "A real sandbox adapter returned exit code 0." }],
+              blockers: [],
+            }),
+            latencyMs: 1,
+          };
+        }
+        if (!toolRequested) {
+          toolRequested = true;
+          return {
+            providerId: "openrouter",
+            model: "test-model",
+            content: JSON.stringify({
+              status: "tool_calls",
+              summary: "Run the test suite.",
+              toolCalls: [{ name: "sandbox.run", arguments: { command: "npm test" } }],
+              evidence: [],
+            }),
+            latencyMs: 1,
+          };
+        }
+        return {
+          providerId: "openrouter",
+          model: "test-model",
+          content: JSON.stringify({
+            status: "completed",
+            summary: "npm test exited successfully in the sandbox.",
+            toolCalls: [],
+            evidence: [],
+          }),
+          latencyMs: 1,
+        };
+      });
+      const execute = vi.fn(async (_runId: string, input: unknown) => {
+        expect(input).toMatchObject({ command: "npm test" });
+        return {
+          name: "sandbox.run" as const,
+          ok: true,
+          result: {
+            exitCode: 0,
+            stdout: "tests passed",
+            stderr: "",
+            durationMs: 30,
+            termination: "exited" as const,
+            outputTruncated: false,
+            command: "npm test",
+            network: "none" as const,
+          },
+        };
+      });
+      const router = new OmniRouter({
+        providers: new Map<ProviderId, ChatProvider>([["openrouter", fakeProvider]]),
+      });
+      const worker = new TaskWorker({
+        store,
+        catalog: new AgentCatalog(catalogRoot),
+        router,
+        workspaceRoot: resolve(workspaceRoot),
+        sandbox: { execute },
+      });
+      const result = await worker.runOnce();
+      expect(result.kind).toBe("completed");
+      expect(execute).toHaveBeenCalledOnce();
+      const task = store.listTasks(runId)[0]!;
+      expect(task.evidence.some((item) => item.kind === "sandbox_execution")).toBe(true);
+      expect(store.getRun(runId)?.output).toMatchObject({ executionTestsRun: true });
+    } finally {
+      store.close();
+    }
   });
+
 });
