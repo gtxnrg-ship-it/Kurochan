@@ -9,7 +9,7 @@
     "pnpm": ">=10.0.0"
   },
   "scripts": {
-    "dev": "concurrently -k -n api,web -c blue,green \"pnpm --filter @kurochan/server dev\" \"pnpm --filter @kurochan/web dev\"",
+    "dev": "pnpm --filter @kurochan/server dev",
     "dev:web": "pnpm --filter @kurochan/web dev",
     "dev:api": "pnpm --filter @kurochan/server dev",
     "build": "pnpm -r --if-present build",
