@@ -582,6 +582,38 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
             requestId: request.id,
           },
         });
+    let knownAgents: readonly (string | undefined)[];
+    try {
+      knownAgents = await Promise.all(
+        [...new Set(parsed.data.tasks.map((task) => task.agentId))].map(async (agentId) =>
+          (await catalog.get(agentId))?.id,
+        ),
+      );
+    } catch (error) {
+      requestWarning(app, error, "catalog_unavailable");
+      return reply.code(503).send({
+        error: {
+          code: "catalog_unavailable",
+          message: "The pinned specialist catalog could not be loaded to validate this run.",
+          retryable: true,
+          requestId: request.id,
+        },
+      });
+    }
+    const knownAgentIds = new Set(knownAgents.filter((id): id is string => Boolean(id)));
+    const missingAgentIds = [...new Set(parsed.data.tasks.map((task) => task.agentId))]
+      .filter((agentId) => !knownAgentIds.has(agentId));
+    if (missingAgentIds.length) {
+      return reply.code(422).send({
+        error: {
+          code: "unknown_specialist",
+          message: "Every task must reference an agent ID from the pinned Agency Agents catalog.",
+          retryable: false,
+          requestId: request.id,
+        },
+        invalidAgentIds: missingAgentIds,
+      });
+    }
     try {
       const run = store.createRun(parsed.data as CreateRunInput);
       return reply
