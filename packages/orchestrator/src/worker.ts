@@ -123,6 +123,7 @@ export class TaskWorker {
   private loopPromise: Promise<void> | undefined;
   private activeAbortController: AbortController | undefined;
   private activeTaskId: string | undefined;
+  private activeRunId: string | undefined;
 
   constructor(private readonly options: TaskWorkerOptions) {
     this.workerId = options.workerId ?? "worker-" + randomUUID();
@@ -156,6 +157,15 @@ export class TaskWorker {
     this.writeHeartbeat("stopping", this.activeTaskId);
     this.activeAbortController?.abort(new Error("Worker shutdown requested."));
     await this.loopPromise;
+  }
+
+  cancelRun(runId: string): void {
+    if (this.activeRunId !== runId) return;
+    const error = Object.assign(new Error("Run cancelled by the user."), {
+      code: "run_cancelled",
+      retryable: false,
+    });
+    this.activeAbortController?.abort(error);
   }
 
   private writeHeartbeat(
@@ -209,12 +219,23 @@ export class TaskWorker {
     }
 
     this.activeTaskId = task.id;
+    this.activeRunId = task.runId;
     this.writeHeartbeat("busy", task.id, { runId: task.runId, planKey: task.planKey, attempt: task.attempts });
     const controller = new AbortController();
     this.activeAbortController = controller;
     let leaseFailure: unknown;
     const heartbeatInterval = Math.max(250, Math.floor(this.leaseMs / 3));
     const heartbeat = setInterval(() => {
+      const currentRun = this.options.store.getRun(task.runId);
+      if (!currentRun || currentRun.status === "cancelled") {
+        leaseFailure = Object.assign(new Error("Run was cancelled."), {
+          code: "run_cancelled",
+          retryable: false,
+        });
+        controller.abort(leaseFailure);
+        clearInterval(heartbeat);
+        return;
+      }
       try {
         this.options.store.renewTaskLease(task.runId, task.id, this.workerId, this.leaseMs);
       } catch (error) {
@@ -229,7 +250,15 @@ export class TaskWorker {
 
     try {
       const result = await this.executeTask(task, controller.signal);
+      const latestRun = this.options.store.getRun(task.runId);
+      if (latestRun?.status === "cancelled") {
+        return { kind: "failed", runId: task.runId, taskId: task.id, summary: "Run was cancelled." };
+      }
       if (leaseFailure) {
+        const failureCode = (leaseFailure as { code?: unknown }).code;
+        if (failureCode === "run_cancelled") {
+          return { kind: "failed", runId: task.runId, taskId: task.id, summary: "Run was cancelled." };
+        }
         throw Object.assign(new Error("Worker lost its task lease; task output was discarded."), {
           code: "lease_lost",
           retryable: true,
@@ -253,8 +282,15 @@ export class TaskWorker {
       }
       return { kind: "completed", runId: task.runId, taskId: task.id, summary: result.summary };
     } catch (caughtError) {
+      const latestRun = this.options.store.getRun(task.runId);
+      if (latestRun?.status === "cancelled") {
+        return { kind: "failed", runId: task.runId, taskId: task.id, summary: "Run was cancelled." };
+      }
+      const leaseCode = (leaseFailure as { code?: unknown } | undefined)?.code;
       const error = leaseFailure
-        ? Object.assign(new Error("Worker lost its task lease; task will be retried."), { code: "lease_lost", retryable: true })
+        ? leaseCode === "run_cancelled"
+          ? leaseFailure
+          : Object.assign(new Error("Worker lost its task lease; task will be retried."), { code: "lease_lost", retryable: true })
         : this.stopping
           ? Object.assign(new Error("Worker is shutting down; task will be retried."), { code: "worker_shutdown", retryable: true })
           : caughtError;
@@ -279,6 +315,7 @@ export class TaskWorker {
       clearInterval(heartbeat);
       if (this.activeAbortController === controller) this.activeAbortController = undefined;
       if (this.activeTaskId === task.id) this.activeTaskId = undefined;
+      if (this.activeRunId === task.runId) this.activeRunId = undefined;
       this.writeHeartbeat(this.stopping ? "stopping" : "idle");
     }
   }
@@ -311,9 +348,11 @@ export class TaskWorker {
     const evidence: Evidence[] = [];
     for (let round = 0; round < this.maxToolRounds; round += 1) {
       if (signal.aborted) {
-        throw Object.assign(new Error("Task execution was interrupted."), {
-          code: this.stopping ? "worker_shutdown" : "lease_lost",
-          retryable: true,
+        const currentRun = this.options.store.getRun(task.runId);
+        const cancelled = currentRun?.status === "cancelled";
+        throw Object.assign(new Error(cancelled ? "Run was cancelled." : "Task execution was interrupted."), {
+          code: cancelled ? "run_cancelled" : this.stopping ? "worker_shutdown" : "lease_lost",
+          retryable: !cancelled,
         });
       }
       const response = await this.options.router.complete({
