@@ -1,0 +1,2 @@
+# Kurochan
+Just for fun
