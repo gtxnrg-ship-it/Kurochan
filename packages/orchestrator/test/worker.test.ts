@@ -289,7 +289,7 @@ describe("TaskWorker", () => {
           ["openrouter", fakeProvider],
         ]),
       });
-      worker = = new TaskWorker({
+      worker = new TaskWorker({
         store,
         catalog: new AgentCatalog(catalogRoot),
         router,
