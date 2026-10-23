@@ -14,9 +14,9 @@
     "dev:api": "pnpm --filter @kurochan/server dev",
     "build": "pnpm -r --if-present build",
     "typecheck": "pnpm -r --if-present typecheck",
-    "test": "vitest run",
+    "test": "pnpm build && vitest run",
     "lint": "prettier --check \"apps/**/*.{ts,tsx,js,json,css,html}\" \"packages/**/*.{ts,js,json}\" \"scripts/**/*.mjs\" \"*.{json,yaml,yml}\"",
-    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "check": "pnpm lint && pnpm typecheck && pnpm test",
     "format": "prettier --write \"apps/**/*.{ts,tsx,js,json,css,html}\" \"packages/**/*.{ts,js,json}\" \"scripts/**/*.mjs\" \"*.{json,yaml,yml}\""
   },
   "devDependencies": {

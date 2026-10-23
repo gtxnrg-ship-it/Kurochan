@@ -14,7 +14,7 @@ export const ChatMessageSchema = z.object({
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 
 export const ChatCompletionRequestSchema = z.object({
-  model: z.string().trim().min(1).max(200).default("omni/balanced"),
+  model: z.enum(["omni/fast", "omni/balanced", "omni/quality"]).default("omni/balanced"),
   messages: z.array(ChatMessageSchema).min(1).max(100),
   max_tokens: z.number().int().min(1).max(8192).optional(),
   temperature: z.number().min(0).max(2).optional(),

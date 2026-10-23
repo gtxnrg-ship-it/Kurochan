@@ -36,7 +36,7 @@ describe("OmniRouter", () => {
     expect(first).toHaveBeenCalledOnce();
     expect(second).toHaveBeenCalledOnce();
     expect(result.attempts).toBe(2);
-    expect(result.providerId).toBe("openrouter");
+    expect(result.providerId).toBe("freellmapi");
   });
 
   it("does not fail over for a non-retryable provider error", async () => {

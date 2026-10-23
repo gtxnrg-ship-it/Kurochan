@@ -35,8 +35,8 @@ export interface ProviderHealth {
 interface MutableProviderHealth {
   consecutiveFailures: number;
   openUntil: number;
-  lastLatencyMs?: number;
-  lastErrorCode?: string;
+  lastLatencyMs: number | undefined;
+  lastErrorCode: string | undefined;
 }
 
 const DEFAULT_ROUTES: Record<RouteProfile, readonly ProviderId[]> = {
@@ -107,7 +107,7 @@ export class OmniRouter {
     if (!Number.isInteger(this.maxAttempts) || this.maxAttempts < 1 || this.maxAttempts > 5) throw new Error("maxAttempts must be between 1 and 5");
     if (!Number.isInteger(this.failureThreshold) || this.failureThreshold < 1 || this.failureThreshold > 20) throw new Error("failureThreshold must be between 1 and 20");
     if (!Number.isInteger(this.circuitCooldownMs) || this.circuitCooldownMs < 1_000) throw new Error("circuitCooldownMs must be at least 1000");
-    for (const id of options.providers.keys()) this.health.set(id, { consecutiveFailures: 0, openUntil: 0 });
+    for (const id of options.providers.keys()) this.health.set(id, { consecutiveFailures: 0, openUntil: 0, lastLatencyMs: undefined, lastErrorCode: undefined });
   }
 
   async complete(request: OmniRouteRequest): Promise<OmniRouteResult> {
@@ -139,7 +139,7 @@ export class OmniRouter {
         health.openUntil = 0;
         health.lastLatencyMs = result.latencyMs;
         health.lastErrorCode = undefined;
-        return { ...result, routeProfile: request.profile, attempts };
+        return { ...result, providerId: provider.id, routeProfile: request.profile, attempts };
       } catch (error) {
         lastError = error;
         const providerError = error instanceof ProviderError ? error : undefined;
@@ -158,7 +158,7 @@ export class OmniRouter {
       }
     }
 
-    if (providerErrors.length === 0) {
+    if (attempts === 0) {
       throw new OmniRouterError("no_provider_available", "All configured providers are temporarily excluded by circuit breakers.", attempts, providerErrors, true);
     }
     const finalCode = lastError instanceof ProviderError ? lastError.code : "upstream_unavailable";

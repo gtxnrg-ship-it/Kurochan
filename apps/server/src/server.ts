@@ -31,12 +31,6 @@ function allowedOrigins(env: Environment): string[] {
   return [...new Set(configured)];
 }
 
-function providerIdFromModel(model: string): ProviderId | undefined {
-  if (model.startsWith("openrouter/")) return "openrouter";
-  if (model.startsWith("freellmapi/")) return "freellmapi";
-  return undefined;
-}
-
 function profileFromModel(model: string) {
   const normalized = model.toLowerCase();
   if (normalized === "omni/fast") return "fast" as const;
@@ -166,7 +160,6 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         error: { code: "streaming_not_supported_yet", message: "Streaming responses are not enabled in this backend build. Set stream to false.", retryable: false, requestId: request.id },
       });
     }
-    const forcedProvider = providerIdFromModel(body.model);
     const profile = profileFromModel(body.model);
     const messages = body.messages;
     const abort = new AbortController();
@@ -179,9 +172,6 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         maxTokens: body.max_tokens ?? 1024,
         temperature: body.temperature ?? 0.2,
         signal: abort.signal,
-        ...(forcedProvider && registry.providers.has(forcedProvider)
-          ? { profile, }
-          : {}),
       });
       const responseBody: ChatCompletionResponse = {
         id: `chatcmpl_${crypto.randomUUID().replaceAll("-", "")}`,
