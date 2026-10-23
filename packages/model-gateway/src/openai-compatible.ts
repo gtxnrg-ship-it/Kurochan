@@ -43,11 +43,20 @@ function optionalNumber(value: unknown): number | undefined {
 
 function usageFrom(value: unknown): ChatCompletionUsage | undefined {
   if (!value || typeof value !== "object") return undefined;
-  const usage = value as {
+  const record = value as {
+    usage?: unknown;
     prompt_tokens?: unknown;
     completion_tokens?: unknown;
     total_tokens?: unknown;
   };
+  const usage =
+    record.usage && typeof record.usage === "object"
+      ? (record.usage as {
+          prompt_tokens?: unknown;
+          completion_tokens?: unknown;
+          total_tokens?: unknown;
+        })
+      : record;
   const promptTokens = optionalNumber(usage.prompt_tokens);
   const completionTokens = optionalNumber(usage.completion_tokens);
   const totalTokens = optionalNumber(usage.total_tokens);
