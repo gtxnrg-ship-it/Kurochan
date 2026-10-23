@@ -9,6 +9,48 @@ import type {
   TaskStatus,
 } from "@kurochan/contracts";
 
+export type ProviderUsageOutcome = "success" | "failure";
+export type ProviderUsageOperation =
+  | "chat"
+  | "planning"
+  | "task"
+  | "verification"
+  | "provider_test"
+  | "other";
+
+export interface ProviderUsageInput {
+  readonly providerId: ProviderId;
+  readonly model: string;
+  readonly profile: RouteProfile;
+  readonly operation: ProviderUsageOperation;
+  readonly runId?: string;
+  readonly taskId?: string;
+  readonly latencyMs: number;
+  readonly outcome: ProviderUsageOutcome;
+  readonly errorCode?: string;
+  readonly usage?: {
+    readonly promptTokens?: number;
+    readonly completionTokens?: number;
+    readonly totalTokens?: number;
+  };
+}
+
+export interface ProviderUsageSummary {
+  readonly providerId: ProviderId;
+  readonly model: string;
+  readonly operation: ProviderUsageOperation;
+  readonly requests: number;
+  readonly successfulRequests: number;
+  readonly failedRequests: number;
+  readonly requestsWithTokenUsage: number;
+  readonly requestsWithoutTokenUsage: number;
+  readonly promptTokens: number;
+  readonly completionTokens: number;
+  readonly totalTokens: number;
+  readonly averageLatencyMs: number;
+  readonly lastUsedAt: number;
+}
+
 export interface PlannedTask {
   readonly key: string;
   readonly agentId: string;
@@ -278,16 +320,161 @@ export class RunStore {
         started_at INTEGER NOT NULL,
         last_seen_at INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS provider_usage (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        provider_id TEXT NOT NULL CHECK(provider_id IN ('openrouter','freellmapi')),
+        model TEXT NOT NULL,
+        route_profile TEXT NOT NULL CHECK(route_profile IN ('fast','balanced','quality')),
+        operation TEXT NOT NULL CHECK(operation IN ('chat','planning','task','verification','provider_test','other')),
+        run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
+        task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+        prompt_tokens INTEGER CHECK(prompt_tokens IS NULL OR prompt_tokens >= 0),
+        completion_tokens INTEGER CHECK(completion_tokens IS NULL OR completion_tokens >= 0),
+        total_tokens INTEGER CHECK(total_tokens IS NULL OR total_tokens >= 0),
+        latency_ms INTEGER NOT NULL CHECK(latency_ms >= 0),
+        outcome TEXT NOT NULL CHECK(outcome IN ('success','failure')),
+        error_code TEXT,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_provider_usage_created ON provider_usage(created_at);
+      CREATE INDEX IF NOT EXISTS idx_provider_usage_provider_created ON provider_usage(provider_id, created_at);
       CREATE INDEX IF NOT EXISTS idx_runs_status_updated ON runs(status, updated_at);
       CREATE INDEX IF NOT EXISTS idx_tasks_claim ON tasks(status, available_at, created_at);
       CREATE INDEX IF NOT EXISTS idx_tasks_run_status ON tasks(run_id, status);
       CREATE INDEX IF NOT EXISTS idx_events_run_id ON run_events(run_id, id);
-      PRAGMA user_version = 1;
+      PRAGMA user_version = 2;
     `);
   }
 
   close(): void {
     this.db.close();
+  }
+
+  recordProviderUsage(
+    input: ProviderUsageInput,
+    now = Date.now(),
+  ): void {
+    if (input.providerId !== "openrouter" && input.providerId !== "freellmapi") {
+      throw new Error("Unknown provider ID for usage record.");
+    }
+    assertText(input.model, "model", 400);
+    if (!VALID_PROFILES.has(input.profile)) {
+      throw new Error("Unknown route profile for usage record.");
+    }
+    if (
+      !["chat", "planning", "task", "verification", "provider_test", "other"].includes(input.operation)
+    ) {
+      throw new Error("Unknown operation for usage record.");
+    }
+    if (input.outcome !== "success" && input.outcome !== "failure") {
+      throw new Error("Unknown usage outcome.");
+    }
+    if (!Number.isInteger(input.latencyMs) || input.latencyMs < 0 || input.latencyMs > 86_400_000) {
+      throw new Error("Usage latency must be a non-negative integer under 24 hours.");
+    }
+    if (input.runId !== undefined) assertText(input.runId, "runId", 200);
+    if (input.taskId !== undefined) assertText(input.taskId, "taskId", 200);
+
+    const validateTokens = (value: number | undefined, label: string) => {
+      if (value !== undefined && (!Number.isSafeInteger(value) || value < 0)) {
+        throw new Error(label + " must be a non-negative safe integer.");
+      }
+      return value ?? null;
+    };
+    const promptTokens = validateTokens(input.usage?.promptTokens, "promptTokens");
+    const completionTokens = validateTokens(input.usage?.completionTokens, "completionTokens");
+    const reportedTotalTokens = input.usage?.totalTokens;
+    const totalTokens = validateTokens(
+      reportedTotalTokens ??
+        (promptTokens !== null && completionTokens !== null
+          ? promptTokens + completionTokens
+          : undefined),
+      "totalTokens",
+    );
+    const errorCode = input.errorCode?.trim();
+    if (errorCode) assertText(errorCode, "errorCode", 100);
+
+    this.db.prepare(
+      `INSERT INTO provider_usage(
+        provider_id,model,route_profile,operation,run_id,task_id,
+        prompt_tokens,completion_tokens,total_tokens,latency_ms,outcome,error_code,created_at
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    ).run(
+      input.providerId,
+      input.model,
+      input.profile,
+      input.operation,
+      input.runId ?? null,
+      input.taskId ?? null,
+      promptTokens,
+      completionTokens,
+      totalTokens,
+      input.latencyMs,
+      input.outcome,
+      errorCode || null,
+      now,
+    );
+  }
+
+  summarizeProviderUsage(
+    since = 0,
+    until = Date.now(),
+  ): readonly ProviderUsageSummary[] {
+    if (
+      !Number.isSafeInteger(since) ||
+      !Number.isSafeInteger(until) ||
+      since < 0 ||
+      until < since
+    ) {
+      throw new Error("Usage time range must be a valid increasing timestamp range.");
+    }
+    const rows = this.db.prepare(
+      `SELECT
+        provider_id,
+        model,
+        operation,
+        COUNT(*) AS requests,
+        SUM(CASE WHEN outcome='success' THEN 1 ELSE 0 END) AS successful_requests,
+        SUM(CASE WHEN outcome='failure' THEN 1 ELSE 0 END) AS failed_requests,
+        SUM(CASE WHEN prompt_tokens IS NOT NULL OR completion_tokens IS NOT NULL OR total_tokens IS NOT NULL THEN 1 ELSE 0 END) AS requests_with_token_usage,
+        SUM(COALESCE(prompt_tokens, 0)) AS prompt_tokens,
+        SUM(COALESCE(completion_tokens, 0)) AS completion_tokens,
+        SUM(COALESCE(total_tokens, 0)) AS total_tokens,
+        AVG(latency_ms) AS average_latency_ms,
+        MAX(created_at) AS last_used_at
+      FROM provider_usage
+      WHERE created_at >= ? AND created_at <= ?
+      GROUP BY provider_id, model, operation
+      ORDER BY provider_id, model, operation`,
+    ).all(since, until) as Array<{
+      provider_id: ProviderId;
+      model: string;
+      operation: ProviderUsageOperation;
+      requests: number;
+      successful_requests: number;
+      failed_requests: number;
+      requests_with_token_usage: number;
+      prompt_tokens: number;
+      completion_tokens: number;
+      total_tokens: number;
+      average_latency_ms: number;
+      last_used_at: number;
+    }>;
+    return rows.map((row) => ({
+      providerId: row.provider_id,
+      model: row.model,
+      operation: row.operation,
+      requests: row.requests,
+      successfulRequests: row.successful_requests,
+      failedRequests: row.failed_requests,
+      requestsWithTokenUsage: row.requests_with_token_usage,
+      requestsWithoutTokenUsage: row.requests - row.requests_with_token_usage,
+      promptTokens: row.prompt_tokens,
+      completionTokens: row.completion_tokens,
+      totalTokens: row.total_tokens,
+      averageLatencyMs: Math.round(row.average_latency_ms),
+      lastUsedAt: row.last_used_at,
+    }));
   }
 
   recordWorkerHeartbeat(
