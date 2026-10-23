@@ -86,4 +86,57 @@ describe("OpenAICompatibleChatProvider", () => {
       provider.complete({ messages: [{ role: "user", content: "hi" }] }),
     ).rejects.toMatchObject({ code: "not_configured" });
   });
+  it("parses OpenAI-compatible SSE deltas and requests true provider streaming", async () => {
+    const fetchImpl = vi.fn(async (_input: string | URL | Request, init?: RequestInit) =>
+      new Response([
+        'data: {"choices":[{"delta":{"role":"assistant"}}]}',
+        "",
+        'data: {"choices":[{"delta":{"content":"hello"}}]}',
+        "",
+        'data: {"choices":[{"delta":{"content":" world"}}]}',
+        "",
+        "data: [DONE]",
+        "",
+      ].join("\n"), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      }),
+    );
+    const provider = new OpenAICompatibleChatProvider({
+      id: "openrouter",
+      displayName: "OpenRouter",
+      baseUrl: "https://example.test/v1",
+      apiKey: "secret-test-key",
+      defaultModel: "test-model",
+      capabilities: { streaming: true },
+      fetchImpl,
+    });
+    const stream = await provider.stream({
+      messages: [{ role: "user", content: "hi" }],
+      requiredCapabilities: ["text", "streaming"],
+    });
+    const chunks: string[] = [];
+    for await (const chunk of stream) chunks.push(chunk.content);
+    expect(chunks).toEqual(["hello", " world"]);
+    expect(JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body))).toMatchObject({
+      model: "test-model",
+      stream: true,
+    });
+    expect(String((fetchImpl.mock.calls[0]?.[1]?.headers as Record<string, string>).accept)).toBe("text/event-stream");
+  });
+
+  it("rejects streaming when the provider capability is not enabled", async () => {
+    const provider = new OpenAICompatibleChatProvider({
+      id: "openrouter",
+      displayName: "OpenRouter",
+      baseUrl: "https://example.test/v1",
+      apiKey: "secret",
+      defaultModel: "test-model",
+    });
+    await expect(provider.stream({
+      messages: [{ role: "user", content: "hi" }],
+      requiredCapabilities: ["text", "streaming"],
+    })).rejects.toMatchObject({ code: "upstream_rejected" });
+  });
+
 });
