@@ -1,4 +1,5 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
+import { resolve } from "node:path";
 import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
@@ -17,7 +18,7 @@ import {
 import { OmniRouter, routeOrdersFromEnvironment } from "@kurochan/omnirouter";
 import { AgentCatalog } from "@kurochan/agent-catalog";
 import { RunStore, type CreateRunInput } from "@kurochan/storage";
-import { PlanError, PlanService } from "@kurochan/orchestrator";
+import { PlanError, PlanService, TaskWorker, WorkspaceRuntime } from "@kurochan/orchestrator";
 
 export interface ServerOptions {
   readonly env?: Environment;
@@ -26,6 +27,7 @@ export interface ServerOptions {
   readonly store?: RunStore;
   readonly catalog?: AgentCatalog;
   readonly planner?: PlanService;
+  readonly workerEnabled?: boolean;
 }
 
 function safeEqual(a: string, b: string): boolean {
@@ -127,8 +129,32 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     disableRequestLogging: false,
   });
 
+  app.addHook("onReady", async () => {
+    if (workerEnabled) worker.start();
+  });
+
   app.addHook("onClose", async () => {
+    await worker.stop();
     store.close();
+  });
+
+  const workspaceRoot = resolve(
+    process.cwd(),
+    env.KUROCHAN_WORKSPACE_ROOT?.trim() || "data/workspaces",
+  );
+  const workspace = new WorkspaceRuntime({ root: workspaceRoot });
+  const workerEnabled = options.workerEnabled ?? false;
+  const worker = new TaskWorker({
+    store,
+    catalog,
+    router,
+    workspaceRoot,
+    onError: (error) => {
+      const code = error && typeof error === "object" && "code" in error
+        ? String((error as { code?: unknown }).code ?? "worker_error")
+        : "worker_error";
+      app.log.warn({ code }, "Task worker iteration failed");
+    },
   });
 
   const origins = allowedOrigins(env);
@@ -231,6 +257,25 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       availableProfiles: ["fast", "balanced", "quality"],
     },
     providers: registry.statuses,
+  }));
+
+  app.get("/v1/worker/status", async () => ({
+    enabled: workerEnabled,
+    running: worker.isRunning,
+    workerId: worker.workerId,
+    workspaceTools: [
+      "workspace.list_files",
+      "workspace.read_file",
+      "workspace.write_file",
+      "workspace.search_text",
+    ],
+    executionLimits: {
+      shellEnabled: false,
+      networkToolEnabled: false,
+      workspaceRootConfigured: Boolean(workspaceRoot),
+      maxToolRounds: 6,
+      leaseMs: 120000,
+    },
   }));
 
   app.get("/v1/omnirouter/status", async () => ({
@@ -565,6 +610,40 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       tasks: store.listTasks(runId),
       events: store.listEvents(runId, 0, 100),
     };
+  });
+
+  app.get("/v1/runs/:runId/artifacts", async (request, reply) => {
+    const { runId } = request.params as { runId: string };
+    if (!store.getRun(runId)) {
+      return reply.code(404).send({ error: { code: "run_not_found", message: "Run was not found.", retryable: false } });
+    }
+    try {
+      return { runId, data: await workspace.listFiles(runId) };
+    } catch (error) {
+      requestWarning(app, error, "workspace_list_failed");
+      return reply.code(400).send({ error: { code: "workspace_unavailable", message: "Workspace files could not be listed for this run.", retryable: false } });
+    }
+  });
+
+  app.get("/v1/runs/:runId/artifacts/content", async (request, reply) => {
+    const { runId } = request.params as { runId: string };
+    const query = request.query as Record<string, unknown>;
+    const path = typeof query.path === "string" ? query.path : "";
+    if (!store.getRun(runId)) {
+      return reply.code(404).send({ error: { code: "run_not_found", message: "Run was not found.", retryable: false } });
+    }
+    if (!path || path.length > 1000) {
+      return reply.code(400).send({ error: { code: "invalid_artifact_path", message: "A workspace-relative path is required.", retryable: false } });
+    }
+    try {
+      return await workspace.readFile(runId, path);
+    } catch (error) {
+      const code = error && typeof error === "object" && "code" in error
+        ? String((error as { code?: unknown }).code ?? "artifact_read_failed")
+        : "artifact_read_failed";
+      const status = code === "file_not_found" ? 404 : 400;
+      return reply.code(status).send({ error: { code, message: error instanceof Error ? error.message : "Artifact could not be read.", retryable: false } });
+    }
   });
 
   app.get("/v1/runs/:runId/events", async (request, reply) => {
