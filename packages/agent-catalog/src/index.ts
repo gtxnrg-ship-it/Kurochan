@@ -135,20 +135,32 @@ function normalizeDivision(value: string): string {
 }
 
 async function listProfilePaths(root: string): Promise<string[]> {
-  const divisions = await readdir(root, { withFileTypes: true });
   const paths: string[] = [];
-  for (const division of divisions) {
-    if (!division.isDirectory() || !DIVISION_ALLOWLIST.has(division.name))
-      continue;
-    const directory = resolve(root, division.name);
+
+  async function walk(directory: string): Promise<void> {
     const children = await readdir(directory, { withFileTypes: true });
     for (const child of children) {
-      if (child.isFile() && extname(child.name).toLowerCase() === ".md") {
-        paths.push(resolve(directory, child.name));
+      const path = resolve(directory, child.name);
+      if (child.isDirectory()) {
+        await walk(path);
+      } else if (
+        child.isFile() &&
+        extname(child.name).toLowerCase() === ".md" &&
+        child.name.toLowerCase() !== "readme.md"
+      ) {
+        paths.push(path);
       }
     }
   }
-  return paths.sort((a, b) => a.localeCompare(b));
+
+  const divisions = await readdir(root, { withFileTypes: true });
+  for (const division of divisions) {
+    if (!division.isDirectory() || !DIVISION_ALLOWLIST.has(division.name)) {
+      continue;
+    }
+    await walk(resolve(root, division.name));
+  }
+  return paths.sort((left, right) => left.localeCompare(right));
 }
 
 export class AgentCatalog {
@@ -353,14 +365,12 @@ export class AgentCatalog {
     const agents: AgentDefinition[] = [];
     for (const path of paths) {
       const sourcePath = relative(this.root, path).split(sep).join("/");
-      const division = normalizeDivision(
-        dirname(sourcePath).split(sep).join("/"),
-      );
+      const division = normalizeDivision(sourcePath.split("/")[0] ?? "");
       if (!DIVISION_ALLOWLIST.has(division)) continue;
       const raw = await readFile(path, "utf8");
       const { metadata, instructions } = parseFrontmatter(raw);
       const name = stringField(metadata.name, basename(path, ".md"));
-      const id = `${division}/${basename(path, ".md")}`;
+      const id = sourcePath.replace(/\.md$/i, "");
       agents.push({
         id,
         name,
