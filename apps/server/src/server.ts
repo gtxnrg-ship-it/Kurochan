@@ -2040,6 +2040,9 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
               format: audioResult.format,
               audio: audioResult.audio,
             });
+            // Read back the canonical persisted artifact so the returned URL,
+            // byte count and metadata describe exactly what was saved.
+            savedAudio = store.getConversationAudio(conversationId, assistantMessage.id);
             synthesis = {
               model: audioResult.model,
               format: record.format,
