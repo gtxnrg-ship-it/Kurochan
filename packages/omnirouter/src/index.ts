@@ -322,6 +322,7 @@ export class OmniRouter {
         }
         attempts += 1;
         try {
+          const startedAt = this.now();
           const chunks = await provider.stream!({
             messages: request.messages,
             ...(request.systemPrompt
@@ -345,10 +346,42 @@ export class OmniRouter {
                 : {}
               : {}),
           });
-          const startedAt = this.now();
+
+          // Force the provider to deliver its first chunk before returning a route.
+          // If the connection dies before any output, retry a different capable provider.
+          const iterator = chunks[Symbol.asyncIterator]();
+          let first: IteratorResult<ChatCompletionStreamChunk>;
+          try {
+            first = await iterator.next();
+          } catch (error) {
+            try {
+              await iterator.return?.();
+            } catch {
+              // Preserve the original provider error.
+            }
+            throw error;
+          }
+          const prefetched: AsyncIterable<ChatCompletionStreamChunk> = {
+            async *[Symbol.asyncIterator]() {
+              try {
+                if (!first.done) yield first.value;
+                while (true) {
+                  const next = await iterator.next();
+                  if (next.done) return;
+                  yield next.value;
+                }
+              } finally {
+                try {
+                  await iterator.return?.();
+                } catch {
+                  // The downstream can close before upstream responds to cancellation.
+                }
+              }
+            },
+          };
           const observed = this.observeStream(
             provider,
-            chunks,
+            prefetched,
             startedAt,
             request.signal,
             release,
