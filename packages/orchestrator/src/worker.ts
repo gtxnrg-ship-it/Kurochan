@@ -124,6 +124,7 @@ export class TaskWorker {
   private activeAbortController: AbortController | undefined;
   private activeTaskId: string | undefined;
   private activeRunId: string | undefined;
+  private readonly finalizationControllers = new Map<string, AbortController>();
 
   constructor(private readonly options: TaskWorkerOptions) {
     this.workerId = options.workerId ?? "worker-" + randomUUID();
@@ -165,7 +166,8 @@ export class TaskWorker {
       code: "run_cancelled",
       retryable: false,
     });
-    this.activeAbortController?.abort(error);
+    if (this.activeRunId === runId) this.activeAbortController?.abort(error);
+    this.finalizationControllers.get(runId)?.abort(error);
   }
 
   private writeHeartbeat(
@@ -275,7 +277,7 @@ export class TaskWorker {
       // A reviewer/provider outage must not turn an already-persisted successful task into a failed task.
       if (run?.status === "verifying") {
         try {
-          await this.finalizeRun(run);
+          await this.finalizeRun(run, controller.signal);
         } catch (error) {
           this.options.onError?.(error);
         }
@@ -446,74 +448,115 @@ export class TaskWorker {
     for (const run of runs) await this.finalizeRun(run);
   }
 
-  private async finalizeRun(run: RunRecord): Promise<void> {
-    const tasks = this.options.store.listTasks(run.id);
-    if (tasks.length === 0 || tasks.some((task) => task.status !== "succeeded")) return;
-    const evidence: Evidence[] = [];
-    const response = await this.options.router.complete({
-      profile: "quality",
-      systemPrompt: [
-        "You are Kuro-chan's independent consistency reviewer.",
-        "Review the completed specialist task outputs for completeness against the stated goal, contradictions, missing handoffs, and unsupported completion claims.",
-        "Review attached sandbox execution evidence when present. A reported exit code is evidence that a command returned that status, not proof that it covered every acceptance criterion. Never claim a test, build, or fact was verified unless evidence supports it. GitHub read-only research may be considered; if general web research or external writes were not performed, state those limitations.",
-        'Return only JSON: {"passed":boolean,"summary":string,"checks":[{"name":string,"passed":boolean,"notes":string}],"blockers":[string]}',
-        "Set passed=false for material blockers or contradictions. Do not reward plausible prose without outputs/evidence.",
-      ].join("\n"),
-      messages: [{
-        role: "user",
-        content: jsonCharacterLimit({ goal: run.goal, taskOutputs: tasks.map((task) => ({
-          key: task.planKey, agentId: task.agentId, objective: task.objective, output: task.output, evidence: task.evidence,
-        })) }, 50_000),
-      }],
-      maxTokens: 1800,
-      temperature: 0,
-      timeoutMs: 45_000,
-      requiredCapabilities: ["text"],
-    });
-    const ReviewSchema = z.object({
-      passed: z.boolean(),
-      summary: z.string().trim().min(1).max(10_000),
-      checks: z.array(z.object({
-        name: z.string().trim().min(1).max(300),
-        passed: z.boolean(),
-        notes: z.string().trim().max(2000),
-      }).strict()).min(1).max(20),
-      blockers: z.array(z.string().max(2000)).max(20),
-    }).strict();
-    let review: z.infer<typeof ReviewSchema>;
-    try { review = ReviewSchema.parse(parsePayload(response.content)); }
-    catch {
-      this.options.store.verifyRun(run.id, false, "Independent consistency review returned an invalid result.", [], {
-        reviewPassed: false,
-        verificationScope: "task-output consistency only",
-        executionTestsRun: false,
-        error: "invalid_review_result",
+  private async finalizeRun(run: RunRecord, taskSignal?: AbortSignal): Promise<void> {
+    const controller = taskSignal ? undefined : new AbortController();
+    const signal = taskSignal ?? controller?.signal;
+    if (controller) this.finalizationControllers.set(run.id, controller);
+
+    try {
+      if (signal?.aborted || this.options.store.getRun(run.id)?.status !== "verifying") return;
+      const tasks = this.options.store.listTasks(run.id);
+      if (tasks.length === 0 || tasks.some((task) => task.status !== "succeeded")) return;
+
+      const response = await this.options.router.complete({
+        profile: "quality",
+        systemPrompt: [
+          "You are Kuro-chan's independent consistency reviewer.",
+          "Review the completed specialist task outputs for completeness against the stated goal, contradictions, missing handoffs, and unsupported completion claims.",
+          "Review attached sandbox execution evidence when present. A reported exit code is evidence that a command returned that status, not proof that it covered every acceptance criterion. Never claim a test, build, or fact was verified unless evidence supports it. GitHub read-only research may be considered; if general web research or external writes were not performed, state those limitations.",
+          'Return only JSON: {"passed":boolean,"summary":string,"checks":[{"name":string,"passed":boolean,"notes":string}],"blockers":[string]}',
+          "Set passed=false for material blockers or contradictions. Do not reward plausible prose without outputs/evidence.",
+        ].join("\n"),
+        messages: [{
+          role: "user",
+          content: jsonCharacterLimit({
+            goal: run.goal,
+            taskOutputs: tasks.map((task) => ({
+              key: task.planKey,
+              agentId: task.agentId,
+              objective: task.objective,
+              output: task.output,
+              evidence: task.evidence,
+            })),
+          }, 50_000),
+        }],
+        maxTokens: 1800,
+        temperature: 0,
+        timeoutMs: 45_000,
+        requiredCapabilities: ["text"],
+        ...(signal ? { signal } : {}),
+      }).catch((error: unknown) => {
+        if (signal?.aborted || this.options.store.getRun(run.id)?.status !== "verifying") {
+          return undefined;
+        }
+        throw error;
       });
-      return;
+
+      if (!response || signal?.aborted || this.options.store.getRun(run.id)?.status !== "verifying") return;
+
+      const ReviewSchema = z.object({
+        passed: z.boolean(),
+        summary: z.string().trim().min(1).max(10_000),
+        checks: z.array(z.object({
+          name: z.string().trim().min(1).max(300),
+          passed: z.boolean(),
+          notes: z.string().trim().max(2000),
+        }).strict()).min(1).max(20),
+        blockers: z.array(z.string().max(2000)).max(20),
+      }).strict();
+
+      let review: z.infer<typeof ReviewSchema>;
+      try {
+        review = ReviewSchema.parse(parsePayload(response.content));
+      } catch {
+        if (signal?.aborted || this.options.store.getRun(run.id)?.status !== "verifying") return;
+        this.options.store.verifyRun(run.id, false, "Independent consistency review returned an invalid result.", [], {
+          reviewPassed: false,
+          verificationScope: "task-output consistency only",
+          executionTestsRun: false,
+          error: "invalid_review_result",
+        });
+        return;
+      }
+
+      if (signal?.aborted || this.options.store.getRun(run.id)?.status !== "verifying") return;
+      const passed = review.passed && review.blockers.length === 0 && review.checks.every((check) => check.passed);
+      const evidence: Evidence[] = [{
+        kind: "model_review",
+        summary: passed ? "Independent consistency review found no declared blockers." : "Independent consistency review found blockers.",
+        metadata: {
+          providerId: response.providerId,
+          model: response.model,
+          checks: review.checks,
+          blockers: review.blockers,
+          executionTestsRun: false,
+        },
+      }];
+      const executionTestsRun = hasSuccessfulVerificationCommand(tasks.flatMap((task) => task.evidence));
+      const summary = [
+        review.summary,
+        "Verification scope: model-assisted task-output consistency review plus source and any recorded sandbox-command evidence.",
+        executionTestsRun
+          ? "Execution tests/build checks: at least one recognized test/build command exited successfully in the sandbox; this does not guarantee full coverage."
+          : "Execution tests/build checks: no recognized test/build command is evidenced as successfully completed.",
+      ].join("\n");
+
+      if (signal?.aborted || this.options.store.getRun(run.id)?.status !== "verifying") return;
+      this.options.store.verifyRun(run.id, passed, summary, evidence, {
+        review,
+        verificationScope: "model-assisted output review with available execution and source evidence",
+        executionTestsRun,
+        limitations: [
+          ...(this.options.sandbox ? ["Sandbox command evidence is not a substitute for human review or coverage analysis."] : ["No generated-code build or test execution occurred."]),
+          "GitHub research is read-only and limited to public repositories; authenticated private-repository access and remote writes are not implemented.",
+        ],
+        provider: { id: response.providerId, model: response.model, latencyMs: response.latencyMs },
+      });
+    } finally {
+      if (controller && this.finalizationControllers.get(run.id) === controller) {
+        this.finalizationControllers.delete(run.id);
+      }
     }
-    const passed = review.passed && review.blockers.length === 0 && review.checks.every((check) => check.passed);
-    const summary = [
-      review.summary,
-      "Verification scope: model-assisted task-output consistency review plus source and any recorded sandbox-command evidence.",
-      hasSuccessfulVerificationCommand(tasks.flatMap((task) => task.evidence))
-        ? "Execution tests/build checks: at least one recognized test/build command exited successfully in the sandbox; this does not guarantee full coverage."
-        : "Execution tests/build checks: no recognized test/build command is evidenced as successfully completed.",
-    ].join("\n");
-    evidence.push({
-      kind: "model_review",
-      summary: passed ? "Independent consistency review found no declared blockers." : "Independent consistency review found blockers.",
-      metadata: { providerId: response.providerId, model: response.model, checks: review.checks, blockers: review.blockers, executionTestsRun: false },
-    });
-    this.options.store.verifyRun(run.id, passed, summary, evidence, {
-      review,
-      verificationScope: "model-assisted output review with available execution and source evidence",
-      executionTestsRun: hasSuccessfulVerificationCommand(tasks.flatMap((task) => task.evidence)),
-      limitations: [
-        ...(this.options.sandbox ? ["Sandbox command evidence is not a substitute for human review or coverage analysis."] : ["No generated-code build or test execution occurred."]),
-        "GitHub research is read-only and limited to public repositories; authenticated private-repository access and remote writes are not implemented.",
-      ],
-      provider: { id: response.providerId, model: response.model, latencyMs: response.latencyMs },
-    });
   }
 
   private async loop(): Promise<void> {
