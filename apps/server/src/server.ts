@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import Fastify, { type FastifyInstance } from "fastify";
 import { Readable } from "node:stream";
 import cors from "@fastify/cors";
+import multipart from "@fastify/multipart";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import { z } from "zod";
@@ -14,6 +15,8 @@ import {
 } from "@kurochan/contracts";
 import {
   createProviderRegistry,
+  OpenAICompatibleSpeechRuntime,
+  SpeechProviderError,
   type Environment,
 } from "@kurochan/model-gateway";
 import { OmniRouter, routeOrdersFromEnvironment } from "@kurochan/omnirouter";
@@ -45,6 +48,7 @@ export interface ServerOptions {
   readonly webResearch?: WebResearchExecutor;
   readonly githubProject?: GitHubProjectExecutor;
   readonly mcpTools?: McpToolRuntime;
+  readonly speech?: OpenAICompatibleSpeechRuntime;
 }
 
 function safeEqual(a: string, b: string): boolean {
@@ -115,6 +119,11 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     new RunStore(env.KUROCHAN_DB_PATH?.trim() || "data/kurochan.sqlite");
   const catalog = options.catalog ?? new AgentCatalog();
   const mcpTools = options.mcpTools ?? McpToolRuntime.fromEnvironment(env);
+  const speech = options.speech ?? OpenAICompatibleSpeechRuntime.fromEnvironment(env, {
+    maxAudioBytes: parseBoundedInteger(env.KUROCHAN_SPEECH_MAX_AUDIO_BYTES, 25 * 1024 * 1024, 1024, 25 * 1024 * 1024),
+    maxSpeechTextCharacters: parseBoundedInteger(env.KUROCHAN_SPEECH_MAX_TEXT_CHARACTERS, 20_000, 1, 100_000),
+    maxResponseBytes: parseBoundedInteger(env.KUROCHAN_SPEECH_MAX_RESPONSE_BYTES, 20 * 1024 * 1024, 1024, 50 * 1024 * 1024),
+  });
   const router = new OmniRouter({
     providers: registry.providers,
     routeOrder: routeOrdersFromEnvironment(env),
@@ -293,6 +302,16 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
 
   const origins = allowedOrigins(env);
   void app.register(helmet, { contentSecurityPolicy: false });
+  void app.register(multipart, {
+    limits: {
+      fileSize: 25 * 1024 * 1024,
+      files: 1,
+      fields: 5,
+      fieldNameSize: 100,
+      fieldSize: 4_000,
+      parts: 6,
+    },
+  });
   void app.register(cors, {
     origin: origins.length ? origins : false,
     credentials: false,
@@ -648,6 +667,174 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       leaseMs: 120000,
     },
   }));
+
+  app.get("/v1/speech/status", async () => ({
+    ...speech.status,
+    security: {
+      credentialsInResponses: false,
+      arbitraryUrlsAllowed: false,
+      apiKeyRequiredOnlyWhenUpstreamRequiresIt: true,
+      defaultTranscriptionLanguage: speech.status.transcription.defaultLanguage,
+    },
+  }));
+
+  app.post(
+    "/v1/audio/transcriptions",
+    {
+      config: { rateLimit: { max: 12, timeWindow: "1 minute" } },
+    },
+    async (request, reply) => {
+      let audio: Buffer | undefined;
+      let filename = "";
+      let contentType = "";
+      let language: string | undefined;
+      let prompt: string | undefined;
+      try {
+        for await (const part of request.parts({
+          limits: {
+            files: 1,
+            fields: 5,
+            fieldNameSize: 100,
+            fieldSize: 4_000,
+            fileSize: 25 * 1024 * 1024,
+            parts: 6,
+          },
+        })) {
+          if (part.type === "file") {
+            if (audio) {
+              return reply.code(400).send({
+                error: { code: "invalid_audio", message: "Exactly one audio file is allowed.", retryable: false, requestId: request.id },
+              });
+            }
+            filename = part.filename;
+            contentType = part.mimetype;
+            audio = await part.toBuffer();
+          } else {
+            const value = String(part.value ?? "");
+            if (part.fieldname === "language") language = value;
+            else if (part.fieldname === "prompt") prompt = value;
+            else {
+              return reply.code(400).send({
+                error: { code: "invalid_audio_field", message: "Only language and prompt fields are supported.", retryable: false, requestId: request.id },
+              });
+            }
+          }
+        }
+      } catch (error) {
+        const typed = error as { code?: unknown; message?: unknown };
+        const tooLarge = typed.code === "FST_REQ_FILE_TOO_LARGE";
+        const status = tooLarge ? 413 : 400;
+        return reply.code(status).send({
+          error: {
+            code: tooLarge ? "audio_too_large" : "invalid_audio_upload",
+            message: tooLarge ? "Audio upload exceeds 25 MiB." : "Audio multipart upload could not be read.",
+            retryable: false,
+            requestId: request.id,
+          },
+        });
+      }
+      if (!audio) {
+        return reply.code(400).send({
+          error: { code: "missing_audio", message: "Provide one audio file in the multipart field.", retryable: false, requestId: request.id },
+        });
+      }
+      const abort = new AbortController();
+      request.raw.on("aborted", () => abort.abort());
+      try {
+        const result = await speech.transcribe({
+          audio,
+          filename,
+          contentType,
+          ...(language ? { language } : {}),
+          ...(prompt ? { prompt } : {}),
+          signal: abort.signal,
+        });
+        return {
+          text: result.text,
+          model: result.model,
+          latencyMs: result.latencyMs,
+          language: language ?? speech.status.transcription.defaultLanguage,
+        };
+      } catch (error) {
+        const typed = error as { code?: unknown; message?: unknown; retryable?: unknown };
+        const code = error instanceof SpeechProviderError ? error.code : (typeof typed.code === "string" ? typed.code : "speech_transcription_failed");
+        const status = code === "not_configured" ? 503
+          : code === "cancelled" ? 499
+          : code === "rate_limited" ? 429
+          : code === "invalid_audio" ? 400
+          : code === "audio_too_large" ? 413
+          : code === "invalid_configuration" ? 500
+          : 502;
+        request.log.warn({ code, requestId: request.id }, "Speech transcription failed");
+        return reply.code(status).send({
+          error: {
+            code,
+            message: error instanceof SpeechProviderError ? error.message : "Speech transcription failed. Check the server-side speech configuration.",
+            retryable: error instanceof SpeechProviderError ? error.retryable : status >= 500,
+            requestId: request.id,
+          },
+        });
+      }
+    },
+  );
+
+  app.post(
+    "/v1/audio/speech",
+    {
+      config: { rateLimit: { max: 12, timeWindow: "1 minute" } },
+    },
+    async (request, reply) => {
+      const schema = z.object({
+        input: z.string().trim().min(1).max(100_000),
+        voice: z.string().trim().min(1).max(200).optional(),
+        response_format: z.enum(["mp3", "opus", "aac", "flac", "wav", "pcm"]).optional(),
+        instructions: z.string().trim().max(2_000).optional(),
+      }).strict();
+      const parsed = schema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: { code: "invalid_speech_request", message: "input, voice, response_format, or instructions are invalid.", retryable: false, requestId: request.id },
+        });
+      }
+      const abort = new AbortController();
+      request.raw.on("aborted", () => abort.abort());
+      try {
+        const result = await speech.synthesize({
+          text: parsed.data.input,
+          ...(parsed.data.voice ? { voice: parsed.data.voice } : {}),
+          ...(parsed.data.response_format ? { responseFormat: parsed.data.response_format } : {}),
+          ...(parsed.data.instructions ? { instructions: parsed.data.instructions } : {}),
+          signal: abort.signal,
+        });
+        return reply
+          .header("cache-control", "no-store")
+          .header("x-content-type-options", "nosniff")
+          .header("x-speech-model", result.model)
+          .header("x-speech-format", result.format)
+          .type(result.contentType)
+          .send(Buffer.from(result.audio));
+      } catch (error) {
+        const typed = error as { code?: unknown; message?: unknown; retryable?: unknown };
+        const code = error instanceof SpeechProviderError ? error.code : (typeof typed.code === "string" ? typed.code : "speech_synthesis_failed");
+        const status = code === "not_configured" ? 503
+          : code === "cancelled" ? 499
+          : code === "rate_limited" ? 429
+          : code === "text_too_large" ? 413
+          : code === "invalid_response" ? 400
+          : code === "invalid_configuration" ? 500
+          : 502;
+        request.log.warn({ code, requestId: request.id }, "Speech synthesis failed");
+        return reply.code(status).send({
+          error: {
+            code,
+            message: error instanceof SpeechProviderError ? error.message : "Speech synthesis failed. Check the server-side speech configuration.",
+            retryable: error instanceof SpeechProviderError ? error.retryable : status >= 500,
+            requestId: request.id,
+          },
+        });
+      }
+    },
+  );
 
   app.get("/v1/research/status", async () => ({
     web: {
