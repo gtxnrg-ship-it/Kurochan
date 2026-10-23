@@ -307,10 +307,30 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     webResearch,
     githubProject,
     mcpTools,
-    concurrency: parseBoundedInteger(env.KUROCHAN_WORKER_CONCURRENCY, 4, 1, 32),
-    leaseMs: parseBoundedInteger(env.KUROCHAN_WORKER_LEASE_MS, 120_000, 1_000, 600_000),
-    pollIntervalMs: parseBoundedInteger(env.KUROCHAN_WORKER_POLL_MS, 1_000, 100, 30_000),
-    maxToolRounds: parseBoundedInteger(env.KUROCHAN_WORKER_MAX_TOOL_ROUNDS, 6, 1, 12),
+    concurrency: parseBoundedInteger(
+      env.KUROCHAN_WORKER_CONCURRENCY,
+      4,
+      1,
+      32,
+    ),
+    leaseMs: parseBoundedInteger(
+      env.KUROCHAN_WORKER_LEASE_MS,
+      120_000,
+      1_000,
+      600_000,
+    ),
+    pollIntervalMs: parseBoundedInteger(
+      env.KUROCHAN_WORKER_POLL_MS,
+      1_000,
+      100,
+      30_000,
+    ),
+    maxToolRounds: parseBoundedInteger(
+      env.KUROCHAN_WORKER_MAX_TOOL_ROUNDS,
+      6,
+      1,
+      12,
+    ),
     onError: (error) => {
       const code =
         error && typeof error === "object" && "code" in error
@@ -603,9 +623,24 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     running: worker.isRunning,
     workerId: worker.workerId,
     concurrency: parseBoundedInteger(env.KUROCHAN_WORKER_CONCURRENCY, 4, 1, 32),
-    leaseMs: parseBoundedInteger(env.KUROCHAN_WORKER_LEASE_MS, 120_000, 1_000, 600_000),
-    pollIntervalMs: parseBoundedInteger(env.KUROCHAN_WORKER_POLL_MS, 1_000, 100, 30_000),
-    maxToolRounds: parseBoundedInteger(env.KUROCHAN_WORKER_MAX_TOOL_ROUNDS, 6, 1, 12),
+    leaseMs: parseBoundedInteger(
+      env.KUROCHAN_WORKER_LEASE_MS,
+      120_000,
+      1_000,
+      600_000,
+    ),
+    pollIntervalMs: parseBoundedInteger(
+      env.KUROCHAN_WORKER_POLL_MS,
+      1_000,
+      100,
+      30_000,
+    ),
+    maxToolRounds: parseBoundedInteger(
+      env.KUROCHAN_WORKER_MAX_TOOL_ROUNDS,
+      6,
+      1,
+      12,
+    ),
     mcpTools: {
       enabled: mcpTools.isConfigured,
       servers: mcpTools.status(),
