@@ -604,6 +604,56 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     },
   }));
 
+  app.get("/v1/usage", async (request, reply) => {
+    const query = request.query as Record<string, unknown>;
+    const rawPeriod = typeof query.period === "string" ? query.period : "24h";
+    const windows: Readonly<Record<string, number>> = {
+      "24h": 24 * 60 * 60 * 1000,
+      "7d": 7 * 24 * 60 * 60 * 1000,
+      "30d": 30 * 24 * 60 * 60 * 1000,
+      all: 0,
+    };
+    if (!(rawPeriod in windows)) {
+      return reply.code(400).send({
+        error: {
+          code: "invalid_usage_period",
+          message: "period must be one of 24h, 7d, 30d, or all.",
+          retryable: false,
+        },
+      });
+    }
+    const until = Date.now();
+    const since = rawPeriod === "all" ? 0 : until - windows[rawPeriod]!;
+    const data = store.summarizeProviderUsage(since, until);
+    const totals = data.reduce((sum, entry) => ({
+      requests: sum.requests + entry.requests,
+      successfulRequests: sum.successfulRequests + entry.successfulRequests,
+      failedRequests: sum.failedRequests + entry.failedRequests,
+      requestsWithTokenUsage: sum.requestsWithTokenUsage + entry.requestsWithTokenUsage,
+      requestsWithoutTokenUsage: sum.requestsWithoutTokenUsage + entry.requestsWithoutTokenUsage,
+      promptTokens: sum.promptTokens + entry.promptTokens,
+      completionTokens: sum.completionTokens + entry.completionTokens,
+      totalTokens: sum.totalTokens + entry.totalTokens,
+    }), {
+      requests: 0,
+      successfulRequests: 0,
+      failedRequests: 0,
+      requestsWithTokenUsage: 0,
+      requestsWithoutTokenUsage: 0,
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+    });
+    return {
+      period: rawPeriod,
+      since,
+      until,
+      totals,
+      data,
+      accountingNote: "Token totals include only usage reported by an upstream provider. Missing usage is not estimated, and provider billing/pricing is not inferred.",
+    };
+  });
+
   app.get("/v1/omnirouter/status", async () => ({
     name: "OmniRouter",
     profiles: routeOrdersFromEnvironment(env),
