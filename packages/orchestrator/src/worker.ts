@@ -134,6 +134,7 @@ function approvalGranted(
   store: RunStore,
   task: TaskRecord,
   approvalType: ApprovalType = "task-level",
+  expectedAction: Readonly<Record<string, unknown>> = {},
 ): boolean {
   const events = store
     .listEvents(task.runId, 0, 1000)
@@ -142,12 +143,16 @@ function approvalGranted(
     .filter((event) => event.type === "approval.requested")
     .filter((event) => {
       const payload = event.payload as {
-        action?: { approvalType?: unknown };
+        action?: Record<string, unknown>;
       };
-      const type = payload?.action?.approvalType;
-      return (
-        type === approvalType ||
-        (type === undefined && approvalType === "task-level")
+      const action = payload?.action ?? {};
+      const type = action.approvalType;
+      if (
+        type !== approvalType &&
+        !(type === undefined && approvalType === "task-level")
+      ) return false;
+      return Object.entries(expectedAction).every(
+        ([key, value]) => action[key] === value,
       );
     })
     .at(-1);
