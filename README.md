@@ -6,35 +6,37 @@ Kuro-chan is being built from a clean foundation. It aims to turn natural-langua
 
 ## Product principles
 
-- **Reuse proven expertise.** Integrate the upstream [Agency Agents](https://github.com/msitarzewski/agency-agents) catalog and its specialist instructions instead of recreating hundreds of personas.
-- **Coordinate only the specialists a task needs.** Route work by capability, make dependencies explicit, run independent work concurrently, and preserve context through structured handoffs.
-- **Research before committing to a plan.** Use appropriate web, repository, documentation, and project tools; distinguish evidence from assumptions.
-- **Execute, don't simulate.** Agents must use permission-scoped tools and real execution workers. A persona prompt is not a substitute for a compiler, terminal, browser, or API connection.
-- **Verify outcomes.** Treat tests, artifacts, tool results, and review evidence as the basis for completion claims.
-- **Mobile-first by design.** Make the phone a capable control surface, while delegating heavy builds and untrusted execution to isolated workers where appropriate.
-- **Provider-independent intelligence.** Keep the model gateway separate from orchestration and support provider adapters such as OpenRouter and the intended free-LLM API integration without exposing secrets to the client.
-- **Safe by construction.** Use explicit permissions, scoped credentials, task limits, cancellation, checkpoints, and confirmation for destructive or external actions.
-- **No fake completeness.** Mark features as implemented only when they exist and the relevant checks pass.
+- **Reuse expertise:** integrate the upstream [Agency Agents](https://github.com/msitarzewski/agency-agents) catalog rather than recreating hundreds of specialist personas.
+- **Orchestrate with OmniRouter:** Kuro-chan's internal routing layer chooses configured model providers based on route profile, availability, bounded failover, and policy. OmniRouter is not the same thing as OpenRouter.
+- **Treat providers as adapters:** OpenRouter and a configured FreeLLMAPI/OpenAI-compatible endpoint can serve as upstream inference providers. They do not own Kuro-chan's orchestration.
+- **Research before planning:** gather evidence from relevant web sources, repositories, documentation, and project files.
+- **Execute, don't simulate:** specialist prompts need real tools, permission-scoped workspaces, and execution workers.
+- **Verify outcomes:** tests, artifacts, tool results, and review evidence drive completion claims.
+- **Mobile-first by design:** the phone is the control surface. Heavy builds and untrusted code run in isolated workers.
+- **Safe by construction:** credentials remain server-side; permissions are scoped; destructive or external actions require approval.
+- **No fake completeness:** a visible screen or an untested stub does not count as a completed feature.
 
-## Architecture direction
+## Backend architecture
 
-The initial architecture is organized around clear boundaries:
+```text
+Client (later; backend-first build)
+  -> Kuro-chan API
+     -> durable run/task store and worker queue
+     -> planner + specialist selector
+        -> pinned Agency Agents catalog
+     -> OmniRouter (Kuro-chan-owned policy and routing)
+        -> OpenRouter provider adapter (optional)
+        -> FreeLLMAPI / OpenAI-compatible endpoint adapter (optional)
+     -> permission-scoped tools and isolated workers
+     -> evidence, audit events, and verification
+```
 
-1. **Client:** responsive mobile-first workspace for conversations, plans, task activity, approvals, outputs, and provider settings.
-2. **API and orchestration:** durable task lifecycle, planning, specialist selection, delegation, dependencies, retries, cancellation, and result aggregation.
-3. **Agent catalog:** pinned and validated upstream definitions with metadata, search, attribution, and reproducible sync.
-4. **Model gateway:** provider-neutral requests, capability-aware routing, timeout and retry policy, fallback, and usage accounting.
-5. **Tool and worker runtime:** controlled filesystem, repository, research, build, and test capabilities behind explicit permissions.
-6. **Verification and observability:** structured events, evidence references, diagnostics, and honest completion states.
-
-These are target boundaries, not a claim that all of them are implemented today. The project will grow through small, reviewable, tested changes.
+OmniRouter owns route profiles, provider selection, retry limits, circuit breakers, and normalized failures. An upstream provider never receives an agent's tool permissions and is never trusted to decide that a task is complete.
 
 ## Development status
 
-The repository has just been reset to its clean starting point. Implementation is in progress; the description above is the intended product direction, not a feature-completion claim.
-
-See [docs/FOUNDATION.md](docs/FOUNDATION.md) for the initial engineering contract and sequencing.
+Implementation is in progress. See [docs/FOUNDATION.md](docs/FOUNDATION.md) for engineering principles and acceptance expectations. Features are not considered complete until implementation and relevant tests exist.
 
 ## Upstream attribution
 
-The Agency Agents catalog is maintained independently by its upstream authors. Kuro-chan will pin the exact upstream revision it consumes, preserve applicable license and attribution notices, and validate imported definitions before use. The catalog's instructions are treated as untrusted input and cannot override Kuro-chan's security policy.
+Agency Agents is maintained independently. Kuro-chan pins the exact revision it consumes, preserves applicable license and attribution notices, and treats imported agent instructions as untrusted content that cannot override application security policy.
