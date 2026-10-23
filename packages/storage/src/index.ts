@@ -291,7 +291,9 @@ function assertText(value: string, field: string, max = 20_000): void {
     );
   }
 }
-function asConversation(row: ConversationRow | undefined): ConversationRecord | undefined {
+function asConversation(
+  row: ConversationRow | undefined,
+): ConversationRecord | undefined {
   if (!row) return undefined;
   return {
     id: row.id,
@@ -304,23 +306,39 @@ function asConversation(row: ConversationRow | undefined): ConversationRecord | 
   };
 }
 
-function asConversationMessage(row: ConversationMessageRow | undefined): ConversationMessageRecord | undefined {
+function asConversationMessage(
+  row: ConversationMessageRow | undefined,
+): ConversationMessageRecord | undefined {
   if (!row) return undefined;
   return {
     id: row.id,
     conversationId: row.conversation_id,
     sequence: row.sequence,
-    ...(row.client_message_id ? { clientMessageId: row.client_message_id } : {}),
+    ...(row.client_message_id
+      ? { clientMessageId: row.client_message_id }
+      : {}),
     role: row.role,
     content: row.content,
     ...(row.provider_id ? { providerId: row.provider_id } : {}),
     ...(row.model ? { model: row.model } : {}),
-    ...(row.prompt_tokens === null ? {} : { usage: {
-      ...(row.prompt_tokens === null ? {} : { promptTokens: row.prompt_tokens }),
-      ...(row.completion_tokens === null ? {} : { completionTokens: row.completion_tokens }),
-      ...(row.total_tokens === null ? {} : { totalTokens: row.total_tokens }),
-    } }),
-    ...(row.metadata_json === null ? {} : { metadata: decodeJson(row.metadata_json) }),
+    ...(row.prompt_tokens === null
+      ? {}
+      : {
+          usage: {
+            ...(row.prompt_tokens === null
+              ? {}
+              : { promptTokens: row.prompt_tokens }),
+            ...(row.completion_tokens === null
+              ? {}
+              : { completionTokens: row.completion_tokens }),
+            ...(row.total_tokens === null
+              ? {}
+              : { totalTokens: row.total_tokens }),
+          },
+        }),
+    ...(row.metadata_json === null
+      ? {}
+      : { metadata: decodeJson(row.metadata_json) }),
     ...(row.run_id ? { runId: row.run_id } : {}),
     createdAt: row.created_at,
   };
@@ -487,7 +505,10 @@ export class RunStore {
     this.db.close();
   }
 
-  createConversation(input: CreateConversationInput = {}, now = Date.now()): ConversationRecord {
+  createConversation(
+    input: CreateConversationInput = {},
+    now = Date.now(),
+  ): ConversationRecord {
     const id = input.id ?? randomUUID();
     const title = (input.title?.trim() || "New chat").slice(0, 160);
     const createdBy = input.createdBy?.trim() || "local";
@@ -495,43 +516,62 @@ export class RunStore {
     assertText(title, "conversation title", 160);
     assertText(createdBy, "createdBy", 200);
     try {
-      this.db.prepare(
-        "INSERT INTO conversations(id,title,created_by,created_at,updated_at,message_count,version) VALUES(?,?,?,?,?,0,1)",
-      ).run(id, title, createdBy, now, now);
+      this.db
+        .prepare(
+          "INSERT INTO conversations(id,title,created_by,created_at,updated_at,message_count,version) VALUES(?,?,?,?,?,0,1)",
+        )
+        .run(id, title, createdBy, now, now);
     } catch (error) {
-      throw new Error("Could not create conversation. The conversation ID may already exist.", { cause: error });
+      throw new Error(
+        "Could not create conversation. The conversation ID may already exist.",
+        { cause: error },
+      );
     }
     return this.getConversation(id)!;
   }
 
   getConversation(id: string): ConversationRecord | undefined {
     assertText(id, "conversation id", 200);
-    return asConversation(this.db.prepare(
-      "SELECT id,title,created_by,created_at,updated_at,message_count,version FROM conversations WHERE id=?",
-    ).get(id) as ConversationRow | undefined);
+    return asConversation(
+      this.db
+        .prepare(
+          "SELECT id,title,created_by,created_at,updated_at,message_count,version FROM conversations WHERE id=?",
+        )
+        .get(id) as ConversationRow | undefined,
+    );
   }
 
-  listConversations(options: ListConversationOptions = {}): readonly ConversationRecord[] {
+  listConversations(
+    options: ListConversationOptions = {},
+  ): readonly ConversationRecord[] {
     const limit = options.limit ?? 50;
     const offset = options.offset ?? 0;
     if (!Number.isInteger(limit) || limit < 1 || limit > 100)
       throw new Error("Conversation limit must be between 1 and 100.");
     if (!Number.isInteger(offset) || offset < 0 || offset > 100_000)
       throw new Error("Conversation offset must be between 0 and 100000.");
-    if (options.createdBy !== undefined) assertText(options.createdBy, "createdBy", 200);
+    if (options.createdBy !== undefined)
+      assertText(options.createdBy, "createdBy", 200);
     const rows = options.createdBy
-      ? this.db.prepare(
-          "SELECT id,title,created_by,created_at,updated_at,message_count,version FROM conversations WHERE created_by=? ORDER BY updated_at DESC,created_at DESC,id DESC LIMIT ? OFFSET ?",
-        ).all(options.createdBy, limit, offset) as ConversationRow[]
-      : this.db.prepare(
-          "SELECT id,title,created_by,created_at,updated_at,message_count,version FROM conversations ORDER BY updated_at DESC,created_at DESC,id DESC LIMIT ? OFFSET ?",
-        ).all(limit, offset) as ConversationRow[];
+      ? (this.db
+          .prepare(
+            "SELECT id,title,created_by,created_at,updated_at,message_count,version FROM conversations WHERE created_by=? ORDER BY updated_at DESC,created_at DESC,id DESC LIMIT ? OFFSET ?",
+          )
+          .all(options.createdBy, limit, offset) as ConversationRow[])
+      : (this.db
+          .prepare(
+            "SELECT id,title,created_by,created_at,updated_at,message_count,version FROM conversations ORDER BY updated_at DESC,created_at DESC,id DESC LIMIT ? OFFSET ?",
+          )
+          .all(limit, offset) as ConversationRow[]);
     return rows.map((row) => asConversation(row)!);
   }
 
   deleteConversation(id: string): boolean {
     assertText(id, "conversation id", 200);
-    return this.db.prepare("DELETE FROM conversations WHERE id=?").run(id).changes > 0;
+    return (
+      this.db.prepare("DELETE FROM conversations WHERE id=?").run(id).changes >
+      0
+    );
   }
 
   findConversationMessageByClientId(
@@ -540,24 +580,37 @@ export class RunStore {
   ): ConversationMessageRecord | undefined {
     assertText(conversationId, "conversationId", 200);
     assertText(clientMessageId, "clientMessageId", 200);
-    return asConversationMessage(this.db.prepare(
-      "SELECT * FROM conversation_messages WHERE conversation_id=? AND client_message_id=?",
-    ).get(conversationId, clientMessageId) as ConversationMessageRow | undefined);
+    return asConversationMessage(
+      this.db
+        .prepare(
+          "SELECT * FROM conversation_messages WHERE conversation_id=? AND client_message_id=?",
+        )
+        .get(conversationId, clientMessageId) as
+        ConversationMessageRow | undefined,
+    );
   }
 
   appendConversationMessage(
     conversationId: string,
     input: ConversationMessageInput,
     now = Date.now(),
-  ): { readonly message: ConversationMessageRecord; readonly inserted: boolean } {
+  ): {
+    readonly message: ConversationMessageRecord;
+    readonly inserted: boolean;
+  } {
     assertText(conversationId, "conversationId", 200);
     assertText(input.content, "message content", 200_000);
     if (!["system", "user", "assistant"].includes(input.role))
       throw new Error("Unsupported conversation message role.");
-    if (input.providerId !== undefined && input.providerId !== "openrouter" && input.providerId !== "freellmapi")
+    if (
+      input.providerId !== undefined &&
+      input.providerId !== "openrouter" &&
+      input.providerId !== "freellmapi"
+    )
       throw new Error("Unknown message provider ID.");
     if (input.model !== undefined) assertText(input.model, "model", 400);
-    if (input.clientMessageId !== undefined) assertText(input.clientMessageId, "clientMessageId", 200);
+    if (input.clientMessageId !== undefined)
+      assertText(input.clientMessageId, "clientMessageId", 200);
     if (input.runId !== undefined) assertText(input.runId, "runId", 200);
 
     const validateTokens = (value: number | undefined, label: string) => {
@@ -565,64 +618,92 @@ export class RunStore {
         throw new Error(label + " must be a non-negative safe integer.");
       return value ?? null;
     };
-    const promptTokens = validateTokens(input.usage?.promptTokens, "promptTokens");
-    const completionTokens = validateTokens(input.usage?.completionTokens, "completionTokens");
+    const promptTokens = validateTokens(
+      input.usage?.promptTokens,
+      "promptTokens",
+    );
+    const completionTokens = validateTokens(
+      input.usage?.completionTokens,
+      "completionTokens",
+    );
     const totalTokens = validateTokens(
       input.usage?.totalTokens ??
-        (promptTokens !== null && completionTokens !== null ? promptTokens + completionTokens : undefined),
+        (promptTokens !== null && completionTokens !== null
+          ? promptTokens + completionTokens
+          : undefined),
       "totalTokens",
     );
-    const metadataJson = input.metadata === undefined ? null : encodeJson(input.metadata);
+    const metadataJson =
+      input.metadata === undefined ? null : encodeJson(input.metadata);
     const id = input.id ?? randomUUID();
 
     const transaction = this.db.transaction(() => {
-      const conversation = this.db.prepare(
-        "SELECT id,title,created_by,created_at,updated_at,message_count,version FROM conversations WHERE id=?",
-      ).get(conversationId) as ConversationRow | undefined;
+      const conversation = this.db
+        .prepare(
+          "SELECT id,title,created_by,created_at,updated_at,message_count,version FROM conversations WHERE id=?",
+        )
+        .get(conversationId) as ConversationRow | undefined;
       if (!conversation) throw new Error("Conversation was not found.");
       if (input.clientMessageId) {
-        const existing = this.db.prepare(
-          "SELECT * FROM conversation_messages WHERE conversation_id=? AND client_message_id=?",
-        ).get(conversationId, input.clientMessageId) as ConversationMessageRow | undefined;
+        const existing = this.db
+          .prepare(
+            "SELECT * FROM conversation_messages WHERE conversation_id=? AND client_message_id=?",
+          )
+          .get(conversationId, input.clientMessageId) as
+          ConversationMessageRow | undefined;
         if (existing) {
-          if (existing.role !== input.role || existing.content !== input.content)
-            throw new Error("clientMessageId was already used for different message content.");
+          if (
+            existing.role !== input.role ||
+            existing.content !== input.content
+          )
+            throw new Error(
+              "clientMessageId was already used for different message content.",
+            );
           return { message: asConversationMessage(existing)!, inserted: false };
         }
       }
       if (conversation.message_count >= 1000)
         throw new Error("Conversation has reached its 1000-message limit.");
-      const sequenceRow = this.db.prepare(
-        "SELECT COALESCE(MAX(sequence),0)+1 AS sequence FROM conversation_messages WHERE conversation_id=?",
-      ).get(conversationId) as { sequence: number };
+      const sequenceRow = this.db
+        .prepare(
+          "SELECT COALESCE(MAX(sequence),0)+1 AS sequence FROM conversation_messages WHERE conversation_id=?",
+        )
+        .get(conversationId) as { sequence: number };
       const sequence = sequenceRow.sequence;
-      this.db.prepare(
-        "INSERT INTO conversation_messages(id,conversation_id,sequence,client_message_id,role,content,provider_id,model,prompt_tokens,completion_tokens,total_tokens,metadata_json,run_id,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-      ).run(
-        id,
-        conversationId,
-        sequence,
-        input.clientMessageId ?? null,
-        input.role,
-        input.content,
-        input.providerId ?? null,
-        input.model ?? null,
-        promptTokens,
-        completionTokens,
-        totalTokens,
-        metadataJson,
-        input.runId ?? null,
-        now,
-      );
-      const firstTitle = input.role === "user" && conversation.message_count === 0 && conversation.title === "New chat"
-        ? input.content.replace(/\s+/g, " ").trim().slice(0, 80)
-        : conversation.title;
-      this.db.prepare(
-        "UPDATE conversations SET title=?,message_count=message_count+1,updated_at=?,version=version+1 WHERE id=?",
-      ).run(firstTitle || "New chat", now, conversationId);
-      const row = this.db.prepare(
-        "SELECT * FROM conversation_messages WHERE id=?",
-      ).get(id) as ConversationMessageRow;
+      this.db
+        .prepare(
+          "INSERT INTO conversation_messages(id,conversation_id,sequence,client_message_id,role,content,provider_id,model,prompt_tokens,completion_tokens,total_tokens,metadata_json,run_id,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        )
+        .run(
+          id,
+          conversationId,
+          sequence,
+          input.clientMessageId ?? null,
+          input.role,
+          input.content,
+          input.providerId ?? null,
+          input.model ?? null,
+          promptTokens,
+          completionTokens,
+          totalTokens,
+          metadataJson,
+          input.runId ?? null,
+          now,
+        );
+      const firstTitle =
+        input.role === "user" &&
+        conversation.message_count === 0 &&
+        conversation.title === "New chat"
+          ? input.content.replace(/\s+/g, " ").trim().slice(0, 80)
+          : conversation.title;
+      this.db
+        .prepare(
+          "UPDATE conversations SET title=?,message_count=message_count+1,updated_at=?,version=version+1 WHERE id=?",
+        )
+        .run(firstTitle || "New chat", now, conversationId);
+      const row = this.db
+        .prepare("SELECT * FROM conversation_messages WHERE id=?")
+        .get(id) as ConversationMessageRow;
       return { message: asConversationMessage(row)!, inserted: true };
     });
     return transaction.immediate();
@@ -636,15 +717,27 @@ export class RunStore {
     const limit = options.limit ?? 100;
     if (!Number.isInteger(limit) || limit < 1 || limit > 1000)
       throw new Error("Message limit must be between 1 and 1000.");
-    if (options.beforeSequence !== undefined && (!Number.isInteger(options.beforeSequence) || options.beforeSequence < 1))
+    if (
+      options.beforeSequence !== undefined &&
+      (!Number.isInteger(options.beforeSequence) || options.beforeSequence < 1)
+    )
       throw new Error("beforeSequence must be a positive integer.");
-    const rows = options.beforeSequence === undefined
-      ? this.db.prepare(
-          "SELECT * FROM (SELECT * FROM conversation_messages WHERE conversation_id=? ORDER BY sequence DESC LIMIT ?) ORDER BY sequence ASC",
-        ).all(conversationId, limit) as ConversationMessageRow[]
-      : this.db.prepare(
-          "SELECT * FROM (SELECT * FROM conversation_messages WHERE conversation_id=? AND sequence<? ORDER BY sequence DESC LIMIT ?) ORDER BY sequence ASC",
-        ).all(conversationId, options.beforeSequence, limit) as ConversationMessageRow[];
+    const rows =
+      options.beforeSequence === undefined
+        ? (this.db
+            .prepare(
+              "SELECT * FROM (SELECT * FROM conversation_messages WHERE conversation_id=? ORDER BY sequence DESC LIMIT ?) ORDER BY sequence ASC",
+            )
+            .all(conversationId, limit) as ConversationMessageRow[])
+        : (this.db
+            .prepare(
+              "SELECT * FROM (SELECT * FROM conversation_messages WHERE conversation_id=? AND sequence<? ORDER BY sequence DESC LIMIT ?) ORDER BY sequence ASC",
+            )
+            .all(
+              conversationId,
+              options.beforeSequence,
+              limit,
+            ) as ConversationMessageRow[]);
     return rows.map((row) => asConversationMessage(row)!);
   }
 

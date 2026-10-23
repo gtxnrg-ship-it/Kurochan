@@ -829,21 +829,27 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     return getAgentProfile(params["*"], reply);
   });
 
-  const CreateConversationSchema = z.object({
-    title: z.string().trim().min(1).max(160).optional(),
-  }).strict();
-  const ConversationMessageRequestSchema = z.object({
-    content: z.string().trim().min(1).max(200_000),
-    clientMessageId: z.string().trim().min(1).max(200).optional(),
-    model: z.string().trim().min(1).max(200).default("omni/balanced"),
-    max_tokens: z.number().int().min(1).max(8192).optional(),
-    temperature: z.number().min(0).max(2).optional(),
-    timeout_ms: z.number().int().min(1000).max(180_000).optional(),
-  }).strict();
-  const StartConversationRunSchema = z.object({
-    goal: z.string().trim().min(1).max(20_000),
-    profile: z.enum(["fast", "balanced", "quality"]).default("balanced"),
-  }).strict();
+  const CreateConversationSchema = z
+    .object({
+      title: z.string().trim().min(1).max(160).optional(),
+    })
+    .strict();
+  const ConversationMessageRequestSchema = z
+    .object({
+      content: z.string().trim().min(1).max(200_000),
+      clientMessageId: z.string().trim().min(1).max(200).optional(),
+      model: z.string().trim().min(1).max(200).default("omni/balanced"),
+      max_tokens: z.number().int().min(1).max(8192).optional(),
+      temperature: z.number().min(0).max(2).optional(),
+      timeout_ms: z.number().int().min(1000).max(180_000).optional(),
+    })
+    .strict();
+  const StartConversationRunSchema = z
+    .object({
+      goal: z.string().trim().min(1).max(20_000),
+      profile: z.enum(["fast", "balanced", "quality"]).default("balanced"),
+    })
+    .strict();
 
   app.post("/v1/conversations", async (request, reply) => {
     const parsed = CreateConversationSchema.safeParse(request.body ?? {});
@@ -868,7 +874,10 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       return reply.code(400).send({
         error: {
           code: "conversation_create_failed",
-          message: error instanceof Error ? error.message : "Conversation could not be created.",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Conversation could not be created.",
           retryable: false,
           requestId: request.id,
         },
@@ -929,49 +938,60 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     }
     return {
       conversation,
-      messages: store.listConversationMessages(conversationId, { limit: messageLimit }),
-    };
-  });
-
-  app.get("/v1/conversations/:conversationId/messages", async (request, reply) => {
-    const { conversationId } = request.params as { conversationId: string };
-    const conversation = store.getConversation(conversationId);
-    if (!conversation || conversation.createdBy !== "local") {
-      return reply.code(404).send({
-        error: {
-          code: "conversation_not_found",
-          message: "Conversation was not found.",
-          retryable: false,
-          requestId: request.id,
-        },
-      });
-    }
-    const query = request.query as Record<string, unknown>;
-    let limit: number;
-    let beforeSequence: number | undefined;
-    try {
-      limit = parseBoundedInteger(query.limit, 100, 1, 200);
-      if (query.beforeSequence !== undefined) {
-        beforeSequence = parseBoundedInteger(query.beforeSequence, 1, 1, 1_000_000);
-      }
-    } catch {
-      return reply.code(400).send({
-        error: {
-          code: "invalid_pagination",
-          message: "limit must be 1..200 and beforeSequence must be a positive sequence number.",
-          retryable: false,
-          requestId: request.id,
-        },
-      });
-    }
-    return {
-      conversationId,
-      data: store.listConversationMessages(conversationId, {
-        limit,
-        ...(beforeSequence === undefined ? {} : { beforeSequence }),
+      messages: store.listConversationMessages(conversationId, {
+        limit: messageLimit,
       }),
     };
   });
+
+  app.get(
+    "/v1/conversations/:conversationId/messages",
+    async (request, reply) => {
+      const { conversationId } = request.params as { conversationId: string };
+      const conversation = store.getConversation(conversationId);
+      if (!conversation || conversation.createdBy !== "local") {
+        return reply.code(404).send({
+          error: {
+            code: "conversation_not_found",
+            message: "Conversation was not found.",
+            retryable: false,
+            requestId: request.id,
+          },
+        });
+      }
+      const query = request.query as Record<string, unknown>;
+      let limit: number;
+      let beforeSequence: number | undefined;
+      try {
+        limit = parseBoundedInteger(query.limit, 100, 1, 200);
+        if (query.beforeSequence !== undefined) {
+          beforeSequence = parseBoundedInteger(
+            query.beforeSequence,
+            1,
+            1,
+            1_000_000,
+          );
+        }
+      } catch {
+        return reply.code(400).send({
+          error: {
+            code: "invalid_pagination",
+            message:
+              "limit must be 1..200 and beforeSequence must be a positive sequence number.",
+            retryable: false,
+            requestId: request.id,
+          },
+        });
+      }
+      return {
+        conversationId,
+        data: store.listConversationMessages(conversationId, {
+          limit,
+          ...(beforeSequence === undefined ? {} : { beforeSequence }),
+        }),
+      };
+    },
+  );
 
   app.delete("/v1/conversations/:conversationId", async (request, reply) => {
     const { conversationId } = request.params as { conversationId: string };
@@ -990,151 +1010,193 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     return { deleted: true, conversationId };
   });
 
-  app.post("/v1/conversations/:conversationId/messages", async (request, reply) => {
-    const { conversationId } = request.params as { conversationId: string };
-    const parsed = ConversationMessageRequestSchema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply.code(400).send({
-        error: {
-          code: "invalid_message",
-          message: "Message content and model settings are invalid.",
-          retryable: false,
-          requestId: request.id,
-        },
-      });
-    }
-    const conversation = store.getConversation(conversationId);
-    if (!conversation || conversation.createdBy !== "local") {
-      return reply.code(404).send({
-        error: {
-          code: "conversation_not_found",
-          message: "Conversation was not found.",
-          retryable: false,
-          requestId: request.id,
-        },
-      });
-    }
-    const selection = modelSelection(parsed.data.model, registry);
-    if (!selection) {
-      return reply.code(400).send({
-        error: {
-          code: "unknown_model",
-          message: "Use omni/fast, omni/balanced, omni/quality, or a provider-qualified model.",
-          retryable: false,
-          requestId: request.id,
-        },
-      });
-    }
-
-    let userAppend: ReturnType<RunStore["appendConversationMessage"]>;
-    try {
-      userAppend = store.appendConversationMessage(conversationId, {
-        role: "user",
-        content: parsed.data.content,
-        ...(parsed.data.clientMessageId ? { clientMessageId: parsed.data.clientMessageId } : {}),
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Message could not be saved.";
-      const idempotencyConflict = message.includes("clientMessageId was already used");
-      requestWarning(app, error, idempotencyConflict ? "message_idempotency_conflict" : "message_persist_failed");
-      return reply.code(idempotencyConflict ? 409 : 400).send({
-        error: {
-          code: idempotencyConflict ? "message_idempotency_conflict" : "message_persist_failed",
-          message,
-          retryable: false,
-          requestId: request.id,
-        },
-      });
-    }
-
-    if (!userAppend.inserted) {
-      const prior = store.listConversationMessages(conversationId, { limit: 1000 });
-      const existingReply = prior.find(
-        (message) => message.sequence > userAppend.message.sequence && message.role === "assistant",
-      );
-      if (existingReply) {
-        return {
-          conversation: store.getConversation(conversationId),
-          userMessage: userAppend.message,
-          assistantMessage: existingReply,
-          idempotentReplay: true,
-        };
-      }
-    }
-
-    const history = store.listConversationMessages(conversationId, { limit: 40 })
-      .map((message) => ({ role: message.role, content: message.content }));
-    const abort = new AbortController();
-    request.raw.on("aborted", () => abort.abort());
-    try {
-      const result = await router.complete({
-        profile: selection.profile,
-        context: { operation: "chat" },
-        ...(selection.preferredProvider ? {
-          preferredProvider: selection.preferredProvider,
-          lockProvider: true,
-        } : {}),
-        ...(selection.providerModel ? { model: selection.providerModel } : {}),
-        messages: history,
-        maxTokens: parsed.data.max_tokens ?? 1024,
-        temperature: parsed.data.temperature ?? 0.2,
-        timeoutMs: parsed.data.timeout_ms ?? 60_000,
-        signal: abort.signal,
-        requiredCapabilities: ["text"],
-      });
-      if (!result.content.trim() || result.content.length > 200_000) {
-        return reply.code(502).send({
+  app.post(
+    "/v1/conversations/:conversationId/messages",
+    async (request, reply) => {
+      const { conversationId } = request.params as { conversationId: string };
+      const parsed = ConversationMessageRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({
           error: {
-            code: "invalid_provider_response",
-            message: "The configured model returned an empty or oversized response.",
-            retryable: true,
+            code: "invalid_message",
+            message: "Message content and model settings are invalid.",
+            retryable: false,
             requestId: request.id,
           },
         });
       }
-      const assistantAppend = store.appendConversationMessage(conversationId, {
-        role: "assistant",
-        content: result.content,
-        providerId: result.providerId,
-        model: result.model,
-        ...(result.usage ? { usage: result.usage } : {}),
-        metadata: {
-          routeProfile: result.routeProfile,
-          attempts: result.attempts,
-          providerErrors: result.providerErrors,
-        },
-      });
-      return {
-        conversation: store.getConversation(conversationId),
-        userMessage: userAppend.message,
-        assistantMessage: assistantAppend.message,
-        provider: {
-          id: result.providerId,
-          model: result.model,
-          profile: result.routeProfile,
-          attempts: result.attempts,
-          latencyMs: result.latencyMs,
-          providerErrors: result.providerErrors,
-        },
-      };
-    } catch (error) {
-      const typed = error as { code?: string; message?: string; retryable?: boolean };
-      const code = typed.code ?? "conversation_reply_failed";
-      const status = code === "cancelled" ? 499
-        : code === "router_overloaded" || code === "rate_limited" ? 429
-        : code === "no_provider_available" ? 503
-        : 502;
-      requestWarning(app, error, code);
-      return reply.code(status).send({
-        error: {
-          code,
-          message: typed.message ?? "The assistant could not complete this reply. Your message is saved, so you can retry with the same clientMessageId.",
-          retryable: typed.retryable ?? status >= 500,
-          requestId: request.id,
-        },
-      });
-    }
-  });
+      const conversation = store.getConversation(conversationId);
+      if (!conversation || conversation.createdBy !== "local") {
+        return reply.code(404).send({
+          error: {
+            code: "conversation_not_found",
+            message: "Conversation was not found.",
+            retryable: false,
+            requestId: request.id,
+          },
+        });
+      }
+      const selection = modelSelection(parsed.data.model, registry);
+      if (!selection) {
+        return reply.code(400).send({
+          error: {
+            code: "unknown_model",
+            message:
+              "Use omni/fast, omni/balanced, omni/quality, or a provider-qualified model.",
+            retryable: false,
+            requestId: request.id,
+          },
+        });
+      }
+
+      let userAppend: ReturnType<RunStore["appendConversationMessage"]>;
+      try {
+        userAppend = store.appendConversationMessage(conversationId, {
+          role: "user",
+          content: parsed.data.content,
+          ...(parsed.data.clientMessageId
+            ? { clientMessageId: parsed.data.clientMessageId }
+            : {}),
+        });
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Message could not be saved.";
+        const idempotencyConflict = message.includes(
+          "clientMessageId was already used",
+        );
+        requestWarning(
+          app,
+          error,
+          idempotencyConflict
+            ? "message_idempotency_conflict"
+            : "message_persist_failed",
+        );
+        return reply.code(idempotencyConflict ? 409 : 400).send({
+          error: {
+            code: idempotencyConflict
+              ? "message_idempotency_conflict"
+              : "message_persist_failed",
+            message,
+            retryable: false,
+            requestId: request.id,
+          },
+        });
+      }
+
+      if (!userAppend.inserted) {
+        const prior = store.listConversationMessages(conversationId, {
+          limit: 1000,
+        });
+        const existingReply = prior.find(
+          (message) =>
+            message.sequence > userAppend.message.sequence &&
+            message.role === "assistant",
+        );
+        if (existingReply) {
+          return {
+            conversation: store.getConversation(conversationId),
+            userMessage: userAppend.message,
+            assistantMessage: existingReply,
+            idempotentReplay: true,
+          };
+        }
+      }
+
+      const history = store
+        .listConversationMessages(conversationId, { limit: 40 })
+        .map((message) => ({ role: message.role, content: message.content }));
+      const abort = new AbortController();
+      request.raw.on("aborted", () => abort.abort());
+      try {
+        const result = await router.complete({
+          profile: selection.profile,
+          context: { operation: "chat" },
+          ...(selection.preferredProvider
+            ? {
+                preferredProvider: selection.preferredProvider,
+                lockProvider: true,
+              }
+            : {}),
+          ...(selection.providerModel
+            ? { model: selection.providerModel }
+            : {}),
+          messages: history,
+          maxTokens: parsed.data.max_tokens ?? 1024,
+          temperature: parsed.data.temperature ?? 0.2,
+          timeoutMs: parsed.data.timeout_ms ?? 60_000,
+          signal: abort.signal,
+          requiredCapabilities: ["text"],
+        });
+        if (!result.content.trim() || result.content.length > 200_000) {
+          return reply.code(502).send({
+            error: {
+              code: "invalid_provider_response",
+              message:
+                "The configured model returned an empty or oversized response.",
+              retryable: true,
+              requestId: request.id,
+            },
+          });
+        }
+        const assistantAppend = store.appendConversationMessage(
+          conversationId,
+          {
+            role: "assistant",
+            content: result.content,
+            providerId: result.providerId,
+            model: result.model,
+            ...(result.usage ? { usage: result.usage } : {}),
+            metadata: {
+              routeProfile: result.routeProfile,
+              attempts: result.attempts,
+              providerErrors: result.providerErrors,
+            },
+          },
+        );
+        return {
+          conversation: store.getConversation(conversationId),
+          userMessage: userAppend.message,
+          assistantMessage: assistantAppend.message,
+          provider: {
+            id: result.providerId,
+            model: result.model,
+            profile: result.routeProfile,
+            attempts: result.attempts,
+            latencyMs: result.latencyMs,
+            providerErrors: result.providerErrors,
+          },
+        };
+      } catch (error) {
+        const typed = error as {
+          code?: string;
+          message?: string;
+          retryable?: boolean;
+        };
+        const code = typed.code ?? "conversation_reply_failed";
+        const status =
+          code === "cancelled"
+            ? 499
+            : code === "router_overloaded" || code === "rate_limited"
+              ? 429
+              : code === "no_provider_available"
+                ? 503
+                : 502;
+        requestWarning(app, error, code);
+        return reply.code(status).send({
+          error: {
+            code,
+            message:
+              typed.message ??
+              "The assistant could not complete this reply. Your message is saved, so you can retry with the same clientMessageId.",
+            retryable: typed.retryable ?? status >= 500,
+            requestId: request.id,
+          },
+        });
+      }
+    },
+  );
 
   app.post("/v1/conversations/:conversationId/runs", async (request, reply) => {
     const { conversationId } = request.params as { conversationId: string };
@@ -1143,7 +1205,8 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       return reply.code(400).send({
         error: {
           code: "invalid_run_goal",
-          message: "A run goal of 1 to 20000 characters and an optional valid profile are required.",
+          message:
+            "A run goal of 1 to 20000 characters and an optional valid profile are required.",
           retryable: false,
           requestId: request.id,
         },
@@ -1193,7 +1256,11 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           summary: plan.summary,
           selectedAgents: plan.selectedAgents,
           selectedRunbook: plan.selectedRunbook,
-          provider: { id: plan.providerId, model: plan.model, latencyMs: plan.latencyMs },
+          provider: {
+            id: plan.providerId,
+            model: plan.model,
+            latencyMs: plan.latencyMs,
+          },
           planningAttempts: plan.attempts,
         },
         tasks: store.listTasks(run.id),
@@ -1201,10 +1268,16 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       });
     } catch (error) {
       if (error instanceof PlanError) {
-        const status = error.code === "catalog_unavailable" || error.code === "no_provider_available" || error.code === "no_specialists_found" ? 503
-          : error.code === "cancelled" ? 499
-          : error.retryable ? 502
-          : 422;
+        const status =
+          error.code === "catalog_unavailable" ||
+          error.code === "no_provider_available" ||
+          error.code === "no_specialists_found"
+            ? 503
+            : error.code === "cancelled"
+              ? 499
+              : error.retryable
+                ? 502
+                : 422;
         return reply.code(status).send({
           error: {
             code: error.code,

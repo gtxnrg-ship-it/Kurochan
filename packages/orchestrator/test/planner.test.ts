@@ -183,7 +183,8 @@ describe("PlanService", () => {
           {
             key: "security-review",
             agentId: "security/security-architect",
-            objective: "Review the proposed API for threats and insecure assumptions.",
+            objective:
+              "Review the proposed API for threats and insecure assumptions.",
             dependsOn: ["research"],
           },
           {
@@ -200,7 +201,9 @@ describe("PlanService", () => {
       goal: "Build a startup MVP service",
       profile: "balanced",
     });
-    expect(plan.selectedAgents.some((agent) => agent.id === unseen.id)).toBe(true);
+    expect(plan.selectedAgents.some((agent) => agent.id === unseen.id)).toBe(
+      true,
+    );
 
     const prompt = JSON.parse(
       router.complete.mock.calls[0]![0].messages[0]!.content,

@@ -400,12 +400,15 @@ describe("RunStore", () => {
         version: 3,
         updatedAt: 102,
       });
-      expect(store.listConversationMessages(conversation.id).map((message) => message.role)).toEqual([
-        "user",
-        "assistant",
-      ]);
       expect(
-        store.listConversationMessages(conversation.id, { beforeSequence: 2 }).map((message) => message.content),
+        store
+          .listConversationMessages(conversation.id)
+          .map((message) => message.role),
+      ).toEqual(["user", "assistant"]);
+      expect(
+        store
+          .listConversationMessages(conversation.id, { beforeSequence: 2 })
+          .map((message) => message.content),
       ).toEqual(["Build a small API"]);
       expect(() =>
         store.appendConversationMessage(conversation.id, {
@@ -415,7 +418,9 @@ describe("RunStore", () => {
         }),
       ).toThrow(/different message content/);
       expect(store.listConversations({ createdBy: "local" })).toHaveLength(1);
-      expect(store.listConversations({ createdBy: "someone-else" })).toHaveLength(0);
+      expect(
+        store.listConversations({ createdBy: "someone-else" }),
+      ).toHaveLength(0);
       expect(store.deleteConversation(conversation.id)).toBe(true);
       expect(store.listConversationMessages(conversation.id)).toEqual([]);
       expect(store.deleteConversation(conversation.id)).toBe(false);

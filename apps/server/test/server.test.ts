@@ -141,16 +141,18 @@ describe("Kuro-chan API", () => {
   it("persists conversational replies, replays idempotent messages, and deletes a thread cleanly", async () => {
     const store = new RunStore(":memory:");
     const calls: ChatCompletionInput[] = [];
-    const complete = vi.fn(async (input: ChatCompletionInput): Promise<ChatCompletionOutput> => {
-      calls.push(input);
-      return {
-        providerId: "freellmapi",
-        model: input.model ?? "auto",
-        content: "Assistant reply " + calls.length,
-        latencyMs: 7,
-        usage: { promptTokens: 15, completionTokens: 4, totalTokens: 19 },
-      };
-    });
+    const complete = vi.fn(
+      async (input: ChatCompletionInput): Promise<ChatCompletionOutput> => {
+        calls.push(input);
+        return {
+          providerId: "freellmapi",
+          model: input.model ?? "auto",
+          content: "Assistant reply " + calls.length,
+          latencyMs: 7,
+          usage: { promptTokens: 15, completionTokens: 4, totalTokens: 19 },
+        };
+      },
+    );
     const freellmapi: ChatProvider = {
       id: "freellmapi",
       displayName: "FreeLLMAPI",
@@ -162,22 +164,26 @@ describe("Kuro-chan API", () => {
     app = buildServer({
       env: {},
       providers: {
-        providers: new Map<ProviderId, ChatProvider>([["freellmapi", freellmapi]]),
-        statuses: [{
-          id: "freellmapi",
-          name: "FreeLLMAPI",
-          configured: true,
-          defaultModel: "auto",
-          capabilityNotes: [],
-          capabilities: {
-            text: true,
-            vision: false,
-            tools: false,
-            json: false,
-            streaming: true,
-            reasoning: false,
+        providers: new Map<ProviderId, ChatProvider>([
+          ["freellmapi", freellmapi],
+        ]),
+        statuses: [
+          {
+            id: "freellmapi",
+            name: "FreeLLMAPI",
+            configured: true,
+            defaultModel: "auto",
+            capabilityNotes: [],
+            capabilities: {
+              text: true,
+              vision: false,
+              tools: false,
+              json: false,
+              streaming: true,
+              reasoning: false,
+            },
           },
-        }],
+        ],
       },
       logger: false,
       store,
@@ -223,7 +229,9 @@ describe("Kuro-chan API", () => {
     });
     expect(replay.statusCode).toBe(200);
     expect(replay.json().idempotentReplay).toBe(true);
-    expect(replay.json().assistantMessage.id).toBe(first.json().assistantMessage.id);
+    expect(replay.json().assistantMessage.id).toBe(
+      first.json().assistantMessage.id,
+    );
     expect(complete).toHaveBeenCalledOnce();
 
     const second = await app.inject({
@@ -250,7 +258,10 @@ describe("Kuro-chan API", () => {
     expect(detail.json().conversation.messageCount).toBe(4);
     expect(detail.json().messages).toHaveLength(4);
 
-    const list = await app.inject({ method: "GET", url: "/v1/conversations?limit=10" });
+    const list = await app.inject({
+      method: "GET",
+      url: "/v1/conversations?limit=10",
+    });
     expect(list.statusCode).toBe(200);
     expect(list.json().data).toHaveLength(1);
 
@@ -271,17 +282,21 @@ describe("Kuro-chan API", () => {
     const plan = {
       createPlan: vi.fn(async () => ({
         summary: "Implement, test, and review the API.",
-        tasks: [{
-          key: "implementation",
-          agentId: "game-development/unreal-engine/unreal-world-builder",
-          objective: "Implement the requested project changes.",
-          dependsOn: [],
-        }],
-        selectedAgents: [{
-          id: "game-development/unreal-engine/unreal-world-builder",
-          name: "Unreal World Builder",
-          division: "game-development",
-        }],
+        tasks: [
+          {
+            key: "implementation",
+            agentId: "game-development/unreal-engine/unreal-world-builder",
+            objective: "Implement the requested project changes.",
+            dependsOn: [],
+          },
+        ],
+        selectedAgents: [
+          {
+            id: "game-development/unreal-engine/unreal-world-builder",
+            name: "Unreal World Builder",
+            division: "game-development",
+          },
+        ],
         providerId: "freellmapi",
         model: "auto",
         latencyMs: 5,
@@ -317,9 +332,11 @@ describe("Kuro-chan API", () => {
     });
     expect(response.json().message.metadata).toMatchObject({
       kind: "run_started",
-      selectedAgents: [{
-        id: "game-development/unreal-engine/unreal-world-builder",
-      }],
+      selectedAgents: [
+        {
+          id: "game-development/unreal-engine/unreal-world-builder",
+        },
+      ],
     });
     expect(store.getConversation(conversationId)?.messageCount).toBe(1);
     expect(store.getRun(response.json().run.id)?.createdBy).toBe("local");

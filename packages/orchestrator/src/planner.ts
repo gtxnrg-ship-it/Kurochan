@@ -237,8 +237,7 @@ function rankCatalogAgents(
       (entry.score > 0 || runbookAgentIds.has(entry.profile.id)),
   );
   const remainder = ranked.filter(
-    (entry) =>
-      !requiredIds.has(entry.profile.id) && !useful.includes(entry),
+    (entry) => !requiredIds.has(entry.profile.id) && !useful.includes(entry),
   );
   // Required NEXUS roles are a hard constraint, not merely a ranking bonus.
   const candidateLimit = Math.max(max, required.length);
@@ -351,7 +350,9 @@ export class PlanService {
         ...new Set(
           relevantRunbooks.flatMap((runbook) =>
             runbook.roster
-              .filter((group) => group.activation.trim().toLowerCase() === "required")
+              .filter(
+                (group) => group.activation.trim().toLowerCase() === "required",
+              )
               .flatMap((group) => group.agents),
           ),
         ),
@@ -554,7 +555,9 @@ export class PlanService {
           keys.add(task.key);
         }
         assertAcyclic(payload.tasks);
-        const selectedAgentIds = new Set(payload.tasks.map((task) => task.agentId));
+        const selectedAgentIds = new Set(
+          payload.tasks.map((task) => task.agentId),
+        );
         const missingRequiredAgents = requiredRunbookAgentIds.filter(
           (id) => !selectedAgentIds.has(id),
         );
