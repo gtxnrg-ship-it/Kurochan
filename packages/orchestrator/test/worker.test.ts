@@ -121,6 +121,64 @@ describe("TaskWorker", () => {
       store.close();
     }
   });  
+  it("cancels an in-flight model request when the run is cancelled", async () => {
+    const catalogRoot = await fakeCatalogRoot();
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "kuro-workspaces-"));
+    created.push(workspaceRoot);
+    const runId = "7c14ac61-0fb4-47b6-a54d-7c1cc3c92ec9";
+    const store = new RunStore(":memory:");
+    try {
+      store.createRun({
+        id: runId,
+        goal: "Cancel a long-running task",
+        profile: "balanced",
+        tasks: [{
+          key: "long-task",
+          agentId: "engineering/engineering-test-agent",
+          objective: "Wait for the current inference call to finish.",
+        }],
+      });
+      let markStarted: (() => void) | undefined;
+      const inferenceStarted = new Promise<void>((resolveStarted) => {
+        markStarted = resolveStarted;
+      });
+      const fakeProvider = provider(async (input: ChatCompletionInput): Promise<ChatCompletionOutput> => {
+        markStarted?.();
+        return await new Promise<ChatCompletionOutput>((_resolve, reject) => {
+          const cancel = () => reject(Object.assign(new Error("Inference cancelled."), { code: "cancelled" }));
+          if (input.signal?.aborted) {
+            cancel();
+            return;
+          }
+          input.signal?.addEventListener("abort", cancel, { once: true });
+        });
+      });
+      const router = new OmniRouter({
+        providers: new Map<ProviderId, ChatProvider>([["openrouter", fakeProvider]]),
+      });
+      const worker = new TaskWorker({
+        store,
+        catalog: new AgentCatalog(catalogRoot),
+        router,
+        workspaceRoot: resolve(workspaceRoot),
+        leaseMs: 1_000,
+      });
+      const running = worker.runOnce();
+      await inferenceStarted;
+      store.cancelRun(runId, "user requested stop");
+      worker.cancelRun(runId);
+      await expect(running).resolves.toMatchObject({
+        kind: "failed",
+        runId,
+        summary: "Run was cancelled.",
+      });
+      expect(store.getRun(runId)?.status).toBe("cancelled");
+      expect(store.listTasks(runId)[0]?.status).toBe("cancelled");
+    } finally {
+      store.close();
+    }
+  });
+
   it("executes sandbox tools through the injected runtime and records real command evidence", async () => {
     const catalogRoot = await fakeCatalogRoot();
     const workspaceRoot = await mkdtemp(join(tmpdir(), "kuro-workspaces-"));
