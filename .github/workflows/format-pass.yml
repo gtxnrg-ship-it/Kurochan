@@ -29,6 +29,8 @@ jobs:
         run: pnpm install --no-frozen-lockfile
       - name: Format tracked project files
         run: pnpm format
+      - name: Normalize the API source after generated edits
+        run: pnpm exec prettier --write apps/server/src/server.ts
       - name: Run complete repository checks before publishing formatting
         run: pnpm check
       - name: Commit formatting and dispatch canonical CI
