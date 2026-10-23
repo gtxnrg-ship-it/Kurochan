@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { AgentCatalog } from "@kurochan/agent-catalog";
 import { createProviderRegistry } from "@kurochan/model-gateway";
 import { OmniRouter, routeOrdersFromEnvironment } from "@kurochan/omnirouter";
-import { DockerSandboxRuntime, TaskWorker } from "@kurochan/orchestrator";
+import { DockerSandboxRuntime, TaskWorker, WebResearchRuntime } from "@kurochan/orchestrator";
 import { RunStore } from "@kurochan/storage";
 
 function integerEnv(
@@ -36,6 +36,18 @@ const router = new OmniRouter({
   ),
 });
 
+const webResearch = new WebResearchRuntime({
+  ...(process.env.BRAVE_SEARCH_API_KEY?.trim()
+    ? { apiKey: process.env.BRAVE_SEARCH_API_KEY.trim() }
+    : {}),
+  ...(process.env.BRAVE_SEARCH_COUNTRY?.trim()
+    ? { country: process.env.BRAVE_SEARCH_COUNTRY.trim() }
+    : {}),
+  ...(process.env.BRAVE_SEARCH_LANG?.trim()
+    ? { searchLang: process.env.BRAVE_SEARCH_LANG.trim() }
+    : {}),
+});
+
 const sandboxEnabled =
   process.env.KUROCHAN_SANDBOX_ENABLED?.trim().toLowerCase() === "true";
 const sandboxNetwork =
@@ -55,6 +67,7 @@ const worker = new TaskWorker({
   workspaceRoot: resolve(
     process.env.KUROCHAN_WORKSPACE_ROOT?.trim() || "data/workspaces",
   ),
+  webResearch,
   ...(sandboxEnabled
     ? {
         sandbox: new DockerSandboxRuntime({
@@ -114,6 +127,7 @@ process.stdout.write(
     ),
     sandboxEnabled,
     sandboxNetwork: sandboxEnabled ? sandboxNetwork : "disabled",
+    webResearchConfigured: webResearch.isConfigured,
   }) + "\n",
 );
 
