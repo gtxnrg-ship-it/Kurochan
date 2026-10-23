@@ -9,7 +9,7 @@
     "pnpm": ">=10.0.0"
   },
   "scripts": {
-    "dev": "pnpm --filter @kurochan/server dev",
+    "dev": "concurrently -k -n api,worker -c blue,green \"pnpm --filter @kurochan/server dev\" \"pnpm --filter @kurochan/worker dev\"",
     "dev:web": "pnpm --filter @kurochan/web dev",
     "dev:api": "pnpm --filter @kurochan/server dev",
     "build": "pnpm -r --if-present build",
@@ -18,7 +18,10 @@
     "lint": "prettier --check \"apps/**/*.{ts,tsx,js,json,css,html}\" \"packages/**/*.{ts,js,json}\" \"scripts/**/*.mjs\" \"*.{json,yaml,yml}\"",
     "check": "pnpm check:agency && pnpm typecheck && pnpm test && pnpm lint",
     "format": "prettier --write \"apps/**/*.{ts,tsx,js,json,css,html}\" \"packages/**/*.{ts,js,json}\" \"scripts/**/*.mjs\" \"*.{json,yaml,yml}\"",
-    "check:agency": "node scripts/check-agency-submodule.mjs"
+    "check:agency": "node scripts/check-agency-submodule.mjs",
+    "dev:worker": "pnpm --filter @kurochan/worker dev",
+    "start:api": "pnpm --filter @kurochan/server start",
+    "start:worker": "pnpm --filter @kurochan/worker start"
   },
   "devDependencies": {
     "@types/node": "^22.15.30",
