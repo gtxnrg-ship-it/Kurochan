@@ -100,10 +100,16 @@ describe("PlanService", () => {
             dependsOn: ["research"],
           },
           {
+            key: "security-review",
+            agentId: "security/security-architect",
+            objective: "Review the proposed API for threats and insecure assumptions.",
+            dependsOn: ["research"],
+          },
+          {
             key: "qa",
             agentId: "testing/api-tester",
             objective: "Test the API.",
-            dependsOn: ["build"],
+            dependsOn: ["build", "security-review"],
           },
         ],
       }),
