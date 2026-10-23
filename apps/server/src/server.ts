@@ -22,6 +22,7 @@ import { RunStore, type CreateRunInput } from "@kurochan/storage";
 import {
   DockerSandboxRuntime,
   GitHubProjectRuntime,
+  McpToolRuntime,
   PlanError,
   PlanService,
   TaskWorker,
@@ -43,6 +44,7 @@ export interface ServerOptions {
   readonly sandbox?: SandboxExecutor;
   readonly webResearch?: WebResearchExecutor;
   readonly githubProject?: GitHubProjectExecutor;
+  readonly mcpTools?: McpToolRuntime;
 }
 
 function safeEqual(a: string, b: string): boolean {
@@ -112,6 +114,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     options.store ??
     new RunStore(env.KUROCHAN_DB_PATH?.trim() || "data/kurochan.sqlite");
   const catalog = options.catalog ?? new AgentCatalog();
+  const mcpTools = options.mcpTools ?? McpToolRuntime.fromEnvironment(env);
   const router = new OmniRouter({
     providers: registry.providers,
     routeOrder: routeOrdersFromEnvironment(env),
@@ -149,6 +152,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         githubAllowedRepositories.length > 0 &&
         env.KUROCHAN_GITHUB_WRITE_ENABLED?.trim().toLowerCase() === "true",
       webResearchEnabled: Boolean(env.BRAVE_SEARCH_API_KEY?.trim()),
+      mcpToolsEnabled: mcpTools.isConfigured,
       sandboxEnabled:
         env.KUROCHAN_SANDBOX_ENABLED?.trim().toLowerCase() === "true",
     });
@@ -178,6 +182,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
 
   app.addHook("onClose", async () => {
     if (workerEnabled) await worker.stop();
+    else await mcpTools.close();
     store.close();
   });
 
@@ -275,6 +280,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     ...(sandbox ? { sandbox } : {}),
     webResearch,
     githubProject,
+    mcpTools,
     concurrency: parseBoundedInteger(env.KUROCHAN_WORKER_CONCURRENCY, 4, 1, 32),
     onError: (error) => {
       const code =
@@ -511,11 +517,55 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     };
   });
 
+  app.get("/v1/mcp/status", async (request, reply) => {
+    const query = request.query as Record<string, unknown>;
+    let probe = false;
+    if (query.probe !== undefined) {
+      if (query.probe === "true") probe = true;
+      else if (query.probe !== "false") {
+        return reply.code(400).send({
+          error: {
+            code: "invalid_query",
+            message: "probe must be true or false.",
+            retryable: false,
+            requestId: request.id,
+          },
+        });
+      }
+    }
+    const tools = probe ? await mcpTools.listTools() : [];
+    return {
+      enabled: mcpTools.isConfigured,
+      configuredServerCount: mcpTools.configuredServers().length,
+      servers: mcpTools.status(),
+      ...(probe ? {
+        probed: true,
+        discoveredToolCount: tools.length,
+        tools: tools.map((tool) => ({
+          serverId: tool.serverId,
+          serverName: tool.serverName,
+          name: tool.name,
+          description: tool.description,
+          readOnly: tool.readOnly,
+        })),
+      } : { probed: false }),
+      security: {
+        credentialsInModelContext: false,
+        callsWithNoExplicitReadOnlyAnnotationRequireApproval: true,
+        serverConfigurationIsModelControlled: false,
+      },
+    };
+  });
+
   app.get("/v1/worker/status", async () => ({
     enabled: workerEnabled,
     running: worker.isRunning,
     workerId: worker.workerId,
     concurrency: parseBoundedInteger(env.KUROCHAN_WORKER_CONCURRENCY, 4, 1, 32),
+    mcpTools: {
+      enabled: mcpTools.isConfigured,
+      servers: mcpTools.status(),
+    },
     workers: store.listWorkerHeartbeats(),
     workspaceTools: [
       "workspace.list_files",
