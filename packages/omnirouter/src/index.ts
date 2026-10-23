@@ -8,6 +8,7 @@ import type {
   ChatCompletionInput,
   ChatCompletionOutput,
   ChatCompletionStreamChunk,
+  ChatCompletionUsage,
   ChatProvider,
 } from "@kurochan/model-gateway";
 import { ProviderError } from "@kurochan/model-gateway";
@@ -19,6 +20,34 @@ export interface OmniRouteRequest extends ChatCompletionInput {
   readonly preferredProvider?: ProviderId;
   readonly lockProvider?: boolean;
   readonly requiredCapabilities?: readonly Capability[];
+  readonly context?: OmniRouteContext;
+}
+
+export type OmniRouteOperation =
+  | "chat"
+  | "planning"
+  | "task"
+  | "verification"
+  | "provider_test"
+  | "other";
+
+export interface OmniRouteContext {
+  readonly operation?: OmniRouteOperation;
+  readonly runId?: string;
+  readonly taskId?: string;
+}
+
+export interface OmniRouterUsageEvent {
+  readonly providerId: ProviderId;
+  readonly model: string;
+  readonly profile: RouteProfile;
+  readonly operation: OmniRouteOperation;
+  readonly runId?: string;
+  readonly taskId?: string;
+  readonly latencyMs: number;
+  readonly outcome: "success" | "failure";
+  readonly errorCode?: string;
+  readonly usage?: ChatCompletionUsage;
 }
 
 export interface OmniRouteResult extends ChatCompletionOutput {
@@ -45,6 +74,7 @@ export interface OmniRouterOptions {
   readonly failureThreshold?: number;
   readonly circuitCooldownMs?: number;
   readonly now?: () => number;
+  readonly onUsage?: (event: OmniRouterUsageEvent) => void;
 }
 
 export interface ProviderHealth {
@@ -144,9 +174,11 @@ export class OmniRouter {
   private readonly now: () => number;
   private readonly health = new Map<ProviderId, MutableProviderHealth>();
   private activeRequests = 0;
+  private readonly onUsage: ((event: OmniRouterUsageEvent) => void) | undefined;
 
   constructor(options: OmniRouterOptions) {
     this.providers = options.providers;
+    this.onUsage = options.onUsage;
     this.routeOrder = {
       fast: options.routeOrder?.fast ?? DEFAULT_ROUTES.fast,
       balanced: options.routeOrder?.balanced ?? DEFAULT_ROUTES.balanced,
@@ -189,6 +221,31 @@ export class OmniRouter {
         failures: 0,
         lastErrorCode: undefined,
       });
+    }
+  }
+
+  private emitUsage(
+    request: OmniRouteRequest,
+    usage: {
+      readonly providerId: ProviderId;
+      readonly model: string;
+      readonly latencyMs: number;
+      readonly outcome: "success" | "failure";
+      readonly errorCode?: string;
+      readonly usage?: ChatCompletionUsage;
+    },
+  ): void {
+    if (!this.onUsage) return;
+    try {
+      this.onUsage({
+        ...usage,
+        profile: request.profile,
+        operation: request.context?.operation ?? "other",
+        ...(request.context?.runId ? { runId: request.context.runId } : {}),
+        ...(request.context?.taskId ? { taskId: request.context.taskId } : {}),
+      });
+    } catch {
+      // Telemetry must never make inference fail.
     }
   }
 
@@ -619,6 +676,13 @@ export class OmniRouter {
         health.lastLatencyMs = result.latencyMs;
         health.lastErrorCode = undefined;
         health.successes += 1;
+        this.emitUsage(request, {
+          providerId: provider.id,
+          model: result.model || provider.defaultModel || request.model || "",
+          latencyMs: result.latencyMs,
+          outcome: "success",
+          ...(result.usage ? { usage: result.usage } : {}),
+        });
         return {
           ...result,
           routeProfile: request.profile,
@@ -632,6 +696,17 @@ export class OmniRouter {
         const code = providerError?.code ?? "provider_error";
         health.lastErrorCode = code;
         health.failures += 1;
+        this.emitUsage(request, {
+          providerId: provider.id,
+          model:
+            request.model &&
+            (!request.preferredProvider || request.preferredProvider === provider.id)
+              ? request.model
+              : provider.defaultModel || "",
+          latencyMs: Math.max(0, this.now() - beganAt),
+          outcome: "failure",
+          errorCode: code,
+        });
         providerErrors.push({ providerId: provider.id, code });
         if (providerError?.code === "cancelled" || request.signal?.aborted) {
           throw new OmniRouterError(
