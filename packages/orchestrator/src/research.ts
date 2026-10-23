@@ -58,7 +58,7 @@ interface RepositoryData {
   readonly stargazers_count: number;
   readonly language: string | null;
   readonly license: { readonly spdx_id: string | null; readonly name: string } | null;
-  readonly topics?: readonly string[];
+  readonly topics?: readonly string[] | undefined;
   readonly updated_at: string;
   readonly private?: boolean;
 }
