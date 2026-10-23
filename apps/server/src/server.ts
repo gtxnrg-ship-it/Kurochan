@@ -18,7 +18,7 @@ import {
 import { OmniRouter, routeOrdersFromEnvironment } from "@kurochan/omnirouter";
 import { AgentCatalog } from "@kurochan/agent-catalog";
 import { RunStore, type CreateRunInput } from "@kurochan/storage";
-import { PlanError, PlanService, TaskWorker, WorkspaceRuntime } from "@kurochan/orchestrator";
+import { DockerSandboxRuntime, PlanError, PlanService, TaskWorker, WorkspaceRuntime, type SandboxExecutor } from "@kurochan/orchestrator";
 
 export interface ServerOptions {
   readonly env?: Environment;
@@ -28,6 +28,7 @@ export interface ServerOptions {
   readonly catalog?: AgentCatalog;
   readonly planner?: PlanService;
   readonly workerEnabled?: boolean;
+  readonly sandbox?: SandboxExecutor;
 }
 
 function safeEqual(a: string, b: string): boolean {
@@ -144,11 +145,26 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   );
   const workspace = new WorkspaceRuntime({ root: workspaceRoot });
   const workerEnabled = options.workerEnabled ?? false;
+  const sandboxEnabled = env.KUROCHAN_SANDBOX_ENABLED?.trim().toLowerCase() === "true";
+  const configuredSandboxNetwork = env.KUROCHAN_SANDBOX_NETWORK?.trim().toLowerCase();
+  if (configuredSandboxNetwork && configuredSandboxNetwork !== "none" && configuredSandboxNetwork !== "bridge") {
+    throw new Error("KUROCHAN_SANDBOX_NETWORK must be none or bridge.");
+  }
+  const sandbox = options.sandbox ?? (sandboxEnabled
+    ? new DockerSandboxRuntime({
+        workspaceRoot,
+        ...(env.KUROCHAN_SANDBOX_IMAGE?.trim() ? { image: env.KUROCHAN_SANDBOX_IMAGE.trim() } : {}),
+        network: configuredSandboxNetwork === "bridge" ? "bridge" : "none",
+        timeoutMs: parseBoundedInteger(env.KUROCHAN_SANDBOX_TIMEOUT_MS, 30_000, 1_000, 120_000),
+        maxOutputBytes: parseBoundedInteger(env.KUROCHAN_SANDBOX_MAX_OUTPUT_BYTES, 40_000, 1_024, 200_000),
+      })
+    : undefined);
   const worker = new TaskWorker({
     store,
     catalog,
     router,
     workspaceRoot,
+    ...(sandbox ? { sandbox } : {}),
     onError: (error) => {
       const code = error && typeof error === "object" && "code" in error
         ? String((error as { code?: unknown }).code ?? "worker_error")
@@ -281,8 +297,16 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       arbitraryUrlsAllowed: false,
       repositoryWritesEnabled: false,
     },
+    sandbox: sandbox ? {
+      enabled: true,
+      runtime: "docker",
+      image: sandbox.image,
+      network: sandbox.network,
+      timeoutMs: parseBoundedInteger(env.KUROCHAN_SANDBOX_TIMEOUT_MS, 30_000, 1_000, 120_000),
+      maxOutputBytes: parseBoundedInteger(env.KUROCHAN_SANDBOX_MAX_OUTPUT_BYTES, 40_000, 1_024, 200_000),
+    } : { enabled: false, runtime: null, network: "none" },
     executionLimits: {
-      shellEnabled: false,
+      shellEnabled: Boolean(sandbox),
       networkToolEnabled: false,
       workspaceRootConfigured: Boolean(workspaceRoot),
       maxToolRounds: 6,
