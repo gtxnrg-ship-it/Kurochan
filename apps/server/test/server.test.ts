@@ -553,6 +553,193 @@ describe("Kuro-chan API", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
+  it("runs an idempotent speech-to-speech voice turn and serves its persisted audio artifact", async () => {
+    const store = new RunStore(":memory:");
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/audio/transcriptions")) {
+        return new Response(JSON.stringify({ text: "What is two plus two?" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.endsWith("/audio/speech")) {
+        return new Response(new Uint8Array([82, 73, 70, 70, 1, 2, 3, 4]), {
+          status: 200,
+          headers: { "content-type": "audio/wav" },
+        });
+      }
+      return new Response("not found", { status: 404 });
+    });
+    const speech = new OpenAICompatibleSpeechRuntime({
+      transcription: {
+        baseUrl: "https://speech.example.test/v1",
+        apiKey: "stt-key",
+        model: "whisper-compatible",
+      },
+      synthesis: {
+        baseUrl: "https://speech.example.test/v1",
+        apiKey: "tts-key",
+        model: "speech-compatible",
+        voice: "en-jp-female",
+        responseFormat: "wav",
+        instructions: "Speak English naturally with a light Japanese accent.",
+      },
+      defaultLanguage: "en",
+      fetchImpl,
+    });
+    const complete = vi.fn(async (input: ChatCompletionInput): Promise<ChatCompletionOutput> => {
+      expect(input.messages.some((message) => message.content === "What is two plus two?")).toBe(true);
+      return {
+        providerId: "freellmapi",
+        model: input.model ?? "auto",
+        content: "Four.",
+        latencyMs: 9,
+        usage: { promptTokens: 24, completionTokens: 2, totalTokens: 26 },
+      };
+    });
+    const freellmapi: ChatProvider = {
+      id: "freellmapi",
+      displayName: "FreeLLMAPI",
+      defaultModel: "auto",
+      isConfigured: true,
+      capabilities: {
+        text: true,
+        vision: false,
+        tools: false,
+        json: false,
+        streaming: true,
+        reasoning: false,
+      },
+      complete,
+    };
+    app = buildServer({
+      env: {},
+      providers: {
+        providers: new Map<ProviderId, ChatProvider>([["freellmapi", freellmapi]]),
+        statuses: [{
+          id: "freellmapi",
+          name: "FreeLLMAPI",
+          configured: true,
+          defaultModel: "auto",
+          capabilityNotes: [],
+          capabilities: {
+            text: true,
+            vision: false,
+            tools: false,
+            json: false,
+            streaming: true,
+            reasoning: false,
+          },
+        }],
+      },
+      logger: false,
+      store,
+      speech,
+    });
+    const created = await app.inject({
+      method: "POST",
+      url: "/v1/conversations",
+      payload: {},
+    });
+    const conversationId = created.json().conversation.id as string;
+    const boundary = "kuro-voice-turn-boundary";
+    const body = (audioText = "FAKE_AUDIO_PAYLOAD") => [
+      "--" + boundary,
+      'Content-Disposition: form-data; name="file"; filename="speech.wav"',
+      "Content-Type: audio/wav",
+      "",
+      audioText,
+      "--" + boundary,
+      'Content-Disposition: form-data; name="clientMessageId"',
+      "",
+      "voice-turn-001",
+      "--" + boundary,
+      'Content-Disposition: form-data; name="model"',
+      "",
+      "freellmapi/auto",
+      "--" + boundary,
+      'Content-Disposition: form-data; name="voice"',
+      "",
+      "en-jp-female",
+      "--" + boundary,
+      'Content-Disposition: form-data; name="response_format"',
+      "",
+      "wav",
+      "--" + boundary + "--",
+      "",
+    ].join("\r\n");
+    const url = `/v1/conversations/${conversationId}/voice-turn`;
+    const payload = body();
+    const headers = { "content-type": "multipart/form-data; boundary=" + boundary };
+
+    const first = await app.inject({ method: "POST", url, headers, payload });
+    expect(first.statusCode).toBe(200);
+    expect(first.json()).toMatchObject({
+      transcript: {
+        text: "What is two plus two?",
+        model: "whisper-compatible",
+        language: "en",
+      },
+      assistantMessage: {
+        role: "assistant",
+        content: "Four.",
+        providerId: "freellmapi",
+        usage: { promptTokens: 24, completionTokens: 2, totalTokens: 26 },
+      },
+      synthesis: {
+        model: "speech-compatible",
+        format: "wav",
+        contentType: "audio/wav",
+      },
+      audio: {
+        contentType: "audio/wav",
+        format: "wav",
+        bytes: 8,
+      },
+      idempotentReplay: false,
+    });
+    expect(complete).toHaveBeenCalledOnce();
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(store.listConversationMessages(conversationId)).toHaveLength(2);
+    const userMessage = store.listConversationMessages(conversationId)[0]!;
+    expect(userMessage.metadata).toMatchObject({
+      kind: "voice_input",
+      voiceInput: { rawAudioPersisted: false },
+    });
+    expect(store.getConversationAudio(conversationId, first.json().assistantMessage.id)).toMatchObject({
+      contentType: "audio/wav",
+      format: "wav",
+      bytes: 8,
+    });
+
+    const audio = await app.inject({
+      method: "GET",
+      url: first.json().audio.url,
+    });
+    expect(audio.statusCode).toBe(200);
+    expect(audio.headers["content-type"]).toContain("audio/wav");
+    expect([...Buffer.from(audio.rawPayload)]).toEqual([82, 73, 70, 70, 1, 2, 3, 4]);
+
+    const replay = await app.inject({ method: "POST", url, headers, payload });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json().idempotentReplay).toBe(true);
+    expect(replay.json().assistantMessage.id).toBe(first.json().assistantMessage.id);
+    expect(complete).toHaveBeenCalledOnce();
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(store.listConversationMessages(conversationId)).toHaveLength(2);
+
+    const conflict = await app.inject({
+      method: "POST",
+      url,
+      headers,
+      payload: body("DIFFERENT_AUDIO_PAYLOAD"),
+    });
+    expect(conflict.statusCode).toBe(409);
+    expect(conflict.json().error.code).toBe("voice_idempotency_conflict");
+    expect(complete).toHaveBeenCalledOnce();
+  });
+
   it("reports MCP configuration and can explicitly probe discovered tools", async () => {
     const serverConfig: McpServerConfig = {
       id: "local-utilities",
