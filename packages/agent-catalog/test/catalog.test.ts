@@ -24,6 +24,14 @@ describe("Agency Agents catalog", () => {
     expect((await catalog.list({ division: "game-development" })).length).toBe(
       21,
     );
+    expect(
+      await catalog.get(
+        "game-development/unreal-engine/unreal-world-builder",
+      ),
+    ).toMatchObject({
+      name: "Unreal World Builder",
+      division: "game-development",
+    });
   });
 
   it("validates upstream NEXUS runbooks against real, pinned specialists", async () => {
@@ -31,7 +39,13 @@ describe("Agency Agents catalog", () => {
     const runbooks = await catalog.listRunbooks();
     expect(runbooks.length).toBeGreaterThanOrEqual(4);
     expect(runbooks.some((runbook) => runbook.slug === "startup-mvp")).toBe(true);
-    expect(runbooks.every((runbook) => runbook.roster.every((group) => group.agents.every((id) => id.includes("/")))).toBe(true);
+    expect(
+      runbooks.every((runbook) =>
+        runbook.roster.every((group) =>
+          group.agents.every((id) => id.includes("/")),
+        ),
+      ),
+    ).toBe(true);
     expect((await catalog.readNexusStrategy()).toLowerCase()).toContain("nexus");
   });
 
