@@ -145,7 +145,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   });
 
   app.addHook("onClose", async () => {
-    await worker.stop();
+    if (workerEnabled) await worker.stop();
     store.close();
   });
 
