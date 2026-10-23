@@ -265,6 +265,7 @@ describe("PlanService", () => {
       githubProjectRepositories: ["acme/demo"],
       githubProjectPublishingEnabled: true,
       webResearchEnabled: true,
+      mcpToolsEnabled: true,
       sandboxEnabled: true,
     });
     const plan = await planner.createPlan({
@@ -298,6 +299,7 @@ describe("PlanService", () => {
       githubProjectCheckoutEnabled: true,
       githubProjectPublishingEnabled: true,
       webResearchEnabled: true,
+      mcpToolsEnabled: true,
       sandboxEnabled: true,
     });
   });
