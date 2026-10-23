@@ -456,19 +456,18 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     const q = typeof query.q === "string" ? query.q : "";
     const division =
       typeof query.division === "string" ? query.division : undefined;
+    const maximumLimit = q.trim() ? 100 : 1000;
     let limit: number;
     try {
-      limit = parseBoundedInteger(query.limit, 50, 1, 100);
+      limit = parseBoundedInteger(query.limit, q.trim() ? 50 : 100, 1, maximumLimit);
     } catch {
-      return reply
-        .code(400)
-        .send({
-          error: {
-            code: "invalid_query",
-            message: "limit must be an integer from 1 to 100.",
-            retryable: false,
-          },
-        });
+      return reply.code(400).send({
+        error: {
+          code: "invalid_query",
+          message: `limit must be an integer from 1 to ${maximumLimit}.`,
+          retryable: false,
+        },
+      });
     }
     try {
       if (q.trim())
