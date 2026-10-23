@@ -1,4 +1,9 @@
-import type { Capability, ChatMessage, ProviderCapabilities, ProviderId } from "@kurochan/contracts";
+import type {
+  Capability,
+  ChatMessage,
+  ProviderCapabilities,
+  ProviderId,
+} from "@kurochan/contracts";
 
 export interface ChatCompletionInput {
   readonly messages: readonly ChatMessage[];
@@ -55,7 +60,10 @@ export class ProviderError extends Error {
     message: string,
     options: { retryable?: boolean; statusCode?: number; cause?: unknown } = {},
   ) {
-    super(message, options.cause === undefined ? undefined : { cause: options.cause });
+    super(
+      message,
+      options.cause === undefined ? undefined : { cause: options.cause },
+    );
     this.name = "ProviderError";
     this.code = code;
     this.retryable = options.retryable ?? false;

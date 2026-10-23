@@ -16,7 +16,5 @@
       "path": "../model-gateway"
     }
   ],
-  "include": [
-    "src/**/*.ts"
-  ]
+  "include": ["src/**/*.ts"]
 }

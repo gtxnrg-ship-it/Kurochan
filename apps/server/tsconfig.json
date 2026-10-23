@@ -25,7 +25,5 @@
       "path": "../../packages/agent-catalog"
     }
   ],
-  "include": [
-    "src/**/*.ts"
-  ]
+  "include": ["src/**/*.ts"]
 }

@@ -13,7 +13,5 @@
       "path": "../contracts"
     }
   ],
-  "include": [
-    "src/**/*.ts"
-  ]
+  "include": ["src/**/*.ts"]
 }

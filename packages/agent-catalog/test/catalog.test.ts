@@ -13,10 +13,17 @@ describe("Agency Agents catalog", () => {
 
   it("searches relevant agents and supports division filtering", async () => {
     const catalog = new AgentCatalog();
-    const results = await catalog.search("Unreal Engine world building game environment", { limit: 10 });
+    const results = await catalog.search(
+      "Unreal Engine world building game environment",
+      { limit: 10 },
+    );
     expect(results.length).toBeGreaterThan(0);
-    expect(results.some((agent) => agent.division === "game-development")).toBe(true);
-    expect((await catalog.list({ division: "game-development" })).length).toBe(21);
+    expect(results.some((agent) => agent.division === "game-development")).toBe(
+      true,
+    );
+    expect((await catalog.list({ division: "game-development" })).length).toBe(
+      21,
+    );
   });
 
   it("does not resolve path traversal IDs", async () => {

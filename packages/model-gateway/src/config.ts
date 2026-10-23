@@ -1,4 +1,9 @@
-import type { Capability, ProviderCapabilities, ProviderId, ProviderStatus } from "@kurochan/contracts";
+import type {
+  Capability,
+  ProviderCapabilities,
+  ProviderId,
+  ProviderStatus,
+} from "@kurochan/contracts";
 import { OpenAICompatibleChatProvider } from "./openai-compatible.js";
 import type { ChatProvider } from "./provider.js";
 
@@ -8,13 +13,32 @@ export interface ProviderRegistry {
   readonly statuses: readonly ProviderStatus[];
 }
 
-const definitions: Record<ProviderId, { name: string; capabilityNotes: string[] }> = {
-  openrouter: { name: "OpenRouter", capabilityNotes: ["OpenAI-compatible text chat", "Capabilities must be enabled only for the chosen model"] },
-  freellmapi: { name: "FreeLLMAPI", capabilityNotes: ["Configured OpenAI-compatible chat endpoint", "Availability and quotas depend on the self-hosted gateway and upstream providers"] },
+const definitions: Record<
+  ProviderId,
+  { name: string; capabilityNotes: string[] }
+> = {
+  openrouter: {
+    name: "OpenRouter",
+    capabilityNotes: [
+      "OpenAI-compatible text chat",
+      "Capabilities must be enabled only for the chosen model",
+    ],
+  },
+  freellmapi: {
+    name: "FreeLLMAPI",
+    capabilityNotes: [
+      "Configured OpenAI-compatible chat endpoint",
+      "Availability and quotas depend on the self-hosted gateway and upstream providers",
+    ],
+  },
 };
 
-function capabilitiesFromEnvironment(env: Environment, prefix: string): ProviderCapabilities {
-  const isEnabled = (capability: Exclude<Capability, "text">) => env[`${prefix}_CAP_${capability.toUpperCase()}`] === "true";
+function capabilitiesFromEnvironment(
+  env: Environment,
+  prefix: string,
+): ProviderCapabilities {
+  const isEnabled = (capability: Exclude<Capability, "text">) =>
+    env[`${prefix}_CAP_${capability.toUpperCase()}`] === "true";
   return {
     text: true,
     vision: isEnabled("vision"),
@@ -25,16 +49,21 @@ function capabilitiesFromEnvironment(env: Environment, prefix: string): Provider
   };
 }
 
-export function createProviderRegistry(env: Environment = process.env): ProviderRegistry {
+export function createProviderRegistry(
+  env: Environment = process.env,
+): ProviderRegistry {
   const specifications = [
     {
       id: "openrouter" as const,
       key: env.OPENROUTER_API_KEY?.trim(),
       model: env.OPENROUTER_MODEL?.trim(),
-      baseUrl: env.OPENROUTER_BASE_URL?.trim() || "https://openrouter.ai/api/v1",
+      baseUrl:
+        env.OPENROUTER_BASE_URL?.trim() || "https://openrouter.ai/api/v1",
       capabilityPrefix: "OPENROUTER",
       extraHeaders: {
-        ...(env.OPENROUTER_SITE_URL?.trim() ? { "HTTP-Referer": env.OPENROUTER_SITE_URL.trim() } : {}),
+        ...(env.OPENROUTER_SITE_URL?.trim()
+          ? { "HTTP-Referer": env.OPENROUTER_SITE_URL.trim() }
+          : {}),
         "X-OpenRouter-Title": "Kuro-chan",
       },
     },
@@ -65,7 +94,10 @@ export function createProviderRegistry(env: Environment = process.env): Provider
           extraHeaders: spec.extraHeaders,
         });
       } catch (error) {
-        configurationError = error instanceof Error ? error.message : "Invalid provider configuration.";
+        configurationError =
+          error instanceof Error
+            ? error.message
+            : "Invalid provider configuration.";
       }
     }
     if (provider?.isConfigured) providers.set(provider.id, provider);
@@ -73,8 +105,12 @@ export function createProviderRegistry(env: Environment = process.env): Provider
       id: spec.id,
       name: definitions[spec.id].name,
       configured: Boolean(provider?.isConfigured),
-      ...(provider?.defaultModel ? { defaultModel: provider.defaultModel } : {}),
-      capabilityNotes: configurationError ? [configurationError] : definitions[spec.id].capabilityNotes,
+      ...(provider?.defaultModel
+        ? { defaultModel: provider.defaultModel }
+        : {}),
+      capabilityNotes: configurationError
+        ? [configurationError]
+        : definitions[spec.id].capabilityNotes,
       ...(provider ? { capabilities: provider.capabilities } : {}),
     });
   }
