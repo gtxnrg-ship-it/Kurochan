@@ -61,6 +61,76 @@ describe("Kuro-chan API", () => {
     );
   });
 
+  it("exposes durable provider and reported-token usage without leaking credentials", async () => {
+    const store = new RunStore(":memory:");
+    const now = Date.now();
+    store.recordProviderUsage({
+      providerId: "freellmapi",
+      model: "auto",
+      profile: "fast",
+      operation: "chat",
+      latencyMs: 120,
+      outcome: "success",
+      usage: { promptTokens: 40, completionTokens: 16 },
+    }, now);
+    store.recordProviderUsage({
+      providerId: "openrouter",
+      model: "test-model",
+      profile: "balanced",
+      operation: "task",
+      latencyMs: 240,
+      outcome: "failure",
+      errorCode: "rate_limited",
+    }, now + 1);
+    app = buildServer({
+      env: { FREELLMAPI_API_KEY: "must-not-be-returned" },
+      logger: false,
+      store,
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/v1/usage?period=24h",
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().totals).toMatchObject({
+      requests: 2,
+      successfulRequests: 1,
+      failedRequests: 1,
+      requestsWithTokenUsage: 1,
+      requestsWithoutTokenUsage: 1,
+      promptTokens: 40,
+      completionTokens: 16,
+      totalTokens: 56,
+    });
+    expect(response.json().data).toContainEqual(
+      expect.objectContaining({
+        providerId: "freellmapi",
+        model: "auto",
+        requests: 1,
+        totalTokens: 56,
+      }),
+    );
+    expect(response.body).not.toContain("must-not-be-returned");
+    expect(response.json().accountingNote).toContain("not estimated");
+  });
+
+  it("rejects unsupported usage windows", async () => {
+    app = buildServer({
+      env: {},
+      logger: false,
+      store: new RunStore(":memory:"),
+    });
+    const response = await app.inject({
+      method: "GET",
+      url: "/v1/usage?period=forever",
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: { code: "invalid_usage_period" },
+    });
+  });
+
   it("reports missing FreeLLMAPI configuration without trying to invent a key", async () => {
     app = buildServer({
       env: {},
