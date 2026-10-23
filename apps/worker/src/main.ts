@@ -27,6 +27,9 @@ function integerEnv(
 }
 
 const registry = createProviderRegistry(process.env);
+const store = new RunStore(
+  process.env.KUROCHAN_DB_PATH?.trim() || "data/kurochan.sqlite",
+);
 const router = new OmniRouter({
   providers: registry.providers,
   routeOrder: routeOrdersFromEnvironment(process.env),
@@ -39,6 +42,7 @@ const router = new OmniRouter({
     1_000,
     300_000,
   ),
+  onUsage: (event) => store.recordProviderUsage(event),
 });
 
 const webResearch = new WebResearchRuntime({
@@ -91,9 +95,6 @@ const githubProject = new GitHubProjectRuntime({
   ),
 });
 
-const store = new RunStore(
-  process.env.KUROCHAN_DB_PATH?.trim() || "data/kurochan.sqlite",
-);
 const catalog = new AgentCatalog();
 const worker = new TaskWorker({
   store,
