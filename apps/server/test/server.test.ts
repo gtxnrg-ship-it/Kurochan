@@ -61,6 +61,75 @@ describe("Kuro-chan API", () => {
     );
   });
 
+  it("reports missing FreeLLMAPI configuration without trying to invent a key", async () => {
+    app = buildServer({
+      env: {},
+      logger: false,
+      store: new RunStore(":memory:"),
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/providers/freellmapi/test",
+    });
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toMatchObject({
+      error: { code: "provider_not_configured" },
+    });
+    expect(response.body).not.toContain("freellmapi-test-key");
+  });
+
+  it("tests a configured provider using a short request locked to that provider", async () => {
+    const calls: Array<ChatCompletionInput> = [];
+    const freellmapi: ChatProvider = {
+      id: "freellmapi",
+      displayName: "FreeLLMAPI",
+      defaultModel: "auto",
+      isConfigured: true,
+      capabilities: { text: true, streaming: true },
+      complete: async (input: ChatCompletionInput): Promise<ChatCompletionOutput> => {
+        calls.push(input);
+        return {
+          providerId: "freellmapi",
+          model: input.model ?? "auto",
+          content: "connected",
+          latencyMs: 3,
+        };
+      },
+    };
+    app = buildServer({
+      env: {},
+      providers: {
+        providers: new Map<ProviderId, ChatProvider>([["freellmapi", freellmapi]]),
+        statuses: [{
+          id: "freellmapi",
+          name: "FreeLLMAPI",
+          configured: true,
+          defaultModel: "auto",
+          capabilityNotes: [],
+          capabilities: { text: true, vision: false, tools: false, json: false, streaming: true, reasoning: false },
+        }],
+      },
+      logger: false,
+      store: new RunStore(":memory:"),
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/providers/freellmapi/test",
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      ok: true,
+      provider: "freellmapi",
+      model: "auto",
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.messages).toEqual([{
+      role: "user",
+      content: "Reply with the single word connected.",
+    }]);
+    expect(response.body).not.toContain("api_key");
+  });
+
   it("requires an API token when one is configured", async () => {
     app = buildServer({
       env: { KUROCHAN_API_TOKEN: "test-token" },
