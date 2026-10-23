@@ -162,6 +162,36 @@ describe("Kuro-chan API", () => {
     );
   });
 
+  it("reports live and stale worker heartbeats without leaking worker metadata", async () => {
+    const store = new RunStore(":memory:");
+    const now = Date.now();
+    store.recordWorkerHeartbeat("worker-live", "busy", "task-123", { service: "kurochan-worker" }, now);
+    store.recordWorkerHeartbeat("worker-stale", "idle", undefined, { service: "kurochan-worker" }, now - 60_000);
+    app = buildServer({
+      env: {},
+      logger: false,
+      store,
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/v1/workers?staleAfterMs=1000",
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().summary).toEqual({ total: 2, active: 1, stale: 1 });
+    expect(response.json().data).toContainEqual(
+      expect.objectContaining({
+        workerId: "worker-live",
+        state: "busy",
+        currentTaskId: "task-123",
+        stale: false,
+      }),
+    );
+    expect(response.json().data).toContainEqual(
+      expect.objectContaining({ workerId: "worker-stale", stale: true }),
+    );
+  });
+
   it("locks provider-qualified model IDs to the named provider", async () => {
     const calls: Array<{ provider: ProviderId; model?: string }> = [];
     const fakeProvider = (
