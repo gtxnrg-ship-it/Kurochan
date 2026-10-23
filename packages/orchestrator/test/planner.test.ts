@@ -56,7 +56,7 @@ describe("PlanService", () => {
       ],
     }));
     const planner = new PlanService({ catalog: fakeCatalog(), router });
-    const plan = await planner.createPlan({ goal: "Build a service", profile: "balanced" });
+    const plan = await planner.createPlan({ goal: "Build a startup MVP service", profile: "balanced" });
     expect(plan.tasks).toHaveLength(3);
     expect(plan.tasks[2]?.dependsOn).toEqual(["build"]);
     expect(plan.selectedAgents).toHaveLength(3);
