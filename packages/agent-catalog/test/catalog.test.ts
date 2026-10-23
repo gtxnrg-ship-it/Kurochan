@@ -7,8 +7,8 @@ describe("Agency Agents catalog", () => {
     const metadata = await catalog.metadata();
     expect(metadata.pinnedCommit).toBe(AGENCY_AGENTS_COMMIT);
     expect(metadata.license).toBe("MIT");
-    expect(metadata.count).toBe(298);
-    expect(metadata.divisions.length).toBeGreaterThanOrEqual(15);
+    expect(metadata.count).toBe(282);
+    expect(metadata.divisions).toHaveLength(18);
   });
 
   it("searches relevant agents and supports division filtering", async () => {
