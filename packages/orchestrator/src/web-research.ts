@@ -110,9 +110,9 @@ export class WebResearchRuntime implements WebResearchExecutor {
   private readonly fetchImpl: typeof fetch;
 
   constructor(options: WebResearchRuntimeOptions = {}) {
-    this.apiKey = options.apiKey?.trim() || process.env.BRAVE_SEARCH_API_KEY?.trim() || undefined;
-    const country = options.country?.trim() || process.env.BRAVE_SEARCH_COUNTRY?.trim() || "US";
-    const searchLang = options.searchLang?.trim() || process.env.BRAVE_SEARCH_LANG?.trim() || "en";
+    this.apiKey = options.apiKey?.trim() || undefined;
+    const country = options.country?.trim() || "US";
+    const searchLang = options.searchLang?.trim() || "en";
     if (!/^[a-z]{2}$/i.test(country)) {
       throw new Error("Brave Search country must be a two-letter country code.");
     }
