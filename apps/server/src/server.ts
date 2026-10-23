@@ -224,6 +224,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     workspaceRoot,
     ...(sandbox ? { sandbox } : {}),
     webResearch,
+    concurrency: parseBoundedInteger(env.KUROCHAN_WORKER_CONCURRENCY, 4, 1, 32),
     onError: (error) => {
       const code =
         error && typeof error === "object" && "code" in error
@@ -462,6 +463,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     enabled: workerEnabled,
     running: worker.isRunning,
     workerId: worker.workerId,
+    concurrency: parseBoundedInteger(env.KUROCHAN_WORKER_CONCURRENCY, 4, 1, 32),
     workers: store.listWorkerHeartbeats(),
     workspaceTools: [
       "workspace.list_files",
