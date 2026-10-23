@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { AgentCatalog } from "@kurochan/agent-catalog";
 import { createProviderRegistry } from "@kurochan/model-gateway";
 import { OmniRouter, routeOrdersFromEnvironment } from "@kurochan/omnirouter";
-import { TaskWorker } from "@kurochan/orchestrator";
+import { DockerSandboxRuntime, TaskWorker } from "@kurochan/orchestrator";
 import { RunStore } from "@kurochan/storage";
 
 function integerEnv(
@@ -31,6 +31,12 @@ const router = new OmniRouter({
   circuitCooldownMs: integerEnv("OMNIROUTER_CIRCUIT_COOLDOWN_MS", 30_000, 1_000, 3_600_000),
 });
 
+const sandboxEnabled = process.env.KUROCHAN_SANDBOX_ENABLED?.trim().toLowerCase() === "true";
+const sandboxNetwork = process.env.KUROCHAN_SANDBOX_NETWORK?.trim().toLowerCase() || "none";
+if (sandboxNetwork !== "none" && sandboxNetwork !== "bridge") {
+  throw new Error("KUROCHAN_SANDBOX_NETWORK must be none or bridge.");
+}
+
 const store = new RunStore(process.env.KUROCHAN_DB_PATH?.trim() || "data/kurochan.sqlite");
 const catalog = new AgentCatalog();
 const worker = new TaskWorker({
@@ -38,6 +44,15 @@ const worker = new TaskWorker({
   catalog,
   router,
   workspaceRoot: resolve(process.env.KUROCHAN_WORKSPACE_ROOT?.trim() || "data/workspaces"),
+  ...(sandboxEnabled ? {
+    sandbox: new DockerSandboxRuntime({
+      workspaceRoot: resolve(process.env.KUROCHAN_WORKSPACE_ROOT?.trim() || "data/workspaces"),
+      ...(process.env.KUROCHAN_SANDBOX_IMAGE?.trim() ? { image: process.env.KUROCHAN_SANDBOX_IMAGE.trim() } : {}),
+      network: sandboxNetwork,
+      timeoutMs: integerEnv("KUROCHAN_SANDBOX_TIMEOUT_MS", 30_000, 1_000, 120_000),
+      maxOutputBytes: integerEnv("KUROCHAN_SANDBOX_MAX_OUTPUT_BYTES", 40_000, 1_024, 200_000),
+    }),
+  } : {}),
   ...(process.env.KUROCHAN_WORKER_ID?.trim() ? { workerId: process.env.KUROCHAN_WORKER_ID.trim() } : {}),
   leaseMs: integerEnv("KUROCHAN_WORKER_LEASE_MS", 120_000, 1_000, 600_000),
   pollIntervalMs: integerEnv("KUROCHAN_WORKER_POLL_MS", 1_000, 100, 30_000),
@@ -56,6 +71,8 @@ process.stdout.write(JSON.stringify({
   workerId: worker.workerId,
   configuredProviders: registry.statuses.filter((provider) => provider.configured).map((provider) => provider.id),
   workspaceRoot: resolve(process.env.KUROCHAN_WORKSPACE_ROOT?.trim() || "data/workspaces"),
+  sandboxEnabled,
+  sandboxNetwork: sandboxEnabled ? sandboxNetwork : "disabled",
 }) + "\n");
 
 async function shutdown(signal: string): Promise<void> {
