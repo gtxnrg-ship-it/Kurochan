@@ -12,6 +12,7 @@ import type {
 import { OmniRouter } from "@kurochan/omnirouter";
 import { RunStore } from "@kurochan/storage";
 import { TaskWorker } from "../src/worker.js";
+import { McpToolRuntime, type McpClientAdapter, type McpServerConfig } from "../src/mcp-tools.js";
 import { WorkspaceRuntime } from "../src/workspace.js";
 
 const created: string[] = [];
@@ -195,6 +196,148 @@ describe("TaskWorker", () => {
       store.close();
     }
   });
+  it("approval-gates MCP tools that are not explicitly marked read-only", async () => {
+    const catalogRoot = await fakeCatalogRoot();
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "kuro-workspaces-"));
+    created.push(workspaceRoot);
+    const runId = "be7691d2-36da-4b38-aec9-734be275c09d";
+    const store = new RunStore(":memory:");
+    let worker: TaskWorker | undefined;
+    let toolExecuted = false;
+    const mcpClient: McpClientAdapter = {
+      connect: vi.fn(async () => undefined),
+      listTools: vi.fn(async () => ({
+        tools: [{
+          name: "create_record",
+          description: "Create a record in the connected workspace",
+          inputSchema: {
+            type: "object",
+            properties: { title: { type: "string" } },
+            required: ["title"],
+          },
+          annotations: { readOnlyHint: false },
+        }],
+      })),
+      callTool: vi.fn(async (_name, args) => {
+        toolExecuted = true;
+        return {
+          isError: false,
+          content: [{ type: "text", text: "created:" + String(args.title) }],
+        };
+      }),
+      close: vi.fn(async () => undefined),
+    };
+    const mcpTools = new McpToolRuntime({
+      servers: [{
+        id: "workspace-service",
+        name: "Workspace service",
+        transport: "stdio",
+        command: "node",
+        args: ["/opt/trusted-mcp.js"],
+      }],
+      connectorFactory: () => mcpClient,
+    });
+    let toolRequested = false;
+    const fakeProvider = provider(async (input: ChatCompletionInput): Promise<ChatCompletionOutput> => {
+      if ((input.systemPrompt ?? "").includes("independent consistency reviewer")) {
+        return {
+          providerId: "openrouter",
+          model: "test-model",
+          content: JSON.stringify({
+            passed: true,
+            summary: "The approved MCP action completed and its output was recorded.",
+            checks: [{ name: "MCP result recorded", passed: true, notes: "The runtime returned a result after explicit approval." }],
+            blockers: [],
+          }),
+          latencyMs: 1,
+        };
+      }
+      if (!toolExecuted) {
+        toolRequested = true;
+        return {
+          providerId: "openrouter",
+          model: "test-model",
+          content: JSON.stringify({
+            status: "tool_calls",
+            summary: "Create the requested record.",
+            toolCalls: [{
+              name: "mcp.call",
+              arguments: {
+                serverId: "workspace-service",
+                toolName: "create_record",
+                arguments: { title: "Quarterly report" },
+              },
+            }],
+            evidence: [],
+          }),
+          latencyMs: 1,
+        };
+      }
+      return {
+        providerId: "openrouter",
+        model: "test-model",
+        content: JSON.stringify({
+          status: "completed",
+          summary: "The record was created and the response was captured.",
+          toolCalls: [],
+          evidence: [],
+        }),
+        latencyMs: 1,
+      };
+    });
+    try {
+      store.createRun({
+        id: runId,
+        goal: "Create a record in the configured external service",
+        profile: "balanced",
+        tasks: [{
+          key: "create-record",
+          agentId: "engineering/engineering-test-agent",
+          objective: "Use the discovered MCP create_record tool to create a quarterly report record.",
+        }],
+      });
+      const router = new OmniRouter({
+        providers: new Map<ProviderId, ChatProvider>([["openrouter", fakeProvider]]),
+      });
+      worker = new TaskWorker({
+        store,
+        catalog: new AgentCatalog(catalogRoot),
+        router,
+        workspaceRoot: resolve(workspaceRoot),
+        mcpTools,
+      });
+
+      const waiting = await worker.runOnce();
+      expect(waiting).toMatchObject({
+        kind: "waiting_for_approval",
+        runId,
+      });
+      expect(toolRequested).toBe(true);
+      expect(mcpClient.callTool).not.toHaveBeenCalled();
+      const task = store.listTasks(runId)[0]!;
+      expect(task.status).toBe("waiting_for_approval");
+      const approval = store.listEvents(runId).find((event) => event.type === "approval.requested");
+      expect(approval?.payload).toMatchObject({
+        action: {
+          approvalType: "external-write",
+          mcpServerId: "workspace-service",
+          mcpToolName: "create_record",
+        },
+      });
+
+      store.resolveTaskApproval(runId, task.id, true, "Reviewed and approved");
+      const result = await worker.runOnce();
+      expect(result).toMatchObject({ kind: "completed", runId });
+      expect(mcpClient.callTool).toHaveBeenCalledOnce();
+      expect(toolExecuted).toBe(true);
+      expect(store.listTasks(runId)[0]?.evidence.some((item) => item.kind === "mcp_tool_result")).toBe(true);
+      expect(store.getRun(runId)?.status).toBe("completed");
+    } finally {
+      await worker?.stop();
+      store.close();
+    }
+  });
+
   it("runs independent specialist tasks concurrently up to the configured worker limit", async () => {
     const catalogRoot = await fakeCatalogRoot();
     const workspaceRoot = await mkdtemp(join(tmpdir(), "kuro-workspaces-"));
