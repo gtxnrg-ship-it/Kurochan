@@ -1,0 +1,3 @@
+[submodule "packages/agent-catalog/vendor/agency-agents"]
+	path = packages/agent-catalog/vendor/agency-agents
+	url = https://github.com/msitarzewski/agency-agents.git
