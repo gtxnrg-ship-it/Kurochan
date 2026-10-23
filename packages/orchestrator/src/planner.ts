@@ -458,6 +458,7 @@ export class PlanService {
       try {
         response = await this.options.router.complete({
           profile: request.profile,
+          context: { operation: "planning" },
           messages: [{ role: "user", content: message }],
           systemPrompt,
           maxTokens: 6000,
