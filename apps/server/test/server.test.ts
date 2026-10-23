@@ -249,7 +249,7 @@ describe("Kuro-chan API", () => {
       url: "/v1/agents/catalog",
     });
     expect(metadata.statusCode).toBe(200);
-    expect(metadata.json().count).toBe(267);
+    expect(metadata.json().count).toBe(282);
     const searched = await app.inject({
       method: "GET",
       url: "/v1/agents?q=Unreal%20Engine%20world%20builder&limit=10",
