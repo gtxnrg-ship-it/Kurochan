@@ -233,6 +233,7 @@ describe("OmniRouter", () => {
       }),
       stream: secondStream,
     };
+    const onUsage = vi.fn();
     const router = new OmniRouter({
       providers: new Map([
         ["openrouter", first],
@@ -240,9 +241,11 @@ describe("OmniRouter", () => {
       ]),
       routeOrder: { balanced: ["openrouter", "freellmapi"] },
       maxAttempts: 2,
+      onUsage,
     });
     const routed = await router.stream({
       profile: "balanced",
+      context: { operation: "task", runId: "run-1", taskId: "task-1" },
       messages: [{ role: "user", content: "test" }],
     });
     const chunks: string[] = [];
@@ -255,6 +258,30 @@ describe("OmniRouter", () => {
     expect(routed.providerErrors).toEqual([
       { providerId: "openrouter", code: "rate_limited" },
     ]);
+    expect(onUsage).toHaveBeenCalledTimes(2);
+    expect(onUsage).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        providerId: "openrouter",
+        profile: "balanced",
+        operation: "task",
+        runId: "run-1",
+        taskId: "task-1",
+        outcome: "failure",
+        errorCode: "rate_limited",
+      }),
+    );
+    expect(onUsage).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        providerId: "freellmapi",
+        profile: "balanced",
+        operation: "task",
+        runId: "run-1",
+        taskId: "task-1",
+        outcome: "success",
+      }),
+    );
   });
 
   it("rejects streaming when no configured provider advertises streaming", async () => {
