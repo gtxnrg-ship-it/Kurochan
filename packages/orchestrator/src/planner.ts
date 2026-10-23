@@ -320,7 +320,7 @@ export class PlanService {
 
     let candidates: AgentProfile[];
     let relevantRunbooks: AgentRunbook[];
-    let requiredRunbookAgentIds: string[];
+    let requiredRunbookAgentIds: string[] = [];
     let nexusStrategy: string;
     try {
       const searchResults = await Promise.all([
