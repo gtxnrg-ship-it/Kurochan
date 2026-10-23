@@ -33,7 +33,7 @@ export interface ChatCompletionOutput {
 export interface ChatProvider {
   readonly id: ProviderId;
   readonly displayName: string;
-  readonly defaultModel?: string;
+  readonly defaultModel: string | undefined;
   readonly isConfigured: boolean;
   /** Missing flags are conservatively treated as false except for text. */
   readonly capabilities?: Partial<ProviderCapabilities>;
