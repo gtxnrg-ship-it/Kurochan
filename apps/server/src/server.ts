@@ -1,4 +1,4 @@
-import { timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
@@ -7,6 +7,7 @@ import {
   ChatCompletionRequestSchema,
   type ChatCompletionResponse,
   type ProviderId,
+  type RouteProfile,
 } from "@kurochan/contracts";
 import { createProviderRegistry, type Environment } from "@kurochan/model-gateway";
 import { OmniRouter, routeOrdersFromEnvironment } from "@kurochan/omnirouter";
@@ -15,7 +16,6 @@ export interface ServerOptions {
   readonly env?: Environment;
   readonly logger?: boolean;
   readonly providers?: ReturnType<typeof createProviderRegistry>;
-  readonly fetchImpl?: typeof fetch;
 }
 
 function safeEqual(a: string, b: string): boolean {
@@ -31,11 +31,31 @@ function allowedOrigins(env: Environment): string[] {
   return [...new Set(configured)];
 }
 
-function profileFromModel(model: string) {
+interface ModelSelection {
+  readonly profile: RouteProfile;
+  readonly preferredProvider?: ProviderId;
+  readonly providerModel?: string;
+}
+
+function modelSelection(model: string, registry: ReturnType<typeof createProviderRegistry>): ModelSelection | undefined {
   const normalized = model.toLowerCase();
-  if (normalized === "omni/fast") return "fast" as const;
-  if (normalized === "omni/quality") return "quality" as const;
-  return "balanced" as const;
+  if (normalized === "omni/fast") return { profile: "fast" };
+  if (normalized === "omni/balanced") return { profile: "balanced" };
+  if (normalized === "omni/quality") return { profile: "quality" };
+
+  for (const id of ["openrouter", "freellmapi"] as const) {
+    const prefix = id + "/";
+    if (model.startsWith(prefix)) {
+      const providerModel = model.slice(prefix.length).trim();
+      return providerModel ? { profile: "balanced", preferredProvider: id, providerModel } : undefined;
+    }
+  }
+
+  const matches = [...registry.providers.values()].filter((provider) => provider.defaultModel === model);
+  if (matches.length === 1) {
+    return { profile: "balanced", preferredProvider: matches[0]!.id, providerModel: model };
+  }
+  return undefined;
 }
 
 export function buildServer(options: ServerOptions = {}): FastifyInstance {
@@ -45,6 +65,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     providers: registry.providers,
     routeOrder: routeOrdersFromEnvironment(env),
     maxAttempts: Number.parseInt(env.OMNIROUTER_MAX_ATTEMPTS ?? "2", 10),
+    maxConcurrentRequests: Number.parseInt(env.OMNIROUTER_MAX_CONCURRENT ?? "24", 10),
     failureThreshold: Number.parseInt(env.OMNIROUTER_FAILURE_THRESHOLD ?? "3", 10),
     circuitCooldownMs: Number.parseInt(env.OMNIROUTER_CIRCUIT_COOLDOWN_MS ?? "30000", 10),
   });
@@ -144,6 +165,13 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       { id: "omni/fast", object: "model", owned_by: "kurochan" },
       { id: "omni/balanced", object: "model", owned_by: "kurochan" },
       { id: "omni/quality", object: "model", owned_by: "kurochan" },
+      ...[...registry.providers.values()]
+        .filter((provider) => Boolean(provider.defaultModel))
+        .map((provider) => ({
+          id: provider.id + "/" + provider.defaultModel,
+          object: "model",
+          owned_by: provider.id,
+        })),
     ],
   }));
 
@@ -160,37 +188,53 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         error: { code: "streaming_not_supported_yet", message: "Streaming responses are not enabled in this backend build. Set stream to false.", retryable: false, requestId: request.id },
       });
     }
-    const profile = profileFromModel(body.model);
-    const messages = body.messages;
+    const selection = modelSelection(body.model, registry);
+    if (!selection) {
+      return reply.code(400).send({
+        error: {
+          code: "unknown_model",
+          message: "Use omni/fast, omni/balanced, omni/quality, or a provider-qualified model such as openrouter/vendor/model.",
+          retryable: false,
+          requestId: request.id,
+        },
+      });
+    }
+
     const abort = new AbortController();
     request.raw.on("aborted", () => abort.abort());
 
     try {
       const result = await router.complete({
-        profile,
-        messages,
+        profile: selection.profile,
+        ...(selection.preferredProvider ? { preferredProvider: selection.preferredProvider, lockProvider: true } : {}),
+        ...(selection.providerModel ? { model: selection.providerModel } : {}),
+        messages: body.messages,
         maxTokens: body.max_tokens ?? 1024,
         temperature: body.temperature ?? 0.2,
+        timeoutMs: body.timeout_ms ?? 60_000,
         signal: abort.signal,
+        requiredCapabilities: ["text"],
       });
       const responseBody: ChatCompletionResponse = {
-        id: `chatcmpl_${crypto.randomUUID().replaceAll("-", "")}`,
+        id: "chatcmpl_" + randomUUID().replaceAll("-", ""),
         object: "chat.completion",
         created: Math.floor(Date.now() / 1000),
         model: body.model,
         choices: [{ index: 0, message: { role: "assistant", content: result.content }, finish_reason: "stop" }],
         ...(result.usage ? { usage: {
-          ...(result.usage.promptTokens === undefined ? {} : { prompt_tokens: result.usage.promptTokens }),
-          ...(result.usage.completionTokens === undefined ? {} : { completion_tokens: result.usage.completionTokens }),
-          ...(result.usage.totalTokens === undefined ? {} : { total_tokens: result.usage.totalTokens }),
+          ...(result.usage.promptTokens === undefined ? {} : { prompt_tokens: Math.round(result.usage.promptTokens) }),
+          ...(result.usage.completionTokens === undefined ? {} : { completion_tokens: Math.round(result.usage.completionTokens) }),
+          ...(result.usage.totalTokens === undefined ? {} : { total_tokens: Math.round(result.usage.totalTokens) }),
         } } : {}),
       };
       reply.header("x-omnirouter-provider", result.providerId);
+      reply.header("x-omnirouter-profile", result.routeProfile);
       reply.header("x-omnirouter-attempts", String(result.attempts));
       return responseBody;
     } catch (error) {
       const err = error as { code?: string; message?: string; retryable?: boolean };
       const status = err.code === "no_provider_available" ? 503
+        : err.code === "router_overloaded" ? 429
         : err.code === "cancelled" ? 499
         : err.code === "invalid_request" ? 400 : 502;
       request.log.warn({ code: err.code ?? "routing_error", requestId: request.id }, "OmniRouter request failed");
@@ -218,5 +262,7 @@ export function validateServerConfiguration(env: Environment = process.env): { h
   }
   const rateLimit = Number.parseInt(env.API_RATE_LIMIT_PER_MINUTE ?? "60", 10);
   if (!Number.isInteger(rateLimit) || rateLimit < 1 || rateLimit > 1000) throw new Error("API_RATE_LIMIT_PER_MINUTE must be between 1 and 1000.");
+  const concurrency = Number.parseInt(env.OMNIROUTER_MAX_CONCURRENT ?? "24", 10);
+  if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 256) throw new Error("OMNIROUTER_MAX_CONCURRENT must be between 1 and 256.");
   return { host, port: parsedPort };
 }
