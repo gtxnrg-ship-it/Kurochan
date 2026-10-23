@@ -1,0 +1,23 @@
+{
+  "name": "@kurochan/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "build": "tsc -b",
+    "start": "node dist/main.js",
+    "typecheck": "tsc -b --pretty false"
+  },
+  "dependencies": {
+    "@kurochan/agent-catalog": "workspace:*",
+    "@kurochan/model-gateway": "workspace:*",
+    "@kurochan/omnirouter": "workspace:*",
+    "@kurochan/orchestrator": "workspace:*",
+    "@kurochan/storage": "workspace:*",
+    "dotenv": "^16.5.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.3"
+  }
+}
