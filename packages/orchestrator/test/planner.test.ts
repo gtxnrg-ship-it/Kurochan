@@ -14,6 +14,20 @@ function fakeCatalog(): AgentCatalog {
     search: vi.fn(async () => candidates),
     list: vi.fn(async () => candidates),
     get: vi.fn(async (id: string) => candidates.find((candidate) => candidate.id === id)),
+    listRunbooks: vi.fn(async () => [{
+      slug: "startup-mvp",
+      title: "Startup MVP",
+      mode: "micro",
+      duration: "short",
+      summary: "Research, design, implement and verify a minimum viable product.",
+      doc: "strategy/nexus-strategy.md",
+      roster: [{
+        group: "engineering",
+        activation: "required",
+        agents: ["engineering/backend-architect"],
+      }],
+    }]),
+    readNexusStrategy: vi.fn(async () => "NEXUS: discover, strategize, build, verify and evolve."),
   } as unknown as AgentCatalog;
 }
 
@@ -46,7 +60,11 @@ describe("PlanService", () => {
     expect(plan.tasks).toHaveLength(3);
     expect(plan.tasks[2]?.dependsOn).toEqual(["build"]);
     expect(plan.selectedAgents).toHaveLength(3);
+    expect(plan.selectedRunbook).toEqual({ slug: "startup-mvp", title: "Startup MVP" });
     expect(router.complete).toHaveBeenCalledOnce();
+    const prompted = JSON.parse(router.complete.mock.calls[0]![0].messages[0]!.content);
+    expect(prompted.relevantNexusRunbooks).toHaveLength(1);
+    expect(router.complete.mock.calls[0]![0].systemPrompt).toContain("NEXUS strategy excerpt");
   });
 
   it("refuses model-invented agent IDs", async () => {
