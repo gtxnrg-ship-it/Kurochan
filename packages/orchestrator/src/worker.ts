@@ -166,6 +166,7 @@ function workerSystemPrompt(
   sandboxEnabled: boolean,
   webResearchEnabled: boolean,
   githubProjectEnabled: boolean,
+  githubProjectPublishingEnabled: boolean,
 ): string {
   return [
     "You are a specialist task executor inside Kuro-chan.",
@@ -174,9 +175,15 @@ function workerSystemPrompt(
     "GitHub research tools: github.search_repositories {query,limit?}, github.get_repository {repository}, github.list_files {repository,path?,ref?}, github.read_file {repository,path,ref?}.",
     ...(githubProjectEnabled
       ? [
-          "GitHub project tools: github.checkout_repository {repository,ref?} and github.create_pull_request {repository,title,body?}.",
-          "Checkout must happen before project file edits. Repository checkout and publication are restricted to the server-side allowlist. Do not attempt to access other repositories or tokens.",
-          "Creating or updating a pull request is an external side effect and requires explicit user approval. Ask for the tool, then wait when the server reports approval is needed. Never claim a pull request exists unless the tool returns its URL.",
+          "GitHub project checkout is available through github.checkout_repository {repository,ref?}; it is restricted to the server-side allowlist.",
+          ...(githubProjectPublishingEnabled
+            ? [
+                "GitHub publishing is available through github.create_pull_request {repository,title,body?}, but every publish action requires explicit user approval. Ask for the tool, wait when approval is requested, and never claim a pull request exists unless a tool result returns its URL.",
+              ]
+            : [
+                "GitHub pull-request publishing is disabled for this deployment. Do not request github.create_pull_request or claim changes can be published.",
+              ]),
+          "Never attempt to access another repository or inspect server-side tokens.",
         ]
       : [
           "The authenticated GitHub project connector is not configured. You may research public repositories but cannot check out authorized project workspaces or create pull requests through GitHub.",
@@ -198,7 +205,7 @@ function workerSystemPrompt(
           "No command execution, compiler, or test runner is registered for this worker. Do not invent shell results or claim code was executed.",
         ]),
     "Read-only GitHub research targets public repositories only and accepts no arbitrary URLs. Project checkout and write permissions are separate, explicit capabilities and never grant access to other runs.",
-    "Tool actions are executed by the server and validated independently. For workspace paths, use relative POSIX paths only. Never use traversal, symlinks, hidden paths, absolute paths, or attempt to leave the workspace.",
+    "Tool actions are executed by the server and validated independently. For workspace paths, use relative POSIX paths only. Never use traversal, symlinks, reserved metadata paths, absolute paths, or attempt to leave the workspace.",
     "If a task requires unavailable capabilities, return status 'blocked' and explain what is missing. Never claim that code compiled, tests passed, external research occurred, or an external system changed unless a real tool result proves it.",
     "Return only JSON: {status:'completed'|'tool_calls'|'blocked',summary:string,toolCalls:[{name:string,arguments:object}],evidence:[{kind:string,summary:string,uri?:string}]}",
     "Use status 'tool_calls' when tools are needed, with at least one tool call. Each call is run sequentially and results will be provided in a following user message. Use status 'completed' only when the task deliverable is actually represented in the workspace or evidence. Be concise and specific.",
@@ -741,6 +748,7 @@ export class TaskWorker {
           Boolean(this.options.sandbox),
           this.webResearch.isConfigured,
           Boolean(this.options.githubProject?.isConfigured),
+          Boolean(this.options.githubProject?.canPublish),
         ),
         maxTokens: 3500,
         temperature: 0.2,
