@@ -3,6 +3,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
+import { z } from "zod";
 import {
   ChatCompletionRequestSchema,
   type ChatCompletionResponse,
