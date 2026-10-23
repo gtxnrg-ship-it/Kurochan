@@ -219,6 +219,7 @@ export class TaskWorker {
     { runId: string; controller: AbortController }
   >();
   private readonly finalizationControllers = new Map<string, AbortController>();
+  private readonly finalizationPromises = new Map<string, Promise<void>>();
   private readonly concurrency: number;
 
   constructor(private readonly options: TaskWorkerOptions) {
@@ -865,7 +866,23 @@ export class TaskWorker {
     for (const run of runs) await this.finalizeRun(run);
   }
 
-  private async finalizeRun(
+  private finalizeRun(
+    run: RunRecord,
+    taskSignal?: AbortSignal,
+  ): Promise<void> {
+    const existing = this.finalizationPromises.get(run.id);
+    if (existing) return existing;
+
+    const pending = this.performFinalizeRun(run, taskSignal).finally(() => {
+      if (this.finalizationPromises.get(run.id) === pending) {
+        this.finalizationPromises.delete(run.id);
+      }
+    });
+    this.finalizationPromises.set(run.id, pending);
+    return pending;
+  }
+
+  private async performFinalizeRun(
     run: RunRecord,
     taskSignal?: AbortSignal,
   ): Promise<void> {
