@@ -67,6 +67,47 @@ describe("PlanService", () => {
     expect(router.complete.mock.calls[0]![0].systemPrompt).toContain("NEXUS strategy excerpt");
   });
 
+  it("retrieves runbook specialists from the complete catalog even when they were absent from search results", async () => {
+    const unseen: AgentProfile = {
+      id: "security/security-architect",
+      name: "Security Architect",
+      description: "Threat modeling, security review, and secure system design",
+      division: "security",
+      sourcePath: "security/security-architect.md",
+      sourceSha256: "d".repeat(64),
+      tools: [],
+    };
+    const catalog = fakeCatalog();
+    vi.mocked(catalog.list).mockResolvedValue([...candidates, unseen]);
+    vi.mocked(catalog.listRunbooks).mockResolvedValue([{
+      slug: "startup-mvp",
+      title: "Startup MVP",
+      mode: "micro",
+      duration: "short",
+      summary: "Build a startup MVP with secure architecture and verification.",
+      doc: "strategy/nexus-strategy.md",
+      roster: [{
+        group: "security",
+        activation: "required",
+        agents: ["security/security-architect"],
+      }],
+    }]);
+
+    const router = fakeRouter(JSON.stringify({
+      summary: "Research, implement and verify the service.",
+      tasks: [
+        { key: "research", agentId: "research/research-analyst", objective: "Research the API requirements.", dependsOn: [] },
+        { key: "build", agentId: "engineering/backend-architect", objective: "Implement the API.", dependsOn: ["research"] },
+        { key: "qa", agentId: "testing/api-tester", objective: "Test the API.", dependsOn: ["build"] },
+      ],
+    }));
+    const planner = new PlanService({ catalog, router });
+    await planner.createPlan({ goal: "Build a startup MVP service", profile: "balanced" });
+
+    const prompt = JSON.parse(router.complete.mock.calls[0]![0].messages[0]!.content);
+    expect(prompt.allowedSpecialists.some((agent: { id: string }) => agent.id === unseen.id)).toBe(true);
+  });
+
   it("supports larger plans when a goal genuinely needs coordinated specialists", async () => {
     const tasks = Array.from({ length: 16 }, (_, index) => ({
       key: `task-${index + 1}`,
