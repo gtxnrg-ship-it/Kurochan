@@ -21,11 +21,13 @@ import { AgentCatalog } from "@kurochan/agent-catalog";
 import { RunStore, type CreateRunInput } from "@kurochan/storage";
 import {
   DockerSandboxRuntime,
+  GitHubProjectRuntime,
   PlanError,
   PlanService,
   TaskWorker,
   WorkspaceRuntime,
   WebResearchRuntime,
+  type GitHubProjectExecutor,
   type SandboxExecutor,
   type WebResearchExecutor,
 } from "@kurochan/orchestrator";
@@ -40,6 +42,7 @@ export interface ServerOptions {
   readonly workerEnabled?: boolean;
   readonly sandbox?: SandboxExecutor;
   readonly webResearch?: WebResearchExecutor;
+  readonly githubProject?: GitHubProjectExecutor;
 }
 
 function safeEqual(a: string, b: string): boolean {
@@ -217,6 +220,32 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         ? { searchLang: env.BRAVE_SEARCH_LANG.trim() }
         : {}),
     });
+  const githubAllowedRepositories = (env.KUROCHAN_GITHUB_ALLOWED_REPOSITORIES ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const githubProjectMaxFileBytes = parseBoundedInteger(
+    env.KUROCHAN_GITHUB_MAX_FILE_BYTES,
+    250_000,
+    1_024,
+    1_000_000,
+  );
+  const githubProject = options.githubProject ?? new GitHubProjectRuntime({
+    workspaceRoot,
+    ...(env.KUROCHAN_GITHUB_TOKEN?.trim()
+      ? { token: env.KUROCHAN_GITHUB_TOKEN.trim() }
+      : {}),
+    allowedRepositories: githubAllowedRepositories,
+    writeEnabled: env.KUROCHAN_GITHUB_WRITE_ENABLED?.trim().toLowerCase() === "true",
+    maxFiles: parseBoundedInteger(env.KUROCHAN_GITHUB_MAX_FILES, 500, 1, 2000),
+    maxFileBytes: githubProjectMaxFileBytes,
+    maxTotalBytes: parseBoundedInteger(
+      env.KUROCHAN_GITHUB_MAX_TOTAL_BYTES,
+      10_000_000,
+      githubProjectMaxFileBytes,
+      50_000_000,
+    ),
+  });
   const worker = new TaskWorker({
     store,
     catalog,
@@ -224,6 +253,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     workspaceRoot,
     ...(sandbox ? { sandbox } : {}),
     webResearch,
+    githubProject,
     concurrency: parseBoundedInteger(env.KUROCHAN_WORKER_CONCURRENCY, 4, 1, 32),
     onError: (error) => {
       const code =
@@ -490,6 +520,22 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       arbitraryUrlsAllowed: false,
       repositoryWritesEnabled: false,
     },
+    githubProject: {
+      enabled: githubProject.isConfigured,
+      checkoutEnabled: githubProject.isConfigured,
+      publishEnabled: githubProject.canPublish,
+      allowlistConfigured: githubAllowedRepositories.length > 0,
+      requiresTaskApproval: true,
+      arbitraryUrlsAllowed: false,
+      maxFiles: parseBoundedInteger(env.KUROCHAN_GITHUB_MAX_FILES, 500, 1, 2000),
+      maxFileBytes: githubProjectMaxFileBytes,
+      maxTotalBytes: parseBoundedInteger(
+        env.KUROCHAN_GITHUB_MAX_TOTAL_BYTES,
+        10_000_000,
+        githubProjectMaxFileBytes,
+        50_000_000,
+      ),
+    },
     sandbox: sandbox
       ? {
           enabled: true,
@@ -536,6 +582,12 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       enabled: true,
       access: "public-repositories-read-only",
       arbitraryUrlsAllowed: false,
+    },
+    githubProject: {
+      configured: githubProject.isConfigured,
+      publishingEnabled: githubProject.canPublish,
+      repositoryAllowlistConfigured: githubAllowedRepositories.length > 0,
+      requiresExplicitApproval: true,
     },
   }));
 
