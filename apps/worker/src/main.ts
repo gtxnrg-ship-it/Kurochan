@@ -5,6 +5,7 @@ import { createProviderRegistry } from "@kurochan/model-gateway";
 import { OmniRouter, routeOrdersFromEnvironment } from "@kurochan/omnirouter";
 import {
   DockerSandboxRuntime,
+  GitHubProjectRuntime,
   TaskWorker,
   WebResearchRuntime,
 } from "@kurochan/orchestrator";
@@ -60,6 +61,36 @@ if (sandboxNetwork !== "none" && sandboxNetwork !== "bridge") {
   throw new Error("KUROCHAN_SANDBOX_NETWORK must be none or bridge.");
 }
 
+const workspaceRoot = resolve(
+  process.env.KUROCHAN_WORKSPACE_ROOT?.trim() || "data/workspaces",
+);
+const githubAllowedRepositories = (process.env.KUROCHAN_GITHUB_ALLOWED_REPOSITORIES ?? "")
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
+const githubProjectMaxFileBytes = integerEnv(
+  "KUROCHAN_GITHUB_MAX_FILE_BYTES",
+  250_000,
+  1_024,
+  1_000_000,
+);
+const githubProject = new GitHubProjectRuntime({
+  workspaceRoot,
+  ...(process.env.KUROCHAN_GITHUB_TOKEN?.trim()
+    ? { token: process.env.KUROCHAN_GITHUB_TOKEN.trim() }
+    : {}),
+  allowedRepositories: githubAllowedRepositories,
+  writeEnabled: process.env.KUROCHAN_GITHUB_WRITE_ENABLED?.trim().toLowerCase() === "true",
+  maxFiles: integerEnv("KUROCHAN_GITHUB_MAX_FILES", 500, 1, 2000),
+  maxFileBytes: githubProjectMaxFileBytes,
+  maxTotalBytes: integerEnv(
+    "KUROCHAN_GITHUB_MAX_TOTAL_BYTES",
+    10_000_000,
+    githubProjectMaxFileBytes,
+    50_000_000,
+  ),
+});
+
 const store = new RunStore(
   process.env.KUROCHAN_DB_PATH?.trim() || "data/kurochan.sqlite",
 );
@@ -68,16 +99,13 @@ const worker = new TaskWorker({
   store,
   catalog,
   router,
-  workspaceRoot: resolve(
-    process.env.KUROCHAN_WORKSPACE_ROOT?.trim() || "data/workspaces",
-  ),
+  workspaceRoot,
   webResearch,
+  githubProject,
   ...(sandboxEnabled
     ? {
         sandbox: new DockerSandboxRuntime({
-          workspaceRoot: resolve(
-            process.env.KUROCHAN_WORKSPACE_ROOT?.trim() || "data/workspaces",
-          ),
+          workspaceRoot,
           ...(process.env.KUROCHAN_SANDBOX_IMAGE?.trim()
             ? { image: process.env.KUROCHAN_SANDBOX_IMAGE.trim() }
             : {}),
@@ -128,12 +156,13 @@ process.stdout.write(
     configuredProviders: registry.statuses
       .filter((provider) => provider.configured)
       .map((provider) => provider.id),
-    workspaceRoot: resolve(
-      process.env.KUROCHAN_WORKSPACE_ROOT?.trim() || "data/workspaces",
-    ),
+    workspaceRoot,
     sandboxEnabled,
     sandboxNetwork: sandboxEnabled ? sandboxNetwork : "disabled",
     webResearchConfigured: webResearch.isConfigured,
+    githubProjectConfigured: githubProject.isConfigured,
+    githubProjectPublishingEnabled: githubProject.canPublish,
+    githubAllowedRepositoryCount: githubAllowedRepositories.length,
   }) + "\n",
 );
 
