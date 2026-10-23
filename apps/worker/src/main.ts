@@ -28,7 +28,7 @@ const router = new OmniRouter({
   maxAttempts: integerEnv("OMNIROUTER_MAX_ATTEMPTS", 2, 1, 5),
   maxConcurrentRequests: integerEnv("OMNIROUTER_MAX_CONCURRENT", 24, 1, 256),
   failureThreshold: integerEnv("OMNIROUTER_FAILURE_THRESHOLD", 3, 1, 20),
-  circuitCooldownMs: integerEnv("OMNIROUTER_CIRCUIT_COOLDOWN_MS", 30_000, 1_000, 3_600_000),
+  circuitCooldownMs: integerEnv("OMNIROUTER_CIRCUIT_COOLDOWN_MS", 30_000, 1_000, 300_000),
 });
 
 const sandboxEnabled = process.env.KUROCHAN_SANDBOX_ENABLED?.trim().toLowerCase() === "true";
