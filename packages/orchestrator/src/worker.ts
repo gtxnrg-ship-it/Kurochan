@@ -62,6 +62,16 @@ const WorkerPayloadSchema = z
   })
   .strict();
 
+export interface GitHubProjectExecutor {
+  readonly isConfigured: boolean;
+  readonly canPublish: boolean;
+  execute(
+    runId: string,
+    call: GitHubProjectToolCall,
+    signal?: AbortSignal,
+  ): Promise<GitHubProjectToolResult>;
+}
+
 export interface TaskWorkerOptions {
   readonly store: RunStore;
   readonly catalog: AgentCatalog;
@@ -69,7 +79,7 @@ export interface TaskWorkerOptions {
   readonly workspaceRoot: string;
   readonly sandbox?: SandboxExecutor;
   readonly webResearch?: WebResearchExecutor;
-  readonly githubProject?: { execute(runId: string, call: GitHubProjectToolCall, signal?: AbortSignal): Promise<GitHubProjectToolResult>; isConfigured: boolean; canPublish: boolean };
+  readonly githubProject?: GitHubProjectExecutor;
   readonly workerId?: string;
   readonly profile?: RouteProfile;
   readonly leaseMs?: number;
