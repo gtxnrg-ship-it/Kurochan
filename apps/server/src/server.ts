@@ -269,6 +269,18 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       "workspace.write_file",
       "workspace.search_text",
     ],
+    researchTools: [
+      "github.search_repositories",
+      "github.get_repository",
+      "github.list_files",
+      "github.read_file",
+    ],
+    githubResearch: {
+      enabled: true,
+      access: "public-repositories-read-only",
+      arbitraryUrlsAllowed: false,
+      repositoryWritesEnabled: false,
+    },
     executionLimits: {
       shellEnabled: false,
       networkToolEnabled: false,
