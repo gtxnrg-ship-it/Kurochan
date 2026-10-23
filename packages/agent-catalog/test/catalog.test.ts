@@ -26,6 +26,15 @@ describe("Agency Agents catalog", () => {
     );
   });
 
+  it("validates upstream NEXUS runbooks against real, pinned specialists", async () => {
+    const catalog = new AgentCatalog();
+    const runbooks = await catalog.listRunbooks();
+    expect(runbooks.length).toBeGreaterThanOrEqual(4);
+    expect(runbooks.some((runbook) => runbook.slug === "startup-mvp")).toBe(true);
+    expect(runbooks.every((runbook) => runbook.roster.every((group) => group.agents.every((id) => id.includes("/")))).toBe(true);
+    expect((await catalog.readNexusStrategy()).toLowerCase()).toContain("nexus");
+  });
+
   it("does not resolve path traversal IDs", async () => {
     const catalog = new AgentCatalog();
     expect(await catalog.get("../README")).toBeUndefined();
