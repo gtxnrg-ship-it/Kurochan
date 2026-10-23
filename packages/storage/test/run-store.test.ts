@@ -429,6 +429,63 @@ describe("RunStore", () => {
     }
   });
 
+  it("persists synthesized audio against an assistant message and deletes it with the conversation", () => {
+    const store = makeStore();
+    try {
+      const conversation = store.createConversation({ createdBy: "local" }, 10);
+      const user = store.appendConversationMessage(
+        conversation.id,
+        { role: "user", content: "Please say hello." },
+        11,
+      );
+      const assistant = store.appendConversationMessage(
+        conversation.id,
+        { role: "assistant", content: "Hello there." },
+        12,
+      );
+      expect(user.inserted).toBe(true);
+      const audio = new Uint8Array([82, 73, 70, 70, 1, 2, 3, 4]);
+      const saved = store.saveConversationAudio({
+        conversationId: conversation.id,
+        messageId: assistant.message.id,
+        contentType: "audio/wav",
+        format: "wav",
+        audio,
+      }, 13);
+      expect(saved).toMatchObject({
+        conversationId: conversation.id,
+        messageId: assistant.message.id,
+        contentType: "audio/wav",
+        format: "wav",
+        bytes: 8,
+        createdAt: 13,
+      });
+      expect([...store.getConversationAudio(conversation.id, assistant.message.id)!.audio]).toEqual([...audio]);
+
+      const duplicate = store.saveConversationAudio({
+        conversationId: conversation.id,
+        messageId: assistant.message.id,
+        contentType: "audio/wav",
+        format: "wav",
+        audio: new Uint8Array([0, 0, 0]),
+      }, 14);
+      expect(duplicate).toEqual(saved);
+      expect([...store.getConversationAudio(conversation.id, assistant.message.id)!.audio]).toEqual([...audio]);
+
+      expect(() => store.saveConversationAudio({
+        conversationId: conversation.id,
+        messageId: user.message.id,
+        contentType: "audio/wav",
+        format: "wav",
+        audio,
+      })).toThrow(/assistant message/);
+      expect(store.deleteConversation(conversation.id)).toBe(true);
+      expect(store.getConversationAudio(conversation.id, assistant.message.id)).toBeUndefined();
+    } finally {
+      store.close();
+    }
+  });
+
   it("supports approvals and cancellation", () => {
     const store = makeStore();
     try {
