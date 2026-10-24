@@ -899,18 +899,21 @@ export class TaskWorker {
     const configuredMcpTools = this.options.mcpTools?.isConfigured
       ? await this.options.mcpTools.listTools()
       : [];
-    const selectedMcpTools = selectMcpToolsForTask(
+    const rankedMcpTools = selectMcpToolsForTask(
       run.goal + " " + task.objective,
       agent,
       configuredMcpTools,
+      30,
     );
+    const mcpContext = selectMcpToolsForContext(rankedMcpTools);
+    const selectedMcpTools = mcpContext.tools;
     let supplementalSkills: Awaited<
       ReturnType<CommunitySkillCatalog["selectForTask"]>
     > = [];
     try {
       supplementalSkills = await this.communitySkills.selectForTask(
         run.goal + " " + task.objective,
-        { maxSkills: 3, maxCharacters: 12_000 },
+        { maxSkills: 3, maxCharacters: 5_000 },
       );
     } catch (error) {
       this.options.onError?.(error);
@@ -918,25 +921,40 @@ export class TaskWorker {
     const messages: Array<{ role: "user" | "assistant"; content: string }> = [
       {
         role: "user",
-        content: jsonCharacterLimit({
-          kind: "task_context",
-          run: { id: run.id, goal: run.goal, profile: run.profile },
-          task: {
-            id: task.id,
-            key: task.planKey,
-            agentId: task.agentId,
-            objective: task.objective,
-            input: task.input,
-            attempt: task.attempts,
-          },
-          specialist: {
-            id: agent.id,
-            name: agent.name,
-            division: agent.division,
-            instructions: profileText(agent.instructions),
-          },
-          completedDependencies: dependencyResults,
-          communitySkills: supplementalSkills.map(
+        content: jsonCharacterLimit(
+          {
+            kind: "task_context",
+            run: {
+              id: run.id,
+              goal: boundedText(run.goal, 5_000),
+              profile: run.profile,
+            },
+            task: {
+              id: task.id,
+              key: task.planKey,
+              agentId: task.agentId,
+              objective: boundedText(task.objective, 3_000),
+              input: boundedJsonValue(task.input, 2_500),
+              attempt: task.attempts,
+            },
+            specialist: {
+              id: agent.id,
+              name: agent.name,
+              division: agent.division,
+              instructions: profileText(agent.instructions, 16_000),
+            },
+            completedDependencies: dependencyResults
+              .slice(0, 4)
+              .map((dependency) => ({
+                taskId: dependency.taskId,
+                planKey: dependency.planKey,
+                agentId: dependency.agentId,
+                objective: boundedText(dependency.objective, 800),
+                output: boundedJsonValue(dependency.output, 1_200),
+                evidence: boundedEvidence(dependency.evidence),
+              })),
+            omittedDependencyCount: Math.max(0, dependencyResults.length - 4),
+            communitySkills: supplementalSkills.map(
             ({
               id,
               packId,
@@ -976,18 +994,27 @@ export class TaskWorker {
               : []),
             ...(selectedMcpTools.length ? ["mcp.call"] : []),
           ],
-          availableMcpTools: selectedMcpTools.map((tool) => ({
-            serverId: tool.serverId,
-            serverName: tool.serverName,
-            name: tool.name,
-            description: tool.description,
-            inputSchema: tool.inputSchema,
-            readOnly: tool.readOnly,
-            ...(tool.destructiveHint === undefined
-              ? {}
-              : { destructiveHint: tool.destructiveHint }),
-          })),
-        }),
+            availableMcpTools: selectedMcpTools.map((tool) => ({
+              serverId: tool.serverId,
+              serverName: boundedText(tool.serverName, 120),
+              name: tool.name,
+              description: boundedText(tool.description, 300),
+              inputSchema: tool.inputSchema,
+              readOnly: tool.readOnly,
+              ...(tool.destructiveHint === undefined
+                ? {}
+                : { destructiveHint: tool.destructiveHint }),
+            })),
+            ...(mcpContext.omittedCount > 0
+              ? {
+                  mcpToolsOmittedDueToContext: mcpContext.omittedCount,
+                  mcpToolContextNotice:
+                    "Only task-relevant MCP tools with bounded input schemas are enabled for this task. Tools omitted from this list are not callable.",
+                }
+              : {}),
+          },
+          60_000,
+        ),
       },
     ];
     const evidence: Evidence[] = [];
