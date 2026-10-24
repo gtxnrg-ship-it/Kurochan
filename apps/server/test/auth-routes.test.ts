@@ -280,7 +280,7 @@ describe("Kuro-chan OAuth API", () => {
         headers: { authorization: "Bearer " + token },
       });
       expect(before.statusCode).toBe(200);
-      expect(before.json().user.userId).toBe("github:101");
+      expect(before.json().user.userId).toBe("github:202");
 
       const logout = await app.inject({
         method: "POST",
