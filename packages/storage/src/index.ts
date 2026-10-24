@@ -572,6 +572,14 @@ export class RunStore {
         bytes INTEGER NOT NULL CHECK(bytes > 0 AND bytes <= 52428800),
         created_at INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS oauth_session_revocations (
+        session_id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        expires_at INTEGER NOT NULL,
+        revoked_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_oauth_session_revocations_expiry
+        ON oauth_session_revocations(expires_at);
       CREATE INDEX IF NOT EXISTS idx_conversation_audio_conversation
         ON conversation_audio(conversation_id, created_at);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_conversation_client_message
@@ -609,6 +617,42 @@ export class RunStore {
 
   close(): void {
     this.db.close();
+  }
+
+  revokeOAuthSession(
+    sessionId: string,
+    userId: string,
+    expiresAt: number,
+    now = Date.now(),
+  ): void {
+    assertText(sessionId, "OAuth session ID", 200);
+    assertText(userId, "OAuth user ID", 200);
+    if (!Number.isSafeInteger(expiresAt) || expiresAt <= now) return;
+    this.db
+      .prepare("DELETE FROM oauth_session_revocations WHERE expires_at <= ?")
+      .run(now);
+    this.db
+      .prepare(
+        "INSERT OR REPLACE INTO oauth_session_revocations(session_id,user_id,expires_at,revoked_at) VALUES(?,?,?,?)",
+      )
+      .run(sessionId, userId, expiresAt, now);
+  }
+
+  isOAuthSessionRevoked(sessionId: string, now = Date.now()): boolean {
+    assertText(sessionId, "OAuth session ID", 200);
+    const row = this.db
+      .prepare(
+        "SELECT expires_at FROM oauth_session_revocations WHERE session_id=?",
+      )
+      .get(sessionId) as { expires_at: number } | undefined;
+    if (!row) return false;
+    if (row.expires_at <= now) {
+      this.db
+        .prepare("DELETE FROM oauth_session_revocations WHERE session_id=?")
+        .run(sessionId);
+      return false;
+    }
+    return true;
   }
 
   createConversation(
