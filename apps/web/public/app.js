@@ -961,14 +961,14 @@ function closeSettings() {
 async function testConnection() {
   const button = $("#test-connection");
   const errorBox = $("#settings-error");
-  const candidateBase = normalizeApiBaseUrl($("#api-base-url").value);
-  const candidateToken = $("#api-token").value.trim() || state.apiToken;
-  const previousBase = state.apiBaseUrl;
-  const previousToken = state.apiToken;
   errorBox.hidden = true;
   button.disabled = true;
   setText("#settings-status", "Testing API connection…");
+  const previousBase = state.apiBaseUrl;
+  const previousToken = state.apiToken;
   try {
+    const candidateBase = normalizeApiBaseUrl($("#api-base-url").value);
+    const candidateToken = $("#api-token").value.trim() || state.apiToken;
     state.apiBaseUrl = candidateBase;
     state.apiToken = candidateToken;
     const ok = await refreshConnection({ quiet: false });
