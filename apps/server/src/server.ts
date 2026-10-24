@@ -1178,11 +1178,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       count: data.length,
       data: data.map((pack) => ({
         ...pack,
-        runtime: statusByPack.get(pack.id) ?? {
-          packId: pack.id,
-          available: false,
-          skillCount: 0,
-        },
+        skillCatalog: statusByPack.get(pack.id) ?? null,
       })),
       security: {
         thirdPartyCodeAutoExecuted: false,
