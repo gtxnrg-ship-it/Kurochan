@@ -1,5 +1,11 @@
 import { ApiClient, ApiError, normalizeApiBaseUrl } from "./api.mjs";
 import { renderMarkdown } from "./markdown.mjs";
+import {
+  INTEGRATION_CATALOG,
+  buildMcpConfig,
+  filterIntegrations,
+  resolveIntegrationStatus,
+} from "./integrations.mjs";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -35,6 +41,16 @@ const state = {
   router: null,
   agentQuery: "",
   agentResults: [],
+  integrationSearch: "",
+  integrationCategory: "All",
+  integrationKind: "All",
+  integrationSelectedId: "github-project",
+  integrationSnapshot: {},
+  integrationPresets: [],
+  integrationsLoaded: false,
+  integrationsLoading: false,
+  integrationProbeAt: null,
+  integrationError: "",
   loading: false,
   sending: false,
   transientMessage: "",
@@ -54,6 +70,10 @@ const viewMeta = {
   agents: {
     eyebrow: "THE SPECIALIST LIBRARY",
     title: "The right minds for the work.",
+  },
+  integrations: {
+    eyebrow: "YOUR TOOLKIT",
+    title: "Connect the tools behind the work.",
   },
   system: {
     eyebrow: "UNDER THE HOOD",
@@ -304,6 +324,7 @@ function renderView() {
   if (state.view === "chat") renderChatView(workspace);
   else if (state.view === "runs") renderRunsView(workspace);
   else if (state.view === "agents") renderAgentsView(workspace);
+  else if (state.view === "integrations") renderIntegrationsView(workspace);
   else renderSystemView(workspace);
 }
 
@@ -1585,6 +1606,601 @@ function renderAgentsView(workspace) {
   input.focus();
 }
 
+function renderIntegrationsView(workspace) {
+  const page = makeElement("div", "page-view integrations-page");
+  const intro = makeElement("div", "page-intro integration-intro");
+  intro.append(
+    makeElement("span", "section-kicker", "A FLEXIBLE TOOLKIT"),
+    makeElement("h2", "", "Give every task the right tools."),
+    makeElement(
+      "p",
+      "",
+      "Browse native capabilities and optional MCP connectors. Kuro-chan only reports a service as connected when the API reports it; a catalog card is not a live connection.",
+    ),
+  );
+
+  const actions = makeElement("div", "integration-actions");
+  const probe = makeElement(
+    "button",
+    "button button-primary",
+    state.integrationsLoading ? "Checking…" : "Test MCP connections",
+  );
+  probe.type = "button";
+  probe.disabled = state.integrationsLoading;
+  probe.addEventListener("click", () => void loadIntegrations({ probe: true }));
+  const refresh = makeElement(
+    "button",
+    "button button-subtle",
+    "Refresh status ↻",
+  );
+  refresh.type = "button";
+  refresh.disabled = state.integrationsLoading;
+  refresh.addEventListener("click", () => void loadIntegrations());
+  actions.append(probe, refresh);
+
+  const message = makeElement("div", "integration-notice");
+  message.id = "integration-status";
+  message.setAttribute("role", "status");
+  message.textContent = state.integrationError
+    ? state.integrationError
+    : state.integrationProbeAt
+      ? "Last connection probe: " +
+        new Date(state.integrationProbeAt).toLocaleTimeString([], {
+          hour: "numeric",
+          minute: "2-digit",
+        })
+      : "Secrets stay on the server or worker. This screen never asks you to paste a provider key into the browser.";
+
+  const summary = makeElement("div", "integration-summary");
+  summary.id = "integration-summary";
+  const filters = makeElement("div", "integration-filters");
+  const searchWrap = makeElement("label", "integration-search-wrap");
+  const searchLabel = makeElement("span", "sr-only", "Search integrations");
+  const search = makeElement("input", "integration-search");
+  search.id = "integration-search";
+  search.type = "search";
+  search.placeholder = "Search GitHub, Firebase, Supabase…";
+  search.autocomplete = "off";
+  search.value = state.integrationSearch;
+  search.addEventListener("input", () => {
+    state.integrationSearch = search.value;
+    renderIntegrationCards();
+  });
+  searchWrap.append(searchLabel, search);
+
+  const kindLabel = makeElement("label", "integration-filter-label");
+  kindLabel.append(makeElement("span", "", "Type"));
+  const kind = makeElement("select", "integration-filter");
+  kind.id = "integration-kind-filter";
+  [
+    ["All", "All integrations"],
+    ["Built in", "Built in"],
+    ["MCP", "MCP directory"],
+  ].forEach(([value, label]) => {
+    const option = makeElement("option", "", label);
+    option.value = value;
+    kind.append(option);
+  });
+  kind.value = state.integrationKind;
+  kind.addEventListener("change", () => {
+    state.integrationKind = kind.value;
+    renderIntegrationCards();
+  });
+  kindLabel.append(kind);
+
+  const categoryLabel = makeElement("label", "integration-filter-label");
+  categoryLabel.append(makeElement("span", "", "Category"));
+  const category = makeElement("select", "integration-filter");
+  category.id = "integration-category-filter";
+  const categories = [
+    "All",
+    ...new Set(INTEGRATION_CATALOG.map((item) => item.category).sort()),
+  ];
+  categories.forEach((value) => {
+    const option = makeElement("option", "", value === "All" ? "All categories" : value);
+    option.value = value;
+    category.append(option);
+  });
+  category.value = state.integrationCategory;
+  category.addEventListener("change", () => {
+    state.integrationCategory = category.value;
+    renderIntegrationCards();
+  });
+  categoryLabel.append(category);
+
+  filters.append(searchWrap, kindLabel, categoryLabel);
+  const grid = makeElement("div", "integration-grid");
+  grid.id = "integration-cards";
+  const detail = makeElement("section", "integration-detail");
+  detail.id = "integration-detail";
+  detail.setAttribute("aria-live", "polite");
+
+  page.append(intro, actions, message, summary, filters, grid, detail);
+  workspace.append(page);
+  renderIntegrationCards();
+  if (
+    !state.integrationsLoaded &&
+    !state.integrationsLoading &&
+    !state.integrationError
+  ) {
+    grid.replaceChildren(
+      makeElement("div", "loading-card", "Loading integration and connection status…"),
+    );
+  }
+}
+
+async function loadIntegrations({ probe = false } = {}) {
+  if (state.integrationsLoading) return;
+  state.integrationsLoading = true;
+  state.integrationError = "";
+  const notice = $("#integration-status");
+  if (notice) {
+    notice.textContent = probe
+      ? "Checking configured MCP servers and discovering their tools…"
+      : "Refreshing the API's current integration status…";
+  }
+  const results = await Promise.allSettled([
+    api.mcpStatus({ probe }),
+    api.communityMcpPresets(),
+    api.researchStatus(),
+    api.workerStatus(),
+    api.speechStatus(),
+    api.config(),
+    api.workers(),
+  ]);
+  const values = results.map((result) =>
+    result.status === "fulfilled" ? result.value : result.reason,
+  );
+  const [mcp, presets, research, worker, speech, config, workers] = values;
+  state.integrationSnapshot = {
+    mcp: mcp && !(mcp instanceof Error) ? mcp : null,
+    research: research && !(research instanceof Error) ? research : null,
+    worker: worker && !(worker instanceof Error) ? worker : null,
+    speech: speech && !(speech instanceof Error) ? speech : null,
+    config: config && !(config instanceof Error) ? config : null,
+    workers: workers && !(workers instanceof Error) ? workers : null,
+  };
+  state.integrationPresets = Array.isArray(presets?.data) ? presets.data : [];
+  state.integrationsLoaded = results.some(
+    (result) => result.status === "fulfilled",
+  );
+  state.integrationsLoading = false;
+  if (probe) state.integrationProbeAt = Date.now();
+  const firstError = results.find(
+    (result) => result.status === "rejected",
+  );
+  if (!state.integrationsLoaded) {
+    const reason = firstError && firstError.status === "rejected"
+      ? firstError.reason
+      : new Error("The API did not return integration diagnostics.");
+    state.integrationError =
+      !state.authenticated || reason?.code === "unauthorized"
+        ? "Connect to your Kuro-chan API in Connection settings to inspect real connection status."
+        : errorMessage(reason);
+  } else if (state.integrationSnapshot.mcp?.security?.secretsReturned === true) {
+    state.integrationError =
+      "The API reported an unexpected security configuration. Do not add secrets here.";
+  }
+  if (state.view === "integrations") renderView();
+}
+
+function renderIntegrationCards() {
+  const grid = $("#integration-cards");
+  const summary = $("#integration-summary");
+  if (!grid || !summary) return;
+  const snapshot = state.integrationSnapshot;
+  const nativeReady = INTEGRATION_CATALOG.filter((item) => {
+    if (item.kind !== "native") return false;
+    return resolveIntegrationStatus(item, snapshot).tone === "success";
+  }).length;
+  const connectedMcp = (snapshot.mcp?.servers || []).filter(
+    (server) => server.connected,
+  ).length;
+  const configuredMcp = Number(snapshot.mcp?.configuredServerCount ?? 0);
+  summary.replaceChildren(
+    integrationMetric(String(connectedMcp), "MCP servers connected"),
+    integrationMetric(String(nativeReady), "Native capabilities ready"),
+    integrationMetric(String(INTEGRATION_CATALOG.length), "Directory entries"),
+  );
+
+  const results = filterIntegrations(INTEGRATION_CATALOG, {
+    query: state.integrationSearch,
+    category: state.integrationCategory,
+    kind: state.integrationKind,
+  });
+  grid.replaceChildren();
+  if (!results.length) {
+    grid.append(
+      makeElement(
+        "div",
+        "empty-state-card",
+        "No integrations match that search. Try a vendor, tool name, or another category.",
+      ),
+    );
+  }
+  for (const integration of results) {
+    const status = resolveIntegrationStatus(integration, snapshot);
+    const card = makeElement("article", "integration-card");
+    card.dataset.tone = status.tone;
+    const top = makeElement("div", "integration-card-top");
+    const symbol = makeElement(
+      "span",
+      "integration-symbol",
+      integrationSymbol(integration),
+    );
+    symbol.setAttribute("aria-hidden", "true");
+    const vendor = makeElement(
+      "div",
+      "integration-vendor",
+      integration.vendor + " · " + integration.category,
+    );
+    top.append(symbol, vendor);
+    const name = makeElement("h3", "integration-card-name", integration.name);
+    const description = makeElement(
+      "p",
+      "integration-card-copy",
+      integration.description,
+    );
+    const meta = makeElement("div", "integration-card-meta");
+    const isReviewedPreset = state.integrationPresets.some(
+      (preset) =>
+        preset.id === integration.id ||
+        preset.id === integration.mcpServerId,
+    );
+    meta.append(
+      integrationBadge(status.label, status.tone),
+      makeElement(
+        "span",
+        "integration-kind",
+        integration.kind === "native" ? "Built in" : "MCP adapter",
+      ),
+    );
+    if (isReviewedPreset) {
+      meta.append(integrationBadge("Reviewed template", "neutral"));
+    }
+    const foot = makeElement("div", "integration-card-foot");
+    foot.append(
+      makeElement("span", "integration-permissions", integration.permissions),
+    );
+    const button = makeElement(
+      "button",
+      "button button-subtle integration-details-button",
+      state.integrationSelectedId === integration.id ? "Hide details" : "Details",
+    );
+    button.type = "button";
+    button.setAttribute(
+      "aria-expanded",
+      String(state.integrationSelectedId === integration.id),
+    );
+    button.addEventListener("click", () => {
+      state.integrationSelectedId =
+        state.integrationSelectedId === integration.id
+          ? null
+          : integration.id;
+      renderIntegrationCards();
+    });
+    foot.append(button);
+    card.append(top, name, description, meta, foot);
+    grid.append(card);
+  }
+  if (configuredMcp > 0 && connectedMcp === 0 && snapshot.mcp?.probed !== true) {
+    const note = makeElement(
+      "p",
+      "integration-probe-note",
+      configuredMcp +
+        " MCP server" +
+        (configuredMcp === 1 ? " is" : "s are") +
+        " configured. Run “Test MCP connections” to check reachability and discover available tools.",
+    );
+    summary.append(note);
+  }
+  renderIntegrationDetail();
+}
+
+function integrationMetric(value, label) {
+  const card = makeElement("div", "integration-metric");
+  card.append(
+    makeElement("strong", "", value),
+    makeElement("span", "", label),
+  );
+  return card;
+}
+
+function integrationBadge(label, tone = "neutral") {
+  const badge = makeElement("span", "integration-badge is-" + tone, label);
+  return badge;
+}
+
+function integrationSymbol(item) {
+  if (item.kind === "native") {
+    const symbols = {
+      workspace: "⌘",
+      githubResearch: "GH",
+      githubProject: "GH",
+      webResearch: "↗",
+      sandbox: "▣",
+      speech: "◖",
+      modelRouting: "◎",
+    };
+    return symbols[item.nativeKey] || "✳";
+  }
+  const symbols = {
+    Code: "⌘",
+    "Data & backend": "DB",
+    "Developer tools": "⌁",
+    Research: "↗",
+    Design: "◫",
+    "Project management": "≋",
+    Knowledge: "▤",
+    Communication: "↗",
+    Observability: "◉",
+    Infrastructure: "⌘",
+    Payments: "$",
+  };
+  return symbols[item.category] || item.name.slice(0, 2).toUpperCase();
+}
+
+function renderIntegrationDetail() {
+  const panel = $("#integration-detail");
+  if (!panel) return;
+  const item = INTEGRATION_CATALOG.find(
+    (integration) => integration.id === state.integrationSelectedId,
+  );
+  panel.replaceChildren();
+  panel.hidden = !item;
+  if (!item) return;
+
+  const snapshot = state.integrationSnapshot;
+  const status = resolveIntegrationStatus(item, snapshot);
+  const top = makeElement("div", "integration-detail-top");
+  const titleBlock = makeElement("div", "integration-detail-heading");
+  titleBlock.append(
+    makeElement("span", "section-kicker", item.vendor.toUpperCase()),
+    makeElement("h3", "", item.name),
+  );
+  top.append(titleBlock, integrationBadge(status.label, status.tone));
+  panel.append(top, makeElement("p", "integration-detail-copy", item.detail));
+  panel.append(
+    makeElement("p", "integration-detail-status", status.detail),
+  );
+
+  const facts = makeElement("div", "integration-facts");
+  facts.append(
+    integrationFact("Connection path", item.kind === "native" ? "Native backend capability" : "MCP server adapter"),
+    integrationFact("Access policy", item.permissions),
+  );
+  if (item.mcpServerId) facts.append(
+    integrationFact("Server ID", item.mcpServerId),
+  );
+  panel.append(facts);
+
+  if (item.kind === "mcp") {
+    const server = (snapshot.mcp?.servers || []).find(
+      (candidate) => candidate.id === item.mcpServerId,
+    );
+    const tools = (snapshot.mcp?.tools || []).filter(
+      (tool) => tool.serverId === item.mcpServerId,
+    );
+    if (server) {
+      panel.append(
+        makeElement(
+          "p",
+          "integration-detail-status",
+          server.connected
+            ? "The API currently reports this server as connected."
+            : server.lastError
+              ? "Last connection error: " + server.lastError
+              : "Configuration exists, but a successful probe has not been confirmed.",
+        ),
+      );
+    }
+    if (tools.length) {
+      const toolSection = makeElement("div", "integration-tools-section");
+      toolSection.append(
+        makeElement("h4", "", "Discovered tools (" + tools.length + ")"),
+      );
+      const list = makeElement("div", "integration-tools-list");
+      tools.slice(0, 24).forEach((tool) => {
+        const row = makeElement("div", "integration-tool-row");
+        row.append(
+          makeElement("span", "", tool.name),
+          integrationBadge(
+            tool.readOnly ? "Read-only" : "Approval required",
+            tool.readOnly ? "success" : "warning",
+          ),
+        );
+        list.append(row);
+      });
+      if (tools.length > 24) {
+        list.append(
+          makeElement(
+            "p",
+            "subtle-copy",
+            (tools.length - 24) + " more tool definitions are available from the API.",
+          ),
+        );
+      }
+      toolSection.append(list);
+      panel.append(toolSection);
+    }
+
+    if (item.setupMode === "oauth-required") {
+      panel.append(
+        makeElement(
+          "p",
+          "integration-callout is-warning",
+          "This service uses interactive OAuth. Kuro-chan's current MCP runtime accepts operator-supplied environment/header credentials, but does not yet complete an OAuth sign-in flow. It is listed for visibility, not as a working connection.",
+        ),
+      );
+    } else {
+      const code = integrationConfigSnippet(item);
+      if (code) {
+        const configSection = makeElement("div", "integration-config-section");
+        configSection.append(
+          makeElement("h4", "", item.setupMode === "operator-config" ? "Starter configuration shape" : "MCP configuration"),
+          makeElement(
+            "p",
+            "subtle-copy",
+            item.setupMode === "operator-config"
+              ? "This is a structural example, not runnable as-is. Replace the endpoint, transport, and auth map using the official server's documentation."
+              : "Add this entry to KUROCHAN_MCP_SERVERS in the worker environment. Merge it with existing entries rather than replacing other configured servers.",
+          ),
+        );
+        const pre = makeElement("pre", "integration-code");
+        pre.append(makeElement("code", "", code));
+        configSection.append(pre);
+        const copy = makeElement(
+          "button",
+          "button button-subtle",
+          "Copy configuration",
+        );
+        copy.type = "button";
+        copy.addEventListener("click", () => void copyIntegrationText(code));
+        configSection.append(copy);
+        panel.append(configSection);
+      }
+      if (item.envHints) {
+        const values = Object.entries(item.envHints)
+          .map(([name, value]) => name + "=" + value)
+          .join("\n");
+        const envSection = makeElement("div", "integration-config-section");
+        envSection.append(
+          makeElement("h4", "", "Worker environment variables"),
+          makeElement(
+            "p",
+            "subtle-copy",
+            "These are variable names and safe placeholders. Put real values in your worker's secret environment, never in chat or this browser.",
+          ),
+        );
+        const pre = makeElement("pre", "integration-code");
+        pre.append(makeElement("code", "", values));
+        const copy = makeElement(
+          "button",
+          "button button-subtle",
+          "Copy variable names",
+        );
+        copy.type = "button";
+        copy.addEventListener("click", () => void copyIntegrationText(values));
+        envSection.append(pre, copy);
+        panel.append(envSection);
+      }
+    }
+  } else {
+    const envLines = nativeEnvironmentHints(item);
+    if (envLines) {
+      const envSection = makeElement("div", "integration-config-section");
+      envSection.append(
+        makeElement("h4", "", "Server environment"),
+        makeElement(
+          "p",
+          "subtle-copy",
+          "Configure these on the API/worker host. The browser never receives secret values.",
+        ),
+      );
+      const pre = makeElement("pre", "integration-code");
+      pre.append(makeElement("code", "", envLines));
+      const copy = makeElement(
+        "button",
+        "button button-subtle",
+        "Copy variable names",
+      );
+      copy.type = "button";
+      copy.addEventListener("click", () => void copyIntegrationText(envLines));
+      envSection.append(pre, copy);
+      panel.append(envSection);
+    }
+  }
+
+  if (item.docsUrl) {
+    const docs = makeElement("a", "integration-docs-link", "Official setup guide ↗");
+    docs.href = item.docsUrl;
+    docs.target = "_blank";
+    docs.rel = "noopener noreferrer";
+    panel.append(docs);
+  }
+}
+
+function integrationFact(label, value) {
+  const row = makeElement("div", "integration-fact");
+  row.append(
+    makeElement("span", "", label),
+    makeElement("strong", "", value),
+  );
+  return row;
+}
+
+function integrationConfigSnippet(item) {
+  const configuration = buildMcpConfig(item);
+  if (configuration) return JSON.stringify([configuration], null, 2);
+  if (item.kind === "mcp" && item.setupMode === "operator-config") {
+    return JSON.stringify(
+      [
+        {
+          id: item.mcpServerId,
+          name: item.name,
+          transport: "streamable-http",
+          url: "https://REPLACE_WITH_OFFICIAL_MCP_ENDPOINT",
+          headers: { Authorization: "MCP_AUTHORIZATION_ENV_VAR" },
+        },
+      ],
+      null,
+      2,
+    );
+  }
+  return null;
+}
+
+function nativeEnvironmentHints(item) {
+  const values = {
+    workspace:
+      "KUROCHAN_WORKER_ENABLED=true\nKUROCHAN_WORKER_CONCURRENCY=4",
+    githubResearch: "",
+    githubProject:
+      "KUROCHAN_GITHUB_TOKEN=<secret in server environment>\nKUROCHAN_GITHUB_ALLOWED_REPOSITORIES=owner/repository\nKUROCHAN_GITHUB_WRITE_ENABLED=false",
+    githubResearch:
+      "Built in: public GitHub research is read-only and does not need a token.",
+    webResearch:
+      "BRAVE_SEARCH_API_KEY=<secret in server environment>\nBRAVE_SEARCH_COUNTRY=BD\nBRAVE_SEARCH_LANG=en",
+    sandbox:
+      "KUROCHAN_SANDBOX_ENABLED=true\nKUROCHAN_SANDBOX_IMAGE=node:22-bookworm-slim\nKUROCHAN_SANDBOX_NETWORK=none",
+    speech:
+      "KUROCHAN_STT_BASE_URL=<provider endpoint>\nKUROCHAN_STT_API_KEY=<secret in server environment>\nKUROCHAN_STT_MODEL=<compatible model>\nKUROCHAN_TTS_BASE_URL=<provider endpoint>\nKUROCHAN_TTS_API_KEY=<secret in server environment>\nKUROCHAN_TTS_MODEL=<compatible model>",
+    modelRouting:
+      "OPENROUTER_API_KEY=<secret in server environment>\nOPENROUTER_MODEL=<supported model>",
+  };
+  return values[item.nativeKey] || "";
+}
+
+async function copyIntegrationText(value) {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      showToast("Copied. Add it to your server-side configuration.");
+      return;
+    }
+  } catch {
+    // Use the selection fallback below on non-secure origins.
+  }
+  const temporary = makeElement("textarea", "clipboard-fallback");
+  temporary.value = value;
+  temporary.readOnly = true;
+  document.body.append(temporary);
+  temporary.select();
+  let copied = false;
+  try {
+    copied = document.execCommand("copy");
+  } catch {
+    copied = false;
+  }
+  temporary.remove();
+  showToast(
+    copied
+      ? "Copied. Add it to your server-side configuration."
+      : "Clipboard isn't available here. Select the configuration text and copy it manually.",
+    copied ? "success" : "normal",
+  );
+}
+
 function initials(name) {
   return String(name || "?")
     .split(/[\s/-]+/)
@@ -1911,7 +2527,9 @@ function init() {
       setView(view);
       if (view === "runs") void loadRuns();
       if (view === "agents" && !state.agentResults.length) void searchAgents();
-      if (view === "system") void loadSystemView();
+      if (view === "integrations" && !state.integrationsLoaded && !state.integrationsLoading)
+         void loadIntegrations();
+       if (view === "system") void loadSystemView();
     }),
   );
   $("#new-chat").addEventListener("click", () => void newConversation());
