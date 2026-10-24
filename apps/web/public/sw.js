@@ -4,6 +4,7 @@ const SHELL = [
   "/app.css",
   "/app.js",
   "/api.mjs",
+  "/markdown.mjs",
   "/manifest.webmanifest",
   "/icons/kurochan.svg",
 ];
