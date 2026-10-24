@@ -272,7 +272,7 @@ function boundedEvidence(evidence: readonly Evidence[]): readonly unknown[] {
   }));
 }
 
-function selectMcpToolsForContext(
+export function selectMcpToolsForContext(
   rankedTools: readonly McpToolDescriptor[],
 ): {
   readonly tools: readonly McpToolDescriptor[];
