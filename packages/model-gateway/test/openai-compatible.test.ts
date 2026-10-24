@@ -100,7 +100,8 @@ describe("OpenAICompatibleChatProvider", () => {
 
   it("classifies exhausted credits as retryable so OmniRouter can fail over", async () => {
     const fetchImpl = vi.fn(
-      async () => new Response("account has insufficient credits", { status: 402 }),
+      async () =>
+        new Response("account has insufficient credits", { status: 402 }),
     );
     const provider = new OpenAICompatibleChatProvider({
       id: "openrouter",
@@ -220,7 +221,8 @@ describe("OpenAICompatibleChatProvider", () => {
   });
   it("classifies exhausted credits as retryable for streaming requests", async () => {
     const fetchImpl = vi.fn(
-      async () => new Response("account has insufficient credits", { status: 402 }),
+      async () =>
+        new Response("account has insufficient credits", { status: 402 }),
     );
     const provider = new OpenAICompatibleChatProvider({
       id: "openrouter",
