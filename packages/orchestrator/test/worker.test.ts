@@ -142,7 +142,7 @@ describe("Bounded worker context", () => {
     expect(compacted).toHaveLength(4);
     expect(compacted[0]?.content).toContain("Build the requested feature");
     expect(compacted[1]?.content).toContain("compacted_action_history");
-    expect(compacted.at(-1)?.content).toContain("raw-payload-5");
+    expect(compacted.at(-1)?.content).toContain("latest-result");
     expect(serialized).not.toContain("x".repeat(500));
     expect(serialized.length).toBeLessThanOrEqual(85_000);
   });
