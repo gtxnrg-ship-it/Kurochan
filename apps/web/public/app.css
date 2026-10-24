@@ -2241,3 +2241,48 @@ button:disabled {
 .message-text a:hover {
   color: #2d4d39;
 }
+
+.button-voice {
+  color: #765d3b;
+  background: #f7efe0;
+  border-color: #eaddc4;
+}
+.button-voice:hover:not(:disabled) {
+  background: #f2e5cc;
+  border-color: #d9c4a0;
+}
+.button-voice:disabled {
+  opacity: 0.48;
+}
+.voice-audio-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.voice-audio-button {
+  min-height: 31px;
+  padding: 0 10px;
+  border: 1px solid #d8dfce;
+  border-radius: 8px;
+  background: #eef2e8;
+  color: #4e6a4c;
+  font-size: 10px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.voice-audio-button:hover:not(:disabled) {
+  border-color: #afc4a5;
+  background: #e6eddd;
+}
+.voice-audio-button:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+.voice-audio {
+  display: block;
+  width: min(340px, 100%);
+  min-width: 0;
+  height: 36px;
+}
