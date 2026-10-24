@@ -10,6 +10,7 @@ import {
   type ChatCompletionStreamChunk,
   type ChatProvider,
   type ChatCompletionUsage,
+  type ProviderModelInfo,
 } from "./provider.js";
 
 export interface OpenAICompatibleProviderOptions {
@@ -281,6 +282,135 @@ export class OpenAICompatibleChatProvider implements ChatProvider {
         "Provider response limit must be between 1024 and 10000000 bytes.",
       );
     }
+  }
+
+  async listModels(): Promise<readonly ProviderModelInfo[]> {
+    if (!this.apiKey) {
+      throw new ProviderError(
+        "not_configured",
+        `${this.displayName} is missing its server-side API key.`,
+      );
+    }
+
+    const timeoutSignal = AbortSignal.timeout(this.timeoutMs);
+    let response: Response;
+    try {
+      response = await this.fetchImpl(`${this.endpoint}/models`, {
+        method: "GET",
+        headers: {
+          authorization: `Bearer ${this.apiKey}`,
+          accept: "application/json",
+          ...this.extraHeaders,
+        },
+        signal: timeoutSignal,
+      });
+    } catch (error) {
+      throw new ProviderError(
+        "upstream_unavailable",
+        `${this.displayName} model catalog could not be reached.`,
+        { retryable: true, cause: error },
+      );
+    }
+
+    const body = await readBoundedBody(response, this.maxResponseBytes);
+    if (!response.ok) {
+      if (response.status === 402) {
+        throw new ProviderError(
+          "quota_exhausted",
+          `${this.displayName} has exhausted its available credits or quota.`,
+          { retryable: true, statusCode: 402 },
+        );
+      }
+      if (response.status === 429 || response.status === 408 || response.status >= 500) {
+        throw new ProviderError(
+          response.status === 429 ? "rate_limited" : "upstream_unavailable",
+          `${this.displayName} model catalog is temporarily unavailable.`,
+          { retryable: true, statusCode: response.status },
+        );
+      }
+      throw new ProviderError(
+        "upstream_rejected",
+        `${this.displayName} rejected the model catalog request (HTTP ${response.status}).`,
+        { statusCode: response.status },
+      );
+    }
+
+    let payload: unknown;
+    try {
+      payload = JSON.parse(body) as unknown;
+    } catch (error) {
+      throw new ProviderError(
+        "invalid_response",
+        `${this.displayName} returned an invalid model catalog.`,
+        { cause: error },
+      );
+    }
+
+    const rawModels =
+      payload && typeof payload === "object" &&
+      Array.isArray((payload as { data?: unknown }).data)
+        ? (payload as { data: unknown[] }).data
+        : undefined;
+    if (!rawModels) {
+      throw new ProviderError(
+        "invalid_response",
+        `${this.displayName} returned an unsupported model catalog format.`,
+      );
+    }
+
+    const stringValue = (value: unknown, maximumLength: number): string | undefined =>
+      typeof value === "string" && value.trim()
+        ? value.trim().slice(0, maximumLength)
+        : undefined;
+    const numericValue = (value: unknown): number | undefined => {
+      const number = typeof value === "number" ? value :
+        typeof value === "string" && value.trim() ? Number(value) : Number.NaN;
+      return Number.isFinite(number) && number >= 0 ? number : undefined;
+    };
+    const stringArray = (value: unknown): string[] | undefined =>
+      Array.isArray(value)
+        ? value
+            .filter((entry): entry is string => typeof entry === "string")
+            .map((entry) => entry.trim().slice(0, 80))
+            .filter(Boolean)
+            .slice(0, 100)
+        : undefined;
+
+    return rawModels
+      .flatMap((item): ProviderModelInfo[] => {
+        if (!item || typeof item !== "object") return [];
+        const record = item as {
+          id?: unknown;
+          name?: unknown;
+          description?: unknown;
+          context_length?: unknown;
+          pricing?: { prompt?: unknown; completion?: unknown };
+          architecture?: { input_modalities?: unknown; modality?: unknown };
+          supported_parameters?: unknown;
+        };
+        const id = stringValue(record.id, 200);
+        if (!id) return [];
+        const name = stringValue(record.name, 180);
+        const description = stringValue(record.description, 400);
+        const contextLength = numericValue(record.context_length);
+        const inputPricePerToken = numericValue(record.pricing?.prompt);
+        const outputPricePerToken = numericValue(record.pricing?.completion);
+        const modalities =
+          stringArray(record.architecture?.input_modalities) ??
+          stringArray(record.architecture?.modality);
+        const supportedParameters = stringArray(record.supported_parameters);
+        return [{
+          id,
+          ...(name ? { name } : {}),
+          ...(description ? { description } : {}),
+          ...(contextLength === undefined ? {} : { contextLength }),
+          ...(inputPricePerToken === undefined ? {} : { inputPricePerToken }),
+          ...(outputPricePerToken === undefined ? {} : { outputPricePerToken }),
+          ...(modalities ? { modalities } : {}),
+          ...(supportedParameters ? { supportedParameters } : {}),
+        }];
+      })
+      .slice(0, 5_000);
   }
 
   async stream(
