@@ -389,3 +389,8 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+.field-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 14px; }
+.field-row .field-label { margin: 0 0 8px; }
+.clear-token-button { flex: 0 0 auto; padding: 3px 5px; border: 0; border-radius: 5px; background: transparent; color: #a45b4a; font-size: 9px; cursor: pointer; }
+.clear-token-button:hover { background: #f6e5df; color: #883e33; }
