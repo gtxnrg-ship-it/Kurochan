@@ -903,7 +903,11 @@ function createSdkAdapter(
     },
     callTool: (name, arguments_, signal) =>
       signal
-        ? client.callTool({ name, arguments: arguments_ }, undefined, { signal })
+        ? client.callTool(
+            { name, arguments: arguments_ },
+            undefined,
+            { signal },
+          )
         : client.callTool({ name, arguments: arguments_ }),
     close: () => client.close(),
   };

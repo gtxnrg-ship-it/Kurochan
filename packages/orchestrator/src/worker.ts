@@ -232,7 +232,10 @@ function summarizePriorWorkerMessage(
     };
   }
 
-  if (record.kind === "compacted_action_history" && Array.isArray(record.entries)) {
+  if (
+    record.kind === "compacted_action_history" &&
+    Array.isArray(record.entries)
+  ) {
     return {
       role: "user",
       kind: "prior_action_history",
@@ -391,8 +394,14 @@ export function compactWorkerMessages(
   return [
     taskContext,
     { role: "user", content: shortHistory },
-    boundWorkerMessage(recentMessages[0] ?? messages[messages.length - 1]!, 8_000),
-    boundWorkerMessage(recentMessages[1] ?? messages[messages.length - 1]!, 8_000),
+    boundWorkerMessage(
+      recentMessages[0] ?? messages[messages.length - 1]!,
+      8_000,
+    ),
+    boundWorkerMessage(
+      recentMessages[1] ?? messages[messages.length - 1]!,
+      8_000,
+    ),
   ];
 }
 

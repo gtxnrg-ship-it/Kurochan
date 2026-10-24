@@ -412,9 +412,7 @@ export class WorkspaceRuntime {
         ? ""
         : lines.slice(startLine - 1, requestedEnd).join("\n");
     const truncated = selected.length > maxCharacters;
-    const content = truncated
-      ? selected.slice(0, maxCharacters)
-      : selected;
+    const content = truncated ? selected.slice(0, maxCharacters) : selected;
     const endLineReturned =
       startLine > lines.length
         ? startLine - 1
