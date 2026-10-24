@@ -28,6 +28,16 @@ function integerEnv(
   );
 }
 
+function redactSensitiveText(value: string): string {
+  return value
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/-]{12,}=?/gi, "Bearer [REDACTED]")
+    .replace(/\b(?:gh[pousr]|github_pat)_[A-Za-z0-9_]{12,}\b/g, "[REDACTED_TOKEN]")
+    .replace(/\bsk-(?:proj-|ant-)?[A-Za-z0-9_-]{16,}\b/g, "[REDACTED_TOKEN]")
+    .replace(/\bAIza[0-9A-Za-z_-]{35}\b/g, "[REDACTED_TOKEN]")
+    .replace(/\b(?:api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|client[-_ ]?secret|password|passwd|secret|token)\s*[:=]\s*["']?[A-Za-z0-9._~+/-]{8,}["']?/gi, "[REDACTED_SECRET]")
+    .slice(0, 2000);
+}
+
 const registry = createProviderRegistry(process.env);
 const store = new RunStore(
   process.env.KUROCHAN_DB_PATH?.trim() || "data/kurochan.sqlite",
@@ -144,8 +154,9 @@ const worker = new TaskWorker({
   maxToolRounds: integerEnv("KUROCHAN_WORKER_MAX_TOOL_ROUNDS", 6, 1, 12),
   concurrency: integerEnv("KUROCHAN_WORKER_CONCURRENCY", 4, 1, 32),
   onError: (error) => {
-    const message =
-      error instanceof Error ? error.message : "Unknown worker error";
+    const message = redactSensitiveText(
+      error instanceof Error ? error.message : "Unknown worker error",
+    );
     process.stderr.write(
       JSON.stringify({ level: "error", service: "kurochan-worker", message }) +
         "\n",
@@ -199,7 +210,9 @@ process.once("SIGINT", () => {
       JSON.stringify({
         level: "error",
         service: "kurochan-worker",
-        message: error instanceof Error ? error.message : "Shutdown failed",
+        message: redactSensitiveText(
+          error instanceof Error ? error.message : "Shutdown failed",
+        ),
       }) + "\n",
     );
     process.exitCode = 1;
