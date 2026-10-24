@@ -42,7 +42,9 @@ export interface SpeechRuntime {
   readonly isTranscriptionConfigured: boolean;
   readonly isSynthesisConfigured: boolean;
   readonly status: SpeechRuntimeStatus;
-  transcribe(input: SpeechTranscriptionInput): Promise<SpeechTranscriptionResult>;
+  transcribe(
+    input: SpeechTranscriptionInput,
+  ): Promise<SpeechTranscriptionResult>;
   synthesize(input: SpeechSynthesisInput): Promise<SpeechSynthesisResult>;
 }
 
