@@ -1622,7 +1622,7 @@ export class RunStore {
     return this.getTask(taskId)!;
   }
 
-  consumeExternalWriteApproval(
+  consumeExternalActionApproval(
     runId: string,
     taskId: string,
     workerId: string,
@@ -1711,11 +1711,7 @@ export class RunStore {
         {
           approvalType: "external-write",
           requestEventId: latestRequest.id,
-          action: {
-            mcpServerId: latestRequest.action.mcpServerId,
-            mcpToolName: latestRequest.action.mcpToolName,
-            argumentsHash: latestRequest.action.argumentsHash,
-          },
+          action: expectedAction,
         },
         now,
       );
