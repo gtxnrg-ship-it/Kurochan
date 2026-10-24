@@ -13,6 +13,7 @@ import { OmniRouter } from "@kurochan/omnirouter";
 import { RunStore } from "@kurochan/storage";
 import {
   approvalGranted,
+  jsonCharacterLimit,
   selectMcpToolsForTask,
   TaskWorker,
 } from "../src/worker.js";
@@ -58,6 +59,33 @@ function provider(complete: ChatProvider["complete"]): ChatProvider {
     complete,
   };
 }
+
+describe("Bounded worker context", () => {
+  it("keeps truncated context valid JSON and clearly marks its preview incomplete", () => {
+    const serialized = jsonCharacterLimit(
+      { results: ["useful evidence ".repeat(100)] },
+      220,
+    );
+
+    expect(serialized.length).toBeLessThanOrEqual(220);
+    const parsed = JSON.parse(serialized) as {
+      contextTruncated?: boolean;
+      notice?: string;
+      preview?: string;
+      originalCharacters?: number;
+    };
+    expect(parsed.contextTruncated).toBe(true);
+    expect(parsed.notice).toContain("incomplete prefix");
+    expect(parsed.preview).toBeTruthy();
+    expect(parsed.originalCharacters).toBeGreaterThan(serialized.length);
+  });
+
+  it("rejects invalid context limits instead of silently overflowing", () => {
+    expect(() => jsonCharacterLimit({}, 10)).toThrow(
+      "JSON context character limit must be between 128 and 200000.",
+    );
+  });
+});
 
 describe("MCP tool relevance routing", () => {
   it("prefers task-relevant MCP tools over unrelated tools", () => {
