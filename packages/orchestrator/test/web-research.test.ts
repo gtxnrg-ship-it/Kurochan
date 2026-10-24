@@ -27,7 +27,7 @@ function contextResponse() {
       [url]: {
         title: "Official Guide",
         hostname: "docs.example.dev",
-        age: ["2026-10-20", "2026-10-20", "3 days ago"],
+        age: ["2026-10-20", "2026-10-20", "3 days ago", "x".repeat(500)],
       },
     },
   };
@@ -75,6 +75,98 @@ describe("WebResearchRuntime", () => {
     expect(result.evidence?.[0]).toMatchObject({
       kind: "web_source",
       uri: "https://docs.example.dev/guide",
+    });
+
+    const resultBody = result.result as { items: { age?: string[] }[] };
+    expect(resultBody.items[0]?.age?.every((age) => age.length <= 100)).toBe(
+      true,
+    );
+  });
+
+  it("returns deeper bounded source context for research-heavy queries", async () => {
+    let requestedUrl = "";
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      requestedUrl = String(input);
+      return jsonResponse({
+        grounding: {
+          generic: Array.from({ length: 12 }, (_, sourceIndex) => ({
+            url: "https://docs.example.dev/guide-" + sourceIndex,
+            title: "Guide " + sourceIndex,
+            snippets: Array.from(
+              { length: 8 },
+              (_, snippetIndex) =>
+                "Source " +
+                sourceIndex +
+                " chunk " +
+                snippetIndex +
+                ": " +
+                "evidence ".repeat(220),
+            ),
+          })),
+        },
+        sources: {},
+      });
+    }) as unknown as typeof fetch;
+    const runtime = new WebResearchRuntime({
+      apiKey: "brave-test-key",
+      fetchImpl,
+    });
+
+    const result = await runtime.execute({
+      name: "web.search",
+      arguments: {
+        query: "comprehensive technical documentation review",
+        limit: 12,
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    const requested = new URL(requestedUrl);
+    expect(requested.searchParams.get("count")).toBe("12");
+    expect(requested.searchParams.get("maximum_number_of_urls")).toBe("12");
+    expect(requested.searchParams.get("maximum_number_of_tokens")).toBe(
+      "12288",
+    );
+    expect(requested.searchParams.get("maximum_number_of_tokens_per_url")).toBe(
+      "2048",
+    );
+    expect(requested.searchParams.get("maximum_number_of_snippets")).toBe("72");
+    expect(
+      requested.searchParams.get("maximum_number_of_snippets_per_url"),
+    ).toBe("6");
+
+    const body = result.result as {
+      items: { snippets: string[] }[];
+    };
+    expect(body.items).toHaveLength(12);
+    expect(body.items.every((item) => item.snippets.length <= 4)).toBe(true);
+    const totalSnippetCharacters = body.items
+      .flatMap((item) => item.snippets)
+      .reduce((total, snippet) => total + snippet.length, 0);
+    expect(totalSnippetCharacters).toBeLessThanOrEqual(28_000);
+    expect(totalSnippetCharacters).toBeGreaterThan(25_000);
+  });
+
+  it("marks malformed provider responses as retryable provider failures", async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({ unexpected: true }),
+    ) as unknown as typeof fetch;
+    const runtime = new WebResearchRuntime({
+      apiKey: "brave-test-key",
+      fetchImpl,
+    });
+
+    const result = await runtime.execute({
+      name: "web.search",
+      arguments: { query: "official documentation response" },
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: "invalid_web_search_response",
+        retryable: true,
+      },
     });
   });
 
@@ -146,6 +238,11 @@ describe("WebResearchRuntime", () => {
               url: "javascript:alert(1)",
               title: "Injected",
               snippets: ["Do not trust this result."],
+            },
+            {
+              url: "https://long.example/" + "x".repeat(1_100),
+              title: "Oversized",
+              snippets: ["Do not retain an oversized URL."],
             },
             {
               url: "https://valid.example/docs",

@@ -1440,9 +1440,14 @@ export class RunStore {
       const tasks = this.db
         .prepare("SELECT status FROM tasks WHERE run_id=?")
         .all(runId) as Array<{ status: TaskStatus }>;
-      const nextStatus: RunStatus = tasks.every((t) => t.status === "succeeded")
-        ? "verifying"
-        : "running";
+      const hasPendingApproval = tasks.some(
+        (item) => item.status === "waiting_for_approval",
+      );
+      const nextStatus: RunStatus = hasPendingApproval
+        ? "waiting_for_approval"
+        : tasks.every((item) => item.status === "succeeded")
+          ? "verifying"
+          : "running";
       this.db
         .prepare(
           "UPDATE runs SET status=?,updated_at=?,version=version+1 WHERE id=?",
@@ -1566,11 +1571,20 @@ export class RunStore {
             "UPDATE tasks SET status='ready',available_at=?,updated_at=? WHERE id=?",
           )
           .run(now, now, taskId);
+        const pendingApproval = this.db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM tasks WHERE run_id=? AND status='waiting_for_approval'",
+          )
+          .get(runId) as { count: number };
         this.db
           .prepare(
-            "UPDATE runs SET status='running',updated_at=?,version=version+1 WHERE id=?",
+            "UPDATE runs SET status=?,updated_at=?,version=version+1 WHERE id=?",
           )
-          .run(now, runId);
+          .run(
+            pendingApproval.count > 0 ? "waiting_for_approval" : "running",
+            now,
+            runId,
+          );
         this.addEvent(
           runId,
           taskId,
@@ -1606,6 +1620,96 @@ export class RunStore {
     });
     tx.immediate();
     return this.getTask(taskId)!;
+  }
+
+  consumeExternalActionApproval(
+    runId: string,
+    taskId: string,
+    workerId: string,
+    expectedAction: Readonly<Record<string, unknown>>,
+    now = Date.now(),
+  ): boolean {
+    assertText(runId, "runId", 200);
+    assertText(taskId, "taskId", 200);
+    assertText(workerId, "workerId", 200);
+    const tx = this.db.transaction(() => {
+      const task = this.db
+        .prepare("SELECT status,lease_owner FROM tasks WHERE id=? AND run_id=?")
+        .get(taskId, runId) as
+        { status: TaskStatus; lease_owner: string | null } | undefined;
+      if (!task || task.status !== "running" || task.lease_owner !== workerId) {
+        return false;
+      }
+
+      const events = this.db
+        .prepare(
+          "SELECT id,type,payload_json FROM run_events WHERE run_id=? AND task_id=? ORDER BY id ASC",
+        )
+        .all(runId, taskId) as Array<{
+        id: number;
+        type: string;
+        payload_json: string;
+      }>;
+      let latestRequest:
+        { id: number; action: Record<string, unknown> } | undefined;
+      for (const event of events) {
+        if (event.type !== "approval.requested") continue;
+        const payload = JSON.parse(event.payload_json) as {
+          action?: unknown;
+        };
+        const action = payload?.action;
+        if (
+          action &&
+          typeof action === "object" &&
+          !Array.isArray(action) &&
+          (action as Record<string, unknown>).approvalType === "external-write"
+        ) {
+          latestRequest = {
+            id: event.id,
+            action: action as Record<string, unknown>,
+          };
+        }
+      }
+      if (!latestRequest) return false;
+      if (
+        !Object.entries(expectedAction).every(
+          ([key, expected]) => latestRequest!.action[key] === expected,
+        )
+      ) {
+        return false;
+      }
+
+      const decision = events.find(
+        (event) =>
+          event.id > latestRequest!.id &&
+          (event.type === "approval.granted" ||
+            event.type === "approval.denied"),
+      );
+      if (decision?.type !== "approval.granted") return false;
+
+      const alreadyConsumed = events.some((event) => {
+        if (event.type !== "approval.consumed") return false;
+        const payload = JSON.parse(event.payload_json) as {
+          requestEventId?: unknown;
+        };
+        return payload.requestEventId === latestRequest!.id;
+      });
+      if (alreadyConsumed) return false;
+
+      this.addEvent(
+        runId,
+        taskId,
+        "approval.consumed",
+        {
+          approvalType: "external-write",
+          requestEventId: latestRequest.id,
+          action: expectedAction,
+        },
+        now,
+      );
+      return true;
+    });
+    return tx.immediate();
   }
 
   verifyRun(

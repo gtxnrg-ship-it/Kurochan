@@ -32,8 +32,8 @@ For OpenRouter, configure `OPENROUTER_API_KEY` and `OPENROUTER_MODEL`. Set `OPEN
 
 - If Kuro-chan and FreeLLMAPI both run directly on the same machine, `127.0.0.1:3001` is the expected local default.
 - If Kuro-chan runs inside a container while FreeLLMAPI runs on the host, `127.0.0.1` inside Kuro-chan's container refers to that container, not the host.
-- If both run in Docker, put them on a deliberate shared network and configure the FreeLLMAPI service hostname and port, for example `http://freellmapi:3001/v1` when that is the actual Compose service name.
-- For remote deployments, use a reachable private endpoint protected by appropriate network controls. Do not expose an unauthenticated inference gateway to the public internet.
+- If both run in Docker, put them on a deliberate shared network and configure the FreeLLMAPI service hostname and port. Prefer HTTPS even on that network. For a trusted, isolated private network that has no TLS, `FREELLMAPI_ALLOW_INSECURE_HTTP=true` explicitly opts in to unencrypted HTTP for FreeLLMAPI only. Treat this as a risk acceptance, not a secure default.
+- Remote deployments must use HTTPS. OpenRouter never accepts a non-loopback HTTP endpoint through this opt-in. Do not expose an unauthenticated inference gateway to the public internet.
 
 Do not guess a URL or copy a key from someone else's deployment.
 

@@ -1,3 +1,19 @@
 [submodule "packages/agent-catalog/vendor/agency-agents"]
 	path = packages/agent-catalog/vendor/agency-agents
 	url = https://github.com/msitarzewski/agency-agents.git
+
+[submodule "vendor/community/superpowers"]
+	path = vendor/community/superpowers
+	url = https://github.com/obra/superpowers.git
+
+[submodule "vendor/community/wshobson-agents"]
+	path = vendor/community/wshobson-agents
+	url = https://github.com/wshobson/agents.git
+
+[submodule "vendor/community/mattpocock-skills"]
+	path = vendor/community/mattpocock-skills
+	url = https://github.com/mattpocock/skills.git
+
+[submodule "vendor/community/addyosmani-agent-skills"]
+	path = vendor/community/addyosmani-agent-skills
+	url = https://github.com/addyosmani/agent-skills.git

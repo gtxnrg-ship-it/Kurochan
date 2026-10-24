@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   McpToolRuntime,
+  redactMcpSensitiveValues,
   type McpClientAdapter,
   type McpServerConfig,
 } from "../src/mcp-tools.js";
@@ -171,6 +172,220 @@ describe("McpToolRuntime", () => {
     });
     await runtime.close();
     expect(client.close).toHaveBeenCalledOnce();
+  });
+
+  it("redacts credential fields and token-shaped strings from tool results", async () => {
+    const githubToken = "ghp_" + "A".repeat(36);
+    const bearerToken = "B".repeat(40);
+    const client = adapter([readonlyTool], async () => ({
+      isError: false,
+      credentials: {
+        access_token: "access-secret",
+        refreshToken: "refresh-secret",
+        token: "generic-token-secret",
+        nested: { password: "password-secret" },
+      },
+      content: [
+        { type: "text", text: "Authorization: Bearer " + bearerToken },
+        { type: "text", text: "GitHub token: " + githubToken },
+        { type: "text", text: "A safe status message." },
+      ],
+    }));
+    const runtime = new McpToolRuntime({
+      servers: [serverConfig],
+      connectorFactory: () => client,
+    });
+
+    const result = await runtime.execute({
+      serverId: "records",
+      toolName: "search_records",
+      arguments: { query: "status" },
+    });
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain("access-secret");
+    expect(serialized).not.toContain("refresh-secret");
+    expect(serialized).not.toContain("generic-token-secret");
+    expect(serialized).not.toContain("password-secret");
+    expect(serialized).not.toContain(bearerToken);
+    expect(serialized).not.toContain(githubToken);
+    expect(serialized).toContain("A safe status message.");
+    expect(serialized).toContain("[REDACTED_SECRET]");
+    await runtime.close();
+  });
+
+  it("redacts secrets from MCP connection health errors", async () => {
+    const client = adapter([readonlyTool]);
+    client.connect = vi.fn(async () => {
+      throw Object.assign(
+        new Error("Connection failed with token=health-secret-value"),
+        { code: "connect_failed" },
+      );
+    });
+    const runtime = new McpToolRuntime({
+      servers: [serverConfig],
+      connectorFactory: () => client,
+    });
+
+    expect(await runtime.listTools()).toEqual([]);
+    const status = JSON.stringify(runtime.status());
+    expect(status).not.toContain("health-secret-value");
+    expect(status).toContain("[REDACTED_SECRET]");
+    await runtime.close();
+  });
+
+  it("redacts secrets in exceptions thrown by an MCP server", async () => {
+    const client = adapter([readonlyTool], async () => {
+      throw Object.assign(
+        new Error("Request failed with token=exception-secret-value"),
+        { code: "upstream_failed" },
+      );
+    });
+    const runtime = new McpToolRuntime({
+      servers: [serverConfig],
+      connectorFactory: () => client,
+    });
+    const result = await runtime.execute({
+      serverId: "records",
+      toolName: "search_records",
+      arguments: { query: "status" },
+    });
+    expect(JSON.stringify(result)).not.toContain("exception-secret-value");
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: "upstream_failed",
+        message: expect.stringContaining("[REDACTED_SECRET]"),
+      },
+    });
+    await runtime.close();
+  });
+
+  it("returns a typed error for undefined or non-JSON MCP results", async () => {
+    const client = adapter([readonlyTool], async () => undefined);
+    const runtime = new McpToolRuntime({
+      servers: [serverConfig],
+      connectorFactory: () => client,
+    });
+
+    const result = await runtime.execute({
+      serverId: "records",
+      toolName: "search_records",
+      arguments: { query: "status" },
+    });
+    expect(result).toMatchObject({
+      name: "mcp.call",
+      ok: false,
+      error: {
+        code: "invalid_result",
+        message:
+          "MCP tool returned a value that cannot be represented as JSON.",
+      },
+    });
+    await runtime.close();
+  });
+
+  it("redacts sensitive values when preparing approval previews", () => {
+    const safe = redactMcpSensitiveValues({
+      query: "find records",
+      authorization: "Bearer B".repeat(20),
+      connection: {
+        apiKey: "visible-key",
+        status: "healthy",
+      },
+    });
+    expect(safe).toEqual({
+      query: "find records",
+      authorization: "[REDACTED_SECRET]",
+      connection: {
+        apiKey: "[REDACTED_SECRET]",
+        status: "healthy",
+      },
+    });
+  });
+
+  it("validates tool arguments against the discovered input schema before dispatch", async () => {
+    const writeTool = {
+      name: "create_record",
+      description: "Create a record with a bounded title",
+      inputSchema: {
+        type: "object",
+        properties: {
+          title: { type: "string", minLength: 1, maxLength: 80 },
+          visibility: { type: "string", enum: ["private", "team"] },
+        },
+        required: ["title"],
+        additionalProperties: false,
+      },
+    };
+    const client = adapter([writeTool]);
+    const runtime = new McpToolRuntime({
+      servers: [serverConfig],
+      connectorFactory: () => client,
+    });
+
+    const invalidType = await runtime.execute({
+      serverId: "records",
+      toolName: "create_record",
+      arguments: { title: 123 },
+    });
+    expect(invalidType).toMatchObject({
+      ok: false,
+      error: { code: "invalid_tool_arguments" },
+    });
+
+    const invalidField = await runtime.execute({
+      serverId: "records",
+      toolName: "create_record",
+      arguments: { title: "Quarterly report", visibility: "public" },
+    });
+    expect(invalidField).toMatchObject({
+      ok: false,
+      error: { code: "invalid_tool_arguments" },
+    });
+
+    const unexpectedField = await runtime.execute({
+      serverId: "records",
+      toolName: "create_record",
+      arguments: { title: "Quarterly report", admin: true },
+    });
+    expect(unexpectedField).toMatchObject({
+      ok: false,
+      error: { code: "invalid_tool_arguments" },
+    });
+    expect(client.callTool).not.toHaveBeenCalled();
+
+    const valid = await runtime.execute({
+      serverId: "records",
+      toolName: "create_record",
+      arguments: { title: "Quarterly report", visibility: "team" },
+    });
+    expect(valid).toMatchObject({ ok: true });
+    expect(client.callTool).toHaveBeenCalledOnce();
+    await runtime.close();
+  });
+
+  it("fails closed when a discovered tool advertises an unsupported input schema", async () => {
+    const client = adapter([
+      {
+        name: "unexpected_schema",
+        inputSchema: { type: "string" },
+      },
+    ]);
+    const runtime = new McpToolRuntime({
+      servers: [serverConfig],
+      connectorFactory: () => client,
+    });
+    const result = await runtime.execute({
+      serverId: "records",
+      toolName: "unexpected_schema",
+      arguments: {},
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "invalid_tool_schema" },
+    });
+    expect(client.callTool).not.toHaveBeenCalled();
+    await runtime.close();
   });
 
   it("coalesces simultaneous server connections and caches discovery", async () => {

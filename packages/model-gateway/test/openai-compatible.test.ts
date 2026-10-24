@@ -75,6 +75,62 @@ describe("OpenAICompatibleChatProvider", () => {
     ).toThrow(ProviderError);
   });
 
+  it("requires HTTPS for remote model endpoints while allowing loopback HTTP", () => {
+    expect(
+      () =>
+        new OpenAICompatibleChatProvider({
+          id: "openrouter",
+          displayName: "OpenRouter",
+          baseUrl: "http://model-provider.example/v1",
+          apiKey: "secret",
+          defaultModel: "test-model",
+        }),
+    ).toThrow(/HTTPS/);
+
+    expect(
+      () =>
+        new OpenAICompatibleChatProvider({
+          id: "freellmapi",
+          displayName: "FreeLLMAPI",
+          baseUrl: "http://127.0.0.1:3001/v1",
+          apiKey: "secret",
+          defaultModel: "auto",
+        }),
+    ).not.toThrow();
+  });
+
+  it("requires an explicit opt-in for remote HTTP FreeLLMAPI and never allows it for OpenRouter", () => {
+    const options = {
+      displayName: "FreeLLMAPI",
+      baseUrl: "http://freellmapi:3001/v1",
+      apiKey: "secret",
+      defaultModel: "auto",
+    };
+    expect(
+      () =>
+        new OpenAICompatibleChatProvider({
+          id: "freellmapi",
+          ...options,
+        }),
+    ).toThrow(/HTTPS/);
+    expect(
+      () =>
+        new OpenAICompatibleChatProvider({
+          id: "freellmapi",
+          ...options,
+          allowInsecureHttp: true,
+        }),
+    ).not.toThrow();
+    expect(
+      () =>
+        new OpenAICompatibleChatProvider({
+          id: "openrouter",
+          ...options,
+          allowInsecureHttp: true,
+        }),
+    ).toThrow(/HTTPS/);
+  });
+
   it("fails explicitly when no key is configured", async () => {
     const provider = new OpenAICompatibleChatProvider({
       id: "openrouter",

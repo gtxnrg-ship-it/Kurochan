@@ -23,6 +23,10 @@ import { OmniRouter, routeOrdersFromEnvironment } from "@kurochan/omnirouter";
 import { AgentCatalog } from "@kurochan/agent-catalog";
 import { RunStore, type CreateRunInput } from "@kurochan/storage";
 import {
+  CommunitySkillCatalog,
+  listCommunityMcpPresets,
+  listCommunityPacks,
+  type CommunityPackMode,
   DockerSandboxRuntime,
   GitHubProjectRuntime,
   McpToolRuntime,
@@ -48,6 +52,7 @@ export interface ServerOptions {
   readonly webResearch?: WebResearchExecutor;
   readonly githubProject?: GitHubProjectExecutor;
   readonly mcpTools?: McpToolRuntime;
+  readonly communitySkills?: CommunitySkillCatalog;
   readonly speech?: OpenAICompatibleSpeechRuntime;
 }
 
@@ -118,6 +123,8 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     options.store ??
     new RunStore(env.KUROCHAN_DB_PATH?.trim() || "data/kurochan.sqlite");
   const catalog = options.catalog ?? new AgentCatalog();
+  const communitySkills =
+    options.communitySkills ?? new CommunitySkillCatalog();
   const mcpTools = options.mcpTools ?? McpToolRuntime.fromEnvironment(env);
   const speech =
     options.speech ??
@@ -144,18 +151,24 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   const router = new OmniRouter({
     providers: registry.providers,
     routeOrder: routeOrdersFromEnvironment(env),
-    maxAttempts: Number.parseInt(env.OMNIROUTER_MAX_ATTEMPTS ?? "2", 10),
-    maxConcurrentRequests: Number.parseInt(
-      env.OMNIROUTER_MAX_CONCURRENT ?? "24",
-      10,
+    maxAttempts: parseBoundedInteger(env.OMNIROUTER_MAX_ATTEMPTS, 2, 1, 5),
+    maxConcurrentRequests: parseBoundedInteger(
+      env.OMNIROUTER_MAX_CONCURRENT,
+      24,
+      1,
+      256,
     ),
-    failureThreshold: Number.parseInt(
-      env.OMNIROUTER_FAILURE_THRESHOLD ?? "3",
-      10,
+    failureThreshold: parseBoundedInteger(
+      env.OMNIROUTER_FAILURE_THRESHOLD,
+      3,
+      1,
+      20,
     ),
-    circuitCooldownMs: Number.parseInt(
-      env.OMNIROUTER_CIRCUIT_COOLDOWN_MS ?? "30000",
-      10,
+    circuitCooldownMs: parseBoundedInteger(
+      env.OMNIROUTER_CIRCUIT_COOLDOWN_MS,
+      30_000,
+      1_000,
+      300_000,
     ),
     onUsage: (event) => store.recordProviderUsage(event),
   });
@@ -307,6 +320,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     webResearch,
     githubProject,
     mcpTools,
+    communitySkills,
     concurrency: parseBoundedInteger(env.KUROCHAN_WORKER_CONCURRENCY, 4, 1, 32),
     leaseMs: parseBoundedInteger(
       env.KUROCHAN_WORKER_LEASE_MS,
@@ -355,7 +369,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     maxAge: 600,
   });
   void app.register(rateLimit, {
-    max: Number.parseInt(env.API_RATE_LIMIT_PER_MINUTE ?? "60", 10),
+    max: parseBoundedInteger(env.API_RATE_LIMIT_PER_MINUTE, 60, 1, 1000),
     timeWindow: "1 minute",
     keyGenerator: (request) => request.ip,
     errorResponseBuilder: (_request, context) => ({
@@ -399,11 +413,19 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       rawStatusCode < 500
         ? rawStatusCode
         : 500;
-    if (status >= 500)
+    if (status >= 500) {
+      const message = error instanceof Error ? error.message : String(error);
       request.log.error(
-        { err: error, requestId: request.id },
+        {
+          err: {
+            name: error instanceof Error ? error.name : "UnknownError",
+            message: redactSensitiveText(message),
+          },
+          requestId: request.id,
+        },
         "Unhandled API error",
       );
+    }
     const tooLarge = status === 413;
     const badJson = status === 400;
     void reply.code(status).send({
@@ -1113,6 +1135,158 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           message:
             "Agency Agents catalog is unavailable. Check that the pinned submodule is initialized.",
           retryable: true,
+        },
+      });
+    }
+  });
+
+  app.get("/v1/community-packs", async (request, reply) => {
+    const query = request.query as Record<string, unknown>;
+    const q = typeof query.q === "string" ? query.q.trim() : "";
+    const rawMode = typeof query.mode === "string" ? query.mode.trim() : "";
+    if (q.length > 200) {
+      return reply.code(400).send({
+        error: {
+          code: "invalid_query",
+          message: "q must not exceed 200 characters.",
+          retryable: false,
+          requestId: request.id,
+        },
+      });
+    }
+    let limit: number;
+    try {
+      limit = parseBoundedInteger(query.limit, q ? 30 : 100, 1, 100);
+    } catch {
+      return reply.code(400).send({
+        error: {
+          code: "invalid_query",
+          message: "limit must be an integer from 1 to 100.",
+          retryable: false,
+          requestId: request.id,
+        },
+      });
+    }
+
+    let data;
+    try {
+      data = listCommunityPacks({
+        query: q,
+        ...(rawMode ? { mode: rawMode as CommunityPackMode } : {}),
+        limit,
+      });
+    } catch {
+      return reply.code(400).send({
+        error: {
+          code: "invalid_query",
+          message: "mode is not a supported community pack mode.",
+          retryable: false,
+          requestId: request.id,
+        },
+      });
+    }
+
+    const status = await communitySkills.status();
+    const statusByPack = new Map(status.map((item) => [item.packId, item]));
+    return {
+      total: listCommunityPacks().length,
+      count: data.length,
+      data: data.map((pack) => ({
+        ...pack,
+        skillCatalog: statusByPack.get(pack.id) ?? null,
+      })),
+      security: {
+        thirdPartyCodeAutoExecuted: false,
+        skillInstructionsAreUntrusted: true,
+        externalWritesAreNotEnabledByThisCatalog: true,
+      },
+    };
+  });
+
+  app.get("/v1/community-mcp-presets", async (request, reply) => {
+    const query = request.query as Record<string, unknown>;
+    const q = typeof query.q === "string" ? query.q.trim() : "";
+    if (q.length > 200) {
+      return reply.code(400).send({
+        error: {
+          code: "invalid_query",
+          message: "q must not exceed 200 characters.",
+          retryable: false,
+          requestId: request.id,
+        },
+      });
+    }
+    let limit: number;
+    try {
+      limit = parseBoundedInteger(query.limit, q ? 20 : 100, 1, 100);
+    } catch {
+      return reply.code(400).send({
+        error: {
+          code: "invalid_query",
+          message: "limit must be an integer from 1 to 100.",
+          retryable: false,
+          requestId: request.id,
+        },
+      });
+    }
+    const data = listCommunityMcpPresets({ query: q, limit });
+    return {
+      count: data.length,
+      data,
+      security: {
+        secretsReturned: false,
+        configurationIsTemplate: true,
+        serversAreNotAutomaticallyInstalledOrStarted: true,
+      },
+    };
+  });
+
+  app.get("/v1/community-skills", async (request, reply) => {
+    const query = request.query as Record<string, unknown>;
+    const q = typeof query.q === "string" ? query.q.trim() : "";
+    if (!q || q.length > 200) {
+      return reply.code(400).send({
+        error: {
+          code: "invalid_query",
+          message: "q must contain 1 to 200 characters.",
+          retryable: false,
+          requestId: request.id,
+        },
+      });
+    }
+    let limit: number;
+    try {
+      limit = parseBoundedInteger(query.limit, 20, 1, 100);
+    } catch {
+      return reply.code(400).send({
+        error: {
+          code: "invalid_query",
+          message: "limit must be an integer from 1 to 100.",
+          retryable: false,
+          requestId: request.id,
+        },
+      });
+    }
+    try {
+      const data = await communitySkills.search(q, limit);
+      return {
+        query: q,
+        count: data.length,
+        data,
+        security: {
+          contentReturned: false,
+          instructionsAreUntrusted: true,
+          scriptsExecuted: false,
+        },
+      };
+    } catch (error) {
+      requestWarning(app, error, "community_skills_unavailable");
+      return reply.code(503).send({
+        error: {
+          code: "community_skills_unavailable",
+          message: "Community skill metadata could not be loaded.",
+          retryable: true,
+          requestId: request.id,
         },
       });
     }
@@ -3140,15 +3314,42 @@ function parseBoundedInteger(
   return parsed;
 }
 
+function redactSensitiveText(value: string): string {
+  return value
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/-]{12,}=?/gi, "Bearer [REDACTED]")
+    .replace(/\b(?:gh[pousr]|github_pat)_[A-Za-z0-9_]{12,}\b/g, "[REDACTED_TOKEN]")
+    .replace(/\bsk-(?:proj-|ant-)?[A-Za-z0-9_-]{16,}\b/g, "[REDACTED_TOKEN]")
+    .replace(/\bAIza[0-9A-Za-z_-]{35}\b/g, "[REDACTED_TOKEN]")
+    .replace(/\b(?:api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|client[-_ ]?secret|password|passwd|secret|token)\s*[:=]\s*["']?[A-Za-z0-9._~+/-]{8,}["']?/gi, "[REDACTED_SECRET]")
+    .slice(0, 2000);
+}
+
 function requestWarning(
   app: FastifyInstance,
   error: unknown,
   code: string,
 ): void {
+  const message = error instanceof Error ? error.message : String(error);
   app.log.warn(
-    { error: error instanceof Error ? error.message : String(error), code },
+    { error: redactSensitiveText(message), code },
     "Backend request could not be completed",
   );
+}
+
+function parseEnvironmentInteger(
+  name: string,
+  raw: string | undefined,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  const value = raw?.trim() ?? "";
+  const parsed =
+    value === "" ? fallback : /^\d+$/.test(value) ? Number(value) : Number.NaN;
+  if (!Number.isSafeInteger(parsed) || parsed < min || parsed > max) {
+    throw new Error(`${name} must be an integer between ${min} and ${max}.`);
+  }
+  return parsed;
 }
 
 export function validateServerConfiguration(env: Environment = process.env): {
@@ -3156,9 +3357,7 @@ export function validateServerConfiguration(env: Environment = process.env): {
   port: number;
 } {
   const host = env.HOST?.trim() || "127.0.0.1";
-  const parsedPort = Number.parseInt(env.PORT ?? "8787", 10);
-  if (!Number.isInteger(parsedPort) || parsedPort < 1 || parsedPort > 65535)
-    throw new Error("PORT must be an integer between 1 and 65535.");
+  const parsedPort = parseEnvironmentInteger("PORT", env.PORT, 8787, 1, 65535);
   const loopback =
     host === "127.0.0.1" || host === "localhost" || host === "::1";
   if (!loopback && !env.KUROCHAN_API_TOKEN?.trim()) {
@@ -3166,14 +3365,19 @@ export function validateServerConfiguration(env: Environment = process.env): {
       "Refusing to bind Kuro-chan API to a non-loopback host without KUROCHAN_API_TOKEN.",
     );
   }
-  const rateLimit = Number.parseInt(env.API_RATE_LIMIT_PER_MINUTE ?? "60", 10);
-  if (!Number.isInteger(rateLimit) || rateLimit < 1 || rateLimit > 1000)
-    throw new Error("API_RATE_LIMIT_PER_MINUTE must be between 1 and 1000.");
-  const concurrency = Number.parseInt(
-    env.OMNIROUTER_MAX_CONCURRENT ?? "24",
-    10,
+  parseEnvironmentInteger(
+    "API_RATE_LIMIT_PER_MINUTE",
+    env.API_RATE_LIMIT_PER_MINUTE,
+    60,
+    1,
+    1000,
   );
-  if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 256)
-    throw new Error("OMNIROUTER_MAX_CONCURRENT must be between 1 and 256.");
+  parseEnvironmentInteger(
+    "OMNIROUTER_MAX_CONCURRENT",
+    env.OMNIROUTER_MAX_CONCURRENT,
+    24,
+    1,
+    256,
+  );
   return { host, port: parsedPort };
 }

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { buildServer, validateServerConfiguration } from "../src/server.js";
 import {
+  CommunitySkillCatalog,
   McpToolRuntime,
   type McpClientAdapter,
   type McpServerConfig,
@@ -35,6 +36,145 @@ describe("Kuro-chan API", () => {
       ok: true,
       service: "kurochan-api",
     });
+  });
+
+  it("exposes pinned community packs and honest source availability", async () => {
+    app = buildServer({
+      env: {},
+      logger: false,
+      store: new RunStore(":memory:"),
+      communitySkills: new CommunitySkillCatalog({
+        repositoryRoot: "/path/that/does/not/exist",
+      }),
+    });
+    const response = await app.inject({
+      method: "GET",
+      url: "/v1/community-packs?q=debugging",
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().total).toBe(16);
+    expect(response.json().count).toBeGreaterThan(0);
+    expect(response.json().data).toContainEqual(
+      expect.objectContaining({
+        id: "superpowers",
+        mode: "vendored-skill-pack",
+        pinnedRevision: "2ce8aa15d05bd57213e6f746f953aafb7ded7a8b",
+        skillCatalog: {
+          packId: "superpowers",
+          available: false,
+          skillCount: 0,
+        },
+      }),
+    );
+    expect(response.json().security).toMatchObject({
+      thirdPartyCodeAutoExecuted: false,
+      skillInstructionsAreUntrusted: true,
+    });
+  });
+
+  it("returns prebuilt MCP configuration templates without secrets or auto-installation", async () => {
+    app = buildServer({
+      env: {},
+      logger: false,
+      store: new RunStore(":memory:"),
+    });
+    const response = await app.inject({
+      method: "GET",
+      url: "/v1/community-mcp-presets",
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().count).toBe(3);
+    expect(response.json().data).toContainEqual(
+      expect.objectContaining({
+        id: "playwright-mcp",
+        configuration: expect.objectContaining({
+          command: "npx",
+          args: ["--yes", "@playwright/mcp@0.0.83"],
+        }),
+      }),
+    );
+    expect(response.json().data).toContainEqual(
+      expect.objectContaining({
+        id: "context7",
+        requiredEnvironment: [
+          expect.objectContaining({ name: "CONTEXT7_AUTHORIZATION" }),
+        ],
+      }),
+    );
+    expect(response.json().security).toMatchObject({
+      secretsReturned: false,
+      configurationIsTemplate: true,
+      serversAreNotAutomaticallyInstalledOrStarted: true,
+    });
+    expect(response.body).not.toContain("ghp_");
+  });
+
+  it("rejects invalid community pack filters", async () => {
+    app = buildServer({
+      env: {},
+      logger: false,
+      store: new RunStore(":memory:"),
+    });
+    const response = await app.inject({
+      method: "GET",
+      url: "/v1/community-packs?mode=made-up",
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: { code: "invalid_query" },
+    });
+  });
+
+  it("searches community skill metadata without returning instruction bodies", async () => {
+    const root = await import("node:fs/promises").then(
+      ({ mkdtemp, mkdir, writeFile }) =>
+        mkdtemp("/tmp/kuro-community-api-").then(async (path) => {
+          const skill =
+            path + "/vendor/community/superpowers/skills/debugging/SKILL.md";
+          await mkdir(skill.slice(0, skill.lastIndexOf("/")), {
+            recursive: true,
+          });
+          await writeFile(
+            skill,
+            [
+              "---",
+              "name: Systematic Debugging",
+              "description: Debugging and root-cause analysis.",
+              "---",
+              "# Systematic Debugging",
+              "",
+              "Never expose this body in the metadata endpoint.",
+            ].join("\n"),
+            "utf8",
+          );
+          return { path, skill };
+        }),
+    );
+    try {
+      app = buildServer({
+        env: {},
+        logger: false,
+        store: new RunStore(":memory:"),
+        communitySkills: new CommunitySkillCatalog({
+          repositoryRoot: root.path,
+        }),
+      });
+      const response = await app.inject({
+        method: "GET",
+        url: "/v1/community-skills?q=debugging",
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.body).not.toContain("Never expose this body");
+      expect(response.json().data).toContainEqual(
+        expect.objectContaining({
+          name: "Systematic Debugging",
+          packId: "superpowers",
+        }),
+      );
+    } finally {
+      const { rm } = await import("node:fs/promises");
+      await rm(root.path, { recursive: true, force: true });
+    }
   });
 
   it("does not report ready when no provider is configured", async () => {
@@ -996,6 +1136,26 @@ describe("Kuro-chan API", () => {
     expect(() => validateServerConfiguration({ PORT: "90000" })).toThrow(
       /PORT/,
     );
+    expect(() => validateServerConfiguration({ PORT: "8787oops" })).toThrow(
+      /PORT/,
+    );
+    expect(() =>
+      validateServerConfiguration({
+        API_RATE_LIMIT_PER_MINUTE: "60junk",
+      }),
+    ).toThrow(/API_RATE_LIMIT_PER_MINUTE/);
+    expect(() =>
+      validateServerConfiguration({
+        OMNIROUTER_MAX_CONCURRENT: "24requests",
+      }),
+    ).toThrow(/OMNIROUTER_MAX_CONCURRENT/);
+    expect(() =>
+      buildServer({
+        env: { OMNIROUTER_MAX_ATTEMPTS: "2attempts" },
+        logger: false,
+        store: new RunStore(":memory:"),
+      }),
+    ).toThrow(/integer between/);
   });
 
   it("reports live and stale worker heartbeats without leaking worker metadata", async () => {

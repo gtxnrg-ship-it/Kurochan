@@ -34,6 +34,34 @@ describe("FreeLLMAPI provider configuration", () => {
     );
   });
 
+  it("does not configure remote HTTP endpoints without an explicit opt-in", () => {
+    const registry = createProviderRegistry({
+      FREELLMAPI_API_KEY: "freellmapi-test-key",
+      FREELLMAPI_BASE_URL: "http://freellmapi:3001/v1",
+    });
+
+    expect(registry.providers.has("freellmapi")).toBe(false);
+    expect(registry.statuses).toContainEqual(
+      expect.objectContaining({
+        id: "freellmapi",
+        configured: false,
+        capabilityNotes: expect.arrayContaining([
+          expect.stringContaining("HTTPS"),
+        ]),
+      }),
+    );
+  });
+
+  it("allows remote HTTP FreeLLMAPI only when explicitly opted in", () => {
+    const registry = createProviderRegistry({
+      FREELLMAPI_API_KEY: "freellmapi-test-key",
+      FREELLMAPI_BASE_URL: "http://freellmapi:3001/v1",
+      FREELLMAPI_ALLOW_INSECURE_HTTP: "true",
+    });
+
+    expect(registry.providers.get("freellmapi")?.isConfigured).toBe(true);
+  });
+
   it("does not invent or configure a key when no key is supplied", () => {
     const registry = createProviderRegistry({});
 

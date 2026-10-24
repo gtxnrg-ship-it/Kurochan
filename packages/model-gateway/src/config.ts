@@ -65,6 +65,7 @@ export function createProviderRegistry(
       baseUrl:
         env.OPENROUTER_BASE_URL?.trim() || "https://openrouter.ai/api/v1",
       capabilityPrefix: "OPENROUTER",
+      allowInsecureHttp: false,
       extraHeaders: {
         ...(env.OPENROUTER_SITE_URL?.trim()
           ? { "HTTP-Referer": env.OPENROUTER_SITE_URL.trim() }
@@ -78,6 +79,8 @@ export function createProviderRegistry(
       model: env.FREELLMAPI_MODEL?.trim() || "auto",
       baseUrl: env.FREELLMAPI_BASE_URL?.trim() || "http://127.0.0.1:3001/v1",
       capabilityPrefix: "FREELLMAPI",
+      allowInsecureHttp:
+        env.FREELLMAPI_ALLOW_INSECURE_HTTP?.trim().toLowerCase() === "true",
       defaultCapabilities: ["streaming"] as const,
       extraHeaders: {},
     },
@@ -106,6 +109,7 @@ export function createProviderRegistry(
             "defaultCapabilities" in spec ? spec.defaultCapabilities : [],
           ),
           extraHeaders: spec.extraHeaders,
+          allowInsecureHttp: spec.allowInsecureHttp,
         });
       } catch (error) {
         configurationError =

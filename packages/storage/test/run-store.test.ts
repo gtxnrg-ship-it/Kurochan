@@ -502,6 +502,236 @@ describe("RunStore", () => {
     }
   });
 
+  it("keeps a run waiting for approval when a parallel task finishes", () => {
+    const store = makeStore();
+    try {
+      const run = store.createRun(
+        {
+          goal: "Review a risky action while other work continues",
+          profile: "balanced",
+          tasks: [
+            {
+              key: "external-action",
+              agentId: "release",
+              objective: "Prepare an external write",
+            },
+            {
+              key: "independent-review",
+              agentId: "reviewer",
+              objective: "Review the proposed action",
+            },
+          ],
+        },
+        100,
+      );
+      const externalAction = store.claimNextTask("worker-a", {
+        now: 100,
+        leaseMs: 5_000,
+      })!;
+      const review = store.claimNextTask("worker-b", {
+        now: 100,
+        leaseMs: 5_000,
+      })!;
+
+      store.requestTaskApproval(
+        run.id,
+        externalAction.id,
+        "worker-a",
+        { action: "publish" },
+        101,
+      );
+      expect(store.getRun(run.id)?.status).toBe("waiting_for_approval");
+
+      store.completeTask(
+        run.id,
+        review.id,
+        "worker-b",
+        { reviewed: true },
+        [],
+        102,
+      );
+
+      expect(store.getTask(externalAction.id)?.status).toBe(
+        "waiting_for_approval",
+      );
+      expect(store.getRun(run.id)?.status).toBe("waiting_for_approval");
+      expect(store.claimNextTask("worker-c", { now: 103 })).toBeUndefined();
+
+      store.resolveTaskApproval(
+        run.id,
+        externalAction.id,
+        true,
+        "Approved",
+        104,
+      );
+      expect(store.getRun(run.id)?.status).toBe("running");
+      expect(store.claimNextTask("worker-c", { now: 105 })?.id).toBe(
+        externalAction.id,
+      );
+    } finally {
+      store.close();
+    }
+  });
+
+  it("does not resume a run until every pending approval is resolved", () => {
+    const store = makeStore();
+    try {
+      const run = store.createRun(
+        {
+          goal: "Approve two separate external actions",
+          profile: "balanced",
+          tasks: [
+            {
+              key: "publish",
+              agentId: "release",
+              objective: "Prepare a publish action",
+            },
+            {
+              key: "notify",
+              agentId: "communications",
+              objective: "Prepare a notification action",
+            },
+          ],
+        },
+        200,
+      );
+      const publish = store.claimNextTask("worker-a", {
+        now: 200,
+        leaseMs: 5_000,
+      })!;
+      const notify = store.claimNextTask("worker-b", {
+        now: 200,
+        leaseMs: 5_000,
+      })!;
+
+      store.requestTaskApproval(
+        run.id,
+        publish.id,
+        "worker-a",
+        { action: "publish" },
+        201,
+      );
+      store.requestTaskApproval(
+        run.id,
+        notify.id,
+        "worker-b",
+        { action: "notify" },
+        202,
+      );
+      expect(store.getRun(run.id)?.status).toBe("waiting_for_approval");
+
+      store.resolveTaskApproval(
+        run.id,
+        publish.id,
+        true,
+        "Approved publish",
+        203,
+      );
+      expect(store.getRun(run.id)?.status).toBe("waiting_for_approval");
+      expect(store.claimNextTask("worker-c", { now: 204 })).toBeUndefined();
+
+      store.resolveTaskApproval(
+        run.id,
+        notify.id,
+        true,
+        "Approved notification",
+        205,
+      );
+      expect(store.getRun(run.id)?.status).toBe("running");
+      expect(store.claimNextTask("worker-c", { now: 206 })).toBeDefined();
+    } finally {
+      store.close();
+    }
+  });
+
+  it("consumes external write approvals once and only for the reviewed action", () => {
+    const store = makeStore();
+    try {
+      const run = store.createRun(
+        {
+          goal: "Approve a single external action",
+          profile: "balanced",
+          tasks: [
+            {
+              key: "external-action",
+              agentId: "release",
+              objective: "Create a record in an external service",
+            },
+          ],
+        },
+        100,
+      );
+      let task = store.claimNextTask("worker-a", {
+        now: 100,
+        leaseMs: 5_000,
+      })!;
+      task = store.requestTaskApproval(
+        run.id,
+        task.id,
+        "worker-a",
+        {
+          approvalType: "external-write",
+          mcpServerId: "records",
+          mcpToolName: "create_record",
+          argumentsHash: "approved-hash",
+        },
+        101,
+      );
+      store.resolveTaskApproval(run.id, task.id, true, "Approved", 102);
+      task = store.claimNextTask("worker-a", {
+        now: 103,
+        leaseMs: 5_000,
+      })!;
+
+      expect(
+        store.consumeExternalActionApproval(
+          run.id,
+          task.id,
+          "worker-a",
+          {
+            mcpServerId: "records",
+            mcpToolName: "create_record",
+            argumentsHash: "different-hash",
+          },
+          104,
+        ),
+      ).toBe(false);
+      expect(
+        store.consumeExternalActionApproval(
+          run.id,
+          task.id,
+          "worker-a",
+          {
+            mcpServerId: "records",
+            mcpToolName: "create_record",
+            argumentsHash: "approved-hash",
+          },
+          105,
+        ),
+      ).toBe(true);
+      expect(
+        store.consumeExternalActionApproval(
+          run.id,
+          task.id,
+          "worker-a",
+          {
+            mcpServerId: "records",
+            mcpToolName: "create_record",
+            argumentsHash: "approved-hash",
+          },
+          106,
+        ),
+      ).toBe(false);
+      expect(
+        store
+          .listEvents(run.id)
+          .filter((event) => event.type === "approval.consumed"),
+      ).toHaveLength(1);
+    } finally {
+      store.close();
+    }
+  });
+
   it("supports approvals and cancellation", () => {
     const store = makeStore();
     try {

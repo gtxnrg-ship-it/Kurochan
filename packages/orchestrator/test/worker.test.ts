@@ -11,7 +11,14 @@ import type {
 } from "@kurochan/model-gateway";
 import { OmniRouter } from "@kurochan/omnirouter";
 import { RunStore } from "@kurochan/storage";
-import { approvalGranted, TaskWorker } from "../src/worker.js";
+import {
+  approvalGranted,
+  fingerprintMcpArguments,
+  jsonCharacterLimit,
+  selectMcpToolsForContext,
+  selectMcpToolsForTask,
+  TaskWorker,
+} from "../src/worker.js";
 import {
   McpToolRuntime,
   type McpClientAdapter,
@@ -55,6 +62,129 @@ function provider(complete: ChatProvider["complete"]): ChatProvider {
   };
 }
 
+describe("Bounded worker context", () => {
+  it("keeps truncated context valid JSON and clearly marks its preview incomplete", () => {
+    const serialized = jsonCharacterLimit(
+      { results: ["useful evidence ".repeat(100)] },
+      220,
+    );
+
+    expect(serialized.length).toBeLessThanOrEqual(220);
+    const parsed = JSON.parse(serialized) as {
+      contextTruncated?: boolean;
+      notice?: string;
+      preview?: string;
+      originalCharacters?: number;
+    };
+    expect(parsed.contextTruncated).toBe(true);
+    expect(parsed.notice).toContain("incomplete prefix");
+    expect(parsed.preview).toBeTruthy();
+    expect(parsed.originalCharacters).toBeGreaterThan(serialized.length);
+  });
+
+  it("rejects invalid context limits instead of silently overflowing", () => {
+    expect(() => jsonCharacterLimit({}, 10)).toThrow(
+      "JSON context character limit must be between 128 and 200000.",
+    );
+  });
+});
+
+describe("Approval scope", () => {
+  it("fingerprints JSON arguments independent of object key order", () => {
+    expect(
+      fingerprintMcpArguments({
+        record: { title: "draft", id: 7 },
+        tags: ["a", "b"],
+      }),
+    ).toBe(
+      fingerprintMcpArguments({
+        tags: ["a", "b"],
+        record: { id: 7, title: "draft" },
+      }),
+    );
+    expect(
+      fingerprintMcpArguments({
+        record: { title: "draft", id: 7 },
+        tags: ["a", "b"],
+      }),
+    ).not.toBe(
+      fingerprintMcpArguments({
+        record: { title: "published", id: 7 },
+        tags: ["a", "b"],
+      }),
+    );
+  });
+});
+
+describe("MCP tool relevance routing", () => {
+  it("only exposes bounded schemas in the task-specific tool context", () => {
+    const tools = Array.from({ length: 8 }, (_, index) => ({
+      serverId: "tool-server",
+      serverName: "Tool server",
+      name: "tool_" + index,
+      description: "A test utility tool",
+      inputSchema:
+        index === 0
+          ? {
+              type: "object",
+              properties: {
+                oversized: { type: "string", description: "x".repeat(2_000) },
+              },
+            }
+          : { type: "object", properties: { query: { type: "string" } } },
+      readOnly: true,
+    }));
+    const selected = selectMcpToolsForContext(tools);
+
+    expect(selected.tools).toHaveLength(6);
+    expect(selected.omittedCount).toBe(2);
+    expect(
+      selected.tools.every(
+        (tool) => JSON.stringify(tool.inputSchema).length <= 1_400,
+      ),
+    ).toBe(true);
+    expect(selected.tools.some((tool) => tool.name === "tool_0")).toBe(false);
+  });
+
+  it("prefers task-relevant MCP tools over unrelated tools", () => {
+    const tools = [
+      {
+        serverId: "a-billing",
+        serverName: "Billing",
+        name: "create_charge",
+        description: "Create a charge and bill a customer",
+        inputSchema: { type: "object", properties: {} },
+        readOnly: false,
+      },
+      {
+        serverId: "z-docs",
+        serverName: "Documentation",
+        name: "search_documentation",
+        description:
+          "Search official API documentation and technical reference pages",
+        inputSchema: { type: "object", properties: {} },
+        readOnly: true,
+      },
+    ];
+    const selected = selectMcpToolsForTask(
+      "Search official API documentation for TypeScript configuration",
+      {
+        id: "research/documentation-researcher",
+        name: "Documentation Researcher",
+        description: "Find and verify official technical documentation",
+        tools: ["search", "research"],
+      },
+      tools,
+      2,
+    );
+
+    expect(selected.map((tool) => tool.name)).toEqual([
+      "search_documentation",
+      "create_charge",
+    ]);
+  });
+});
+
 describe("Approval scope", () => {
   it("does not let approval of a later MCP tool authorize an earlier tool", () => {
     const store = new RunStore(":memory:");
@@ -88,6 +218,7 @@ describe("Approval scope", () => {
           approvalType: "external-write",
           mcpServerId: "service-one",
           mcpToolName: "write_one",
+          argumentsHash: "hash-one",
         },
         3,
       );
@@ -103,6 +234,7 @@ describe("Approval scope", () => {
           approvalType: "external-write",
           mcpServerId: "service-two",
           mcpToolName: "write_two",
+          argumentsHash: "hash-two",
         },
         6,
       );
@@ -119,6 +251,14 @@ describe("Approval scope", () => {
         approvalGranted(store, currentTask, "external-write", {
           mcpServerId: "service-two",
           mcpToolName: "write_two",
+          argumentsHash: "wrong-hash",
+        }),
+      ).toBe(false);
+      expect(
+        approvalGranted(store, currentTask, "external-write", {
+          mcpServerId: "service-two",
+          mcpToolName: "write_two",
+          argumentsHash: "hash-two",
         }),
       ).toBe(true);
     } finally {
@@ -294,6 +434,18 @@ describe("TaskWorker", () => {
             },
             annotations: { readOnlyHint: false },
           },
+          ...Array.from({ length: 10 }, (_, index) => ({
+            name: "a_auxiliary_tool_" + index,
+            description: "A generic auxiliary utility operation",
+            inputSchema: { type: "object", properties: {} },
+            annotations: { readOnlyHint: true },
+          })),
+          {
+            name: "zz_hidden_tool",
+            description: "A generic utility with no relevance to this task",
+            inputSchema: { type: "object", properties: {} },
+            annotations: { readOnlyHint: true },
+          },
         ],
       })),
       callTool: vi.fn(async (_name, args) => {
@@ -318,6 +470,7 @@ describe("TaskWorker", () => {
       connectorFactory: () => mcpClient,
     });
     let toolRequested = false;
+    let hiddenToolAttempted = false;
     const fakeProvider = provider(
       async (input: ChatCompletionInput): Promise<ChatCompletionOutput> => {
         if (
@@ -341,6 +494,30 @@ describe("TaskWorker", () => {
                 },
               ],
               blockers: [],
+            }),
+            latencyMs: 1,
+          };
+        }
+        if (!hiddenToolAttempted) {
+          hiddenToolAttempted = true;
+          return {
+            providerId: "openrouter",
+            model: "test-model",
+            content: JSON.stringify({
+              status: "tool_calls",
+              summary:
+                "Attempt to use a configured but unlisted read-only tool.",
+              toolCalls: [
+                {
+                  name: "mcp.call",
+                  arguments: {
+                    serverId: "workspace-service",
+                    toolName: "zz_hidden_tool",
+                    arguments: {},
+                  },
+                },
+              ],
+              evidence: [],
             }),
             latencyMs: 1,
           };
@@ -413,6 +590,7 @@ describe("TaskWorker", () => {
         kind: "waiting_for_approval",
         runId,
       });
+      expect(hiddenToolAttempted).toBe(true);
       expect(toolRequested).toBe(true);
       expect(mcpClient.callTool).not.toHaveBeenCalled();
       const task = store.listTasks(runId)[0]!;
@@ -720,6 +898,131 @@ describe("TaskWorker", () => {
       expect(store.getRun(runId)?.output).toMatchObject({
         review: { passed: true },
       });
+    } finally {
+      store.close();
+    }
+  });
+
+  it("requires a fresh approval when the model repeats an already executed GitHub write", async () => {
+    const catalogRoot = await fakeCatalogRoot();
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "kuro-workspaces-"));
+    created.push(workspaceRoot);
+    const runId = "a4cfa012-3f28-4490-babb-19ce5fdd2cd2";
+    const store = new RunStore(":memory:");
+    let modelCalls = 0;
+    const execute = vi.fn(async () => ({
+      name: "github.create_pull_request" as const,
+      ok: true,
+      result: {
+        repository: "acme/demo",
+        pullRequest: {
+          number: 8,
+          url: "https://github.com/acme/demo/pull/8",
+          state: "open",
+        },
+      },
+      evidence: [
+        {
+          kind: "github_project",
+          summary: "Created pull request #8 for acme/demo",
+          uri: "https://github.com/acme/demo/pull/8",
+        },
+      ],
+    }));
+
+    try {
+      store.createRun({
+        id: runId,
+        goal: "Open a pull request for the approved source changes",
+        profile: "balanced",
+        tasks: [
+          {
+            key: "publish",
+            agentId: "engineering/engineering-test-agent",
+            objective: "Open the requested GitHub pull request.",
+          },
+        ],
+      });
+      const fakeProvider = provider(
+        async (input: ChatCompletionInput): Promise<ChatCompletionOutput> => {
+          if (
+            (input.systemPrompt ?? "").includes(
+              "independent consistency reviewer",
+            )
+          ) {
+            return {
+              providerId: "openrouter",
+              model: "test-model",
+              content: JSON.stringify({
+                passed: true,
+                summary: "Reviewed task output.",
+                checks: [],
+                blockers: [],
+              }),
+              latencyMs: 1,
+            };
+          }
+          modelCalls += 1;
+          return {
+            providerId: "openrouter",
+            model: "test-model",
+            content: JSON.stringify({
+              status: "tool_calls",
+              summary: "Request the same pull request action again.",
+              toolCalls: [
+                {
+                  name: "github.create_pull_request",
+                  arguments: {
+                    repository: "acme/demo",
+                    title: "Implement the requested change",
+                    body: "Created by Kuro-chan.",
+                  },
+                },
+              ],
+              evidence: [],
+            }),
+            latencyMs: 1,
+          };
+        },
+      );
+      const router = new OmniRouter({
+        providers: new Map<ProviderId, ChatProvider>([
+          ["openrouter", fakeProvider],
+        ]),
+      });
+      const worker = new TaskWorker({
+        store,
+        catalog: new AgentCatalog(catalogRoot),
+        router,
+        workspaceRoot: resolve(workspaceRoot),
+        githubProject: {
+          isConfigured: true,
+          canPublish: true,
+          execute,
+        },
+      });
+
+      expect((await worker.runOnce()).kind).toBe("waiting_for_approval");
+      const task = store.listTasks(runId)[0]!;
+      store.resolveTaskApproval(runId, task.id, true, "Reviewed and approved.");
+
+      const repeated = await worker.runOnce();
+      expect(repeated.kind).toBe("waiting_for_approval");
+      expect(execute).toHaveBeenCalledOnce();
+      const requests = store
+        .listEvents(runId, 0, 1000)
+        .filter(
+          (event) =>
+            event.taskId === task.id && event.type === "approval.requested",
+        );
+      expect(requests).toHaveLength(2);
+      expect(requests[1]?.payload).toMatchObject({
+        action: {
+          approvalType: "external-write",
+          actionName: "github.create_pull_request",
+        },
+      });
+      expect(modelCalls).toBeGreaterThanOrEqual(3);
     } finally {
       store.close();
     }
