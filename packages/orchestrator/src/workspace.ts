@@ -1,7 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, mkdir, open, readdir, readFile } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import {
+  basename,
+  dirname,
+  extname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 import { z } from "zod";
 
 const RelativePathSchema = z.string().min(1).max(1000);
@@ -44,6 +53,81 @@ const SAFE_DOTFILES = new Set([
   ".markdownlint.json",
 ]);
 const SAFE_DOT_DIRECTORIES = new Set([".github"]);
+const IGNORED_WORKSPACE_DIRECTORIES = new Set([
+  ".git",
+  ".next",
+  ".nuxt",
+  ".parcel-cache",
+  ".pytest_cache",
+  ".turbo",
+  ".venv",
+  "__pycache__",
+  "build",
+  "coverage",
+  "dist",
+  "node_modules",
+  "out",
+  "playwright-report",
+  "target",
+  "test-results",
+  "venv",
+]);
+const INDEXABLE_EXTENSIONS = new Set([
+  ".c",
+  ".cc",
+  ".cpp",
+  ".cs",
+  ".css",
+  ".cjs",
+  ".cts",
+  ".go",
+  ".graphql",
+  ".h",
+  ".hpp",
+  ".htm",
+  ".html",
+  ".java",
+  ".js",
+  ".json",
+  ".jsonc",
+  ".jsx",
+  ".md",
+  ".mdx",
+  ".mjs",
+  ".mts",
+  ".php",
+  ".properties",
+  ".proto",
+  ".py",
+  ".rb",
+  ".rs",
+  ".scss",
+  ".sh",
+  ".sql",
+  ".svelte",
+  ".swift",
+  ".toml",
+  ".ts",
+  ".tsx",
+  ".vue",
+  ".xml",
+  ".yaml",
+  ".yml",
+]);
+const INDEXABLE_FILENAMES = new Set([
+  "AGENTS.md",
+  "Dockerfile",
+  "Gemfile",
+  "Justfile",
+  "LICENSE",
+  "Makefile",
+  "Procfile",
+  "README",
+  "README.md",
+  "go.mod",
+  "go.sum",
+  "requirements.txt",
+]);
 
 const SearchTextSchema = z
   .object({
@@ -85,11 +169,86 @@ export interface WorkspaceToolResult {
   readonly error?: { code: string; message: string };
 }
 
+function isIndexablePath(path: string): boolean {
+  const filename = basename(path);
+  return (
+    INDEXABLE_EXTENSIONS.has(extname(filename).toLowerCase()) ||
+    INDEXABLE_FILENAMES.has(filename)
+  );
+}
+
+function indexPathPriority(path: string): number {
+  const extension = extname(path).toLowerCase();
+  if (
+    [
+      ".ts",
+      ".tsx",
+      ".js",
+      ".jsx",
+      ".mjs",
+      ".cjs",
+      ".py",
+      ".go",
+      ".rs",
+      ".java",
+      ".cs",
+      ".cpp",
+      ".c",
+      ".h",
+      ".rb",
+      ".php",
+      ".sql",
+      ".graphql",
+      ".svelte",
+      ".vue",
+      ".swift",
+    ].includes(extension)
+  )
+    return 0;
+  if (
+    [".md", ".mdx", ".json", ".jsonc", ".yaml", ".yml", ".toml"].includes(
+      extension,
+    )
+  ) {
+    return 1;
+  }
+  return 2;
+}
+
+export interface WorkspaceSearchIndexStore {
+  getWorkspaceIndexState(
+    runId: string,
+  ): readonly { path: string; fingerprint: string; bytes: number }[];
+  syncWorkspaceIndex(
+    runId: string,
+    currentFiles: readonly {
+      readonly path: string;
+      readonly fingerprint: string;
+      readonly bytes: number;
+    }[],
+    changedContents: ReadonlyMap<string, string | null>,
+    now?: number,
+  ): void;
+  searchWorkspaceIndex(
+    runId: string,
+    query: string,
+    limit?: number,
+  ): readonly { path: string; content: string; score: number }[];
+}
+
 export interface WorkspaceRuntimeOptions {
   readonly root: string;
   readonly maxFileBytes?: number;
   readonly maxFiles?: number;
   readonly maxSearchResults?: number;
+  readonly maxIndexedBytes?: number;
+  readonly searchIndex?: WorkspaceSearchIndexStore;
+}
+
+interface WorkspaceFileDetails {
+  readonly path: string;
+  readonly bytes: number;
+  readonly fingerprint: string;
 }
 
 function isMissing(error: unknown): boolean {
@@ -166,6 +325,8 @@ export class WorkspaceRuntime {
   private readonly maxFileBytes: number;
   private readonly maxFiles: number;
   private readonly maxSearchResults: number;
+  private readonly maxIndexedBytes: number;
+  private readonly searchIndex: WorkspaceSearchIndexStore | undefined;
 
   constructor(options: WorkspaceRuntimeOptions) {
     if (!isAbsolute(options.root))
@@ -174,6 +335,8 @@ export class WorkspaceRuntime {
     this.maxFileBytes = options.maxFileBytes ?? 250_000;
     this.maxFiles = options.maxFiles ?? 500;
     this.maxSearchResults = options.maxSearchResults ?? 100;
+    this.maxIndexedBytes = options.maxIndexedBytes ?? 20_000_000;
+    this.searchIndex = options.searchIndex;
     if (
       !Number.isInteger(this.maxFileBytes) ||
       this.maxFileBytes < 1024 ||
@@ -192,6 +355,12 @@ export class WorkspaceRuntime {
       this.maxSearchResults > 1000
     )
       throw new Error("maxSearchResults must be 1..1000.");
+    if (
+      !Number.isInteger(this.maxIndexedBytes) ||
+      this.maxIndexedBytes < 1_000_000 ||
+      this.maxIndexedBytes > 100_000_000
+    )
+      throw new Error("maxIndexedBytes must be 1000000..100000000.");
   }
 
   runDirectory(runId: string): string {
@@ -270,8 +439,15 @@ export class WorkspaceRuntime {
   async listFiles(
     runId: string,
   ): Promise<readonly { path: string; bytes: number }[]> {
+    const files = await this.listFilesDetailed(runId);
+    return files.map(({ path, bytes }) => ({ path, bytes }));
+  }
+
+  private async listFilesDetailed(
+    runId: string,
+  ): Promise<readonly WorkspaceFileDetails[]> {
     const base = await this.ensureRunDirectory(runId);
-    const files: Array<{ path: string; bytes: number }> = [];
+    const files: WorkspaceFileDetails[] = [];
     const visit = async (directory: string, depth: number): Promise<void> => {
       if (depth > 8 || files.length >= this.maxFiles) return;
       const entries = await readdir(directory, { withFileTypes: true });
@@ -286,12 +462,27 @@ export class WorkspaceRuntime {
         )
           continue;
         const fullPath = join(directory, entry.name);
-        const info = await lstat(fullPath);
+        const info = await lstat(fullPath, { bigint: true });
         if (info.isSymbolicLink()) continue;
-        if (info.isDirectory()) await visit(fullPath, depth + 1);
-        else if (info.isFile()) {
+        if (info.isDirectory()) {
+          if (!IGNORED_WORKSPACE_DIRECTORIES.has(entry.name)) {
+            await visit(fullPath, depth + 1);
+          }
+        } else if (info.isFile()) {
           const rel = relative(base, fullPath).split(sep).join("/");
-          files.push({ path: rel, bytes: info.size });
+          files.push({
+            path: rel,
+            bytes: Number(info.size),
+            fingerprint: [
+              info.dev,
+              info.ino,
+              info.size,
+              info.mtimeNs,
+              info.ctimeNs,
+            ]
+              .map(String)
+              .join(":"),
+          });
         }
       }
     };
@@ -591,11 +782,15 @@ export class WorkspaceRuntime {
     query: string,
     limit = 30,
   ): Promise<readonly { path: string; line: number; text: string }[]> {
+    const boundedLimit = Math.min(limit, this.maxSearchResults);
+    if (this.searchIndex) {
+      return this.searchTextIndexed(runId, query, boundedLimit);
+    }
     const files = await this.listFiles(runId);
     const needle = query.toLowerCase();
     const matches: Array<{ path: string; line: number; text: string }> = [];
     for (const file of files) {
-      if (matches.length >= Math.min(limit, this.maxSearchResults)) break;
+      if (matches.length >= boundedLimit) break;
       if (file.bytes > this.maxFileBytes) continue;
       let content: string;
       try {
@@ -612,8 +807,96 @@ export class WorkspaceRuntime {
             line: index + 1,
             text: line.slice(0, 500),
           });
-          if (matches.length >= Math.min(limit, this.maxSearchResults)) break;
+          if (matches.length >= boundedLimit) break;
         }
+      }
+    }
+    return matches;
+  }
+
+  private async searchTextIndexed(
+    runId: string,
+    query: string,
+    limit: number,
+  ): Promise<readonly { path: string; line: number; text: string }[]> {
+    const details = await this.listFilesDetailed(runId);
+    const candidates = details
+      .filter(
+        (file) => file.bytes <= this.maxFileBytes && isIndexablePath(file.path),
+      )
+      .sort(
+        (left, right) =>
+          indexPathPriority(left.path) - indexPathPriority(right.path) ||
+          left.path.localeCompare(right.path),
+      );
+    const selected: WorkspaceFileDetails[] = [];
+    let selectedBytes = 0;
+    for (const file of candidates) {
+      if (selected.length >= this.maxFiles) break;
+      if (selectedBytes + file.bytes > this.maxIndexedBytes) continue;
+      selected.push(file);
+      selectedBytes += file.bytes;
+    }
+
+    const previous = new Map(
+      this.searchIndex!.getWorkspaceIndexState(runId).map((file) => [
+        file.path,
+        file,
+      ]),
+    );
+    const changedContents = new Map<string, string | null>();
+    for (const file of selected) {
+      const indexed = previous.get(file.path);
+      if (
+        indexed &&
+        indexed.fingerprint === file.fingerprint &&
+        indexed.bytes === file.bytes
+      )
+        continue;
+      try {
+        const read = await this.readFile(runId, file.path);
+        changedContents.set(
+          file.path,
+          read.content.includes("\0") ? null : read.content,
+        );
+      } catch {
+        changedContents.set(file.path, null);
+      }
+    }
+
+    this.searchIndex!.syncWorkspaceIndex(runId, selected, changedContents);
+    const documents = this.searchIndex!.searchWorkspaceIndex(
+      runId,
+      query,
+      Math.min(100, Math.max(limit, 30)),
+    );
+    const terms = (query.toLowerCase().match(/[\p{L}\p{N}_$]+/gu) ?? [])
+      .filter(Boolean)
+      .slice(0, 12);
+    const matches: Array<{ path: string; line: number; text: string }> = [];
+    for (const document of documents) {
+      const scoredLines = document.content
+        .split(/\r?\n/)
+        .map((line, index) => ({
+          line,
+          index,
+          score: terms.reduce(
+            (score, term) =>
+              score + (line.toLowerCase().includes(term) ? 1 : 0),
+            0,
+          ),
+        }))
+        .filter((item) => item.score > 0)
+        .sort(
+          (left, right) => right.score - left.score || left.index - right.index,
+        );
+      for (const item of scoredLines) {
+        matches.push({
+          path: document.path,
+          line: item.index + 1,
+          text: item.line.slice(0, 500),
+        });
+        if (matches.length >= limit) return matches;
       }
     }
     return matches;

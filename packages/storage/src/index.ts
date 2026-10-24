@@ -507,7 +507,7 @@ export class RunStore {
     const schemaVersion = this.db.pragma("user_version", {
       simple: true,
     }) as number;
-    const currentSchemaVersion = 5;
+    const currentSchemaVersion = 6;
     if (!Number.isInteger(schemaVersion) || schemaVersion < 0) {
       this.db.close();
       throw new Error("SQLite schema version is invalid.");
@@ -625,6 +625,24 @@ export class RunStore {
       CREATE INDEX IF NOT EXISTS idx_tasks_claim ON tasks(status, available_at, created_at);
       CREATE INDEX IF NOT EXISTS idx_tasks_run_status ON tasks(run_id, status);
       CREATE INDEX IF NOT EXISTS idx_events_run_id ON run_events(run_id, id);
+      CREATE TABLE IF NOT EXISTS workspace_search_files (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+        path TEXT NOT NULL,
+        fingerprint TEXT NOT NULL,
+        bytes INTEGER NOT NULL CHECK(bytes >= 0),
+        indexed_at INTEGER NOT NULL,
+        UNIQUE(run_id, path)
+      );
+      CREATE VIRTUAL TABLE IF NOT EXISTS workspace_search_fts
+        USING fts5(path, content, tokenize='unicode61 remove_diacritics 2');
+      CREATE TRIGGER IF NOT EXISTS workspace_search_files_delete
+        AFTER DELETE ON workspace_search_files
+        BEGIN
+          DELETE FROM workspace_search_fts WHERE rowid = old.id;
+        END;
+      CREATE INDEX IF NOT EXISTS idx_workspace_search_run_path
+        ON workspace_search_files(run_id, path);
       `);
       const runColumns = this.db.pragma("table_info(runs)") as {
         name: string;
@@ -632,13 +650,208 @@ export class RunStore {
       if (!runColumns.some((column) => column.name === "model")) {
         this.db.exec("ALTER TABLE runs ADD COLUMN model TEXT");
       }
-      this.db.pragma("user_version = 5");
+      this.db.pragma("user_version = 6");
     });
     createAndMigrateSchema.immediate();
   }
 
   close(): void {
     this.db.close();
+  }
+
+  getWorkspaceIndexState(
+    runId: string,
+  ): readonly { path: string; fingerprint: string; bytes: number }[] {
+    assertText(runId, "runId", 200);
+    return this.db
+      .prepare(
+        "SELECT path, fingerprint, bytes FROM workspace_search_files WHERE run_id=? ORDER BY path",
+      )
+      .all(runId) as { path: string; fingerprint: string; bytes: number }[];
+  }
+
+  syncWorkspaceIndex(
+    runId: string,
+    currentFiles: readonly {
+      readonly path: string;
+      readonly fingerprint: string;
+      readonly bytes: number;
+    }[],
+    changedContents: ReadonlyMap<string, string | null>,
+    now = Date.now(),
+  ): void {
+    assertText(runId, "runId", 200);
+    if (currentFiles.length > 2000) {
+      throw new Error("Workspace search index exceeds the file-count limit.");
+    }
+
+    const files = new Map<
+      string,
+      { path: string; fingerprint: string; bytes: number }
+    >();
+    let totalBytes = 0;
+    for (const file of currentFiles) {
+      assertText(file.path, "workspace index path", 1000);
+      assertText(file.fingerprint, "workspace index fingerprint", 500);
+      if (
+        file.path.startsWith("/") ||
+        file.path.includes("\\") ||
+        file.path
+          .split("/")
+          .some((part) => !part || part === "." || part === "..")
+      ) {
+        throw new Error(
+          "Workspace index path must be a normalized relative path.",
+        );
+      }
+      if (
+        !Number.isInteger(file.bytes) ||
+        file.bytes < 0 ||
+        file.bytes > 2_000_000
+      ) {
+        throw new Error(
+          "Workspace index file size is outside the allowed limit.",
+        );
+      }
+      if (files.has(file.path)) {
+        throw new Error("Workspace index contains a duplicate path.");
+      }
+      totalBytes += file.bytes;
+      files.set(file.path, {
+        path: file.path,
+        fingerprint: file.fingerprint,
+        bytes: file.bytes,
+      });
+    }
+    if (totalBytes > 25_000_000) {
+      throw new Error("Workspace search index exceeds the total byte limit.");
+    }
+    for (const [path, content] of changedContents) {
+      if (!files.has(path)) {
+        throw new Error("Workspace index content references an unknown path.");
+      }
+      if (content !== null && Buffer.byteLength(content, "utf8") > 300_000) {
+        throw new Error("Workspace index content exceeds the file-size limit.");
+      }
+    }
+
+    const tx = this.db.transaction(() => {
+      const existing = this.db
+        .prepare(
+          "SELECT id, path, fingerprint, bytes FROM workspace_search_files WHERE run_id=?",
+        )
+        .all(runId) as {
+        id: number;
+        path: string;
+        fingerprint: string;
+        bytes: number;
+      }[];
+      const existingByPath = new Map(existing.map((row) => [row.path, row]));
+      const deleteFile = this.db.prepare(
+        "DELETE FROM workspace_search_files WHERE id=?",
+      );
+      const deleteFts = this.db.prepare(
+        "DELETE FROM workspace_search_fts WHERE rowid=?",
+      );
+      const insertFile = this.db.prepare(
+        "INSERT INTO workspace_search_files(run_id,path,fingerprint,bytes,indexed_at) VALUES(?,?,?,?,?)",
+      );
+      const updateFile = this.db.prepare(
+        "UPDATE workspace_search_files SET fingerprint=?,bytes=?,indexed_at=? WHERE id=?",
+      );
+      const insertFts = this.db.prepare(
+        "INSERT INTO workspace_search_fts(rowid,path,content) VALUES(?,?,?)",
+      );
+
+      for (const row of existing) {
+        if (!files.has(row.path)) deleteFile.run(row.id);
+      }
+
+      for (const file of files.values()) {
+        const old = existingByPath.get(file.path);
+        if (
+          old &&
+          old.fingerprint === file.fingerprint &&
+          old.bytes === file.bytes
+        ) {
+          continue;
+        }
+        if (!changedContents.has(file.path)) {
+          throw new Error(
+            "Changed workspace index metadata requires fresh file content.",
+          );
+        }
+        const content = changedContents.get(file.path);
+        if (content === null) {
+          if (old) {
+            deleteFts.run(old.id);
+            updateFile.run(file.fingerprint, file.bytes, now, old.id);
+          } else {
+            insertFile.run(runId, file.path, file.fingerprint, file.bytes, now);
+          }
+          continue;
+        }
+        if (content === undefined) {
+          throw new Error("Workspace index content is missing.");
+        }
+        let id: number;
+        if (old) {
+          deleteFts.run(old.id);
+          updateFile.run(file.fingerprint, file.bytes, now, old.id);
+          id = old.id;
+        } else {
+          const result = insertFile.run(
+            runId,
+            file.path,
+            file.fingerprint,
+            file.bytes,
+            now,
+          );
+          id = Number(result.lastInsertRowid);
+        }
+        insertFts.run(id, file.path, content);
+      }
+    });
+    tx.immediate();
+  }
+
+  searchWorkspaceIndex(
+    runId: string,
+    query: string,
+    limit = 100,
+  ): readonly { path: string; content: string; score: number }[] {
+    assertText(runId, "runId", 200);
+    assertText(query, "workspace search query", 500);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+      throw new Error(
+        "Workspace search result limit must be between 1 and 100.",
+      );
+    }
+    const tokens = [...query.matchAll(/[\p{L}\p{N}_$]+/gu)]
+      .map((match) => match[0].slice(0, 80))
+      .filter(Boolean)
+      .slice(0, 12);
+    if (tokens.length === 0) return [];
+    const matchQuery = tokens
+      .map((token) => '"' + token.replaceAll('"', '""') + '"')
+      .join(" OR ");
+    return this.db
+      .prepare(
+        `SELECT files.path AS path,
+                workspace_search_fts.content AS content,
+                bm25(workspace_search_fts) AS score
+           FROM workspace_search_fts
+           JOIN workspace_search_files AS files
+             ON files.id = workspace_search_fts.rowid
+          WHERE files.run_id = ? AND workspace_search_fts MATCH ?
+          ORDER BY score ASC, files.path ASC
+          LIMIT ?`,
+      )
+      .all(runId, matchQuery, limit) as {
+      path: string;
+      content: string;
+      score: number;
+    }[];
   }
 
   createConversation(

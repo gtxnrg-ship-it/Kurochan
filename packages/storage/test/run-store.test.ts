@@ -50,7 +50,7 @@ describe("RunStore", () => {
           name: string;
         }[];
         expect(columns.some((column) => column.name === "model")).toBe(true);
-        expect(migrated.pragma("user_version", { simple: true })).toBe(5);
+        expect(migrated.pragma("user_version", { simple: true })).toBe(6);
         const row = migrated
           .prepare(
             "SELECT id, goal, created_by, created_at, updated_at, model FROM runs WHERE id=?",
@@ -101,6 +101,102 @@ describe("RunStore", () => {
       rmSync(directory, { recursive: true, force: true });
     }
   });
+  it("keeps a bounded full-text workspace index in sync and returns relevant files", () => {
+    const store = makeStore();
+    try {
+      const run = store.createRun({
+        goal: "Index a sample project",
+        profile: "balanced",
+        tasks: [
+          {
+            key: "index",
+            agentId: "builder",
+            objective: "Index and search project source",
+          },
+        ],
+      });
+      const initialFiles = [
+        {
+          path: "src/router.ts",
+          fingerprint: "inode-1:100:mtime-1",
+          bytes: 100,
+        },
+        {
+          path: "README.md",
+          fingerprint: "inode-2:80:mtime-1",
+          bytes: 80,
+        },
+      ];
+      store.syncWorkspaceIndex(
+        run.id,
+        initialFiles,
+        new Map([
+          [
+            "src/router.ts",
+            'export function routeProviderFallback() { return "provider fallback"; }',
+          ],
+          [
+            "README.md",
+            "General project notes explain installation and usage.",
+          ],
+        ]),
+        1000,
+      );
+
+      const matches = store.searchWorkspaceIndex(run.id, "provider fallback");
+      expect(matches[0]?.path).toBe("src/router.ts");
+      expect(matches[0]?.content).toContain("routeProviderFallback");
+      expect(store.getWorkspaceIndexState(run.id)).toHaveLength(2);
+
+      store.syncWorkspaceIndex(
+        run.id,
+        [
+          {
+            path: "src/router.ts",
+            fingerprint: "inode-1:101:mtime-2",
+            bytes: 101,
+          },
+          {
+            path: "README.md",
+            fingerprint: "inode-2:80:mtime-1",
+            bytes: 80,
+          },
+        ],
+        new Map([["src/router.ts", 'export const selectModel = "chosen";']]),
+        2000,
+      );
+      expect(
+        store.searchWorkspaceIndex(run.id, "routeProviderFallback"),
+      ).toHaveLength(0);
+      expect(store.searchWorkspaceIndex(run.id, "selectModel")[0]?.path).toBe(
+        "src/router.ts",
+      );
+
+      store.syncWorkspaceIndex(
+        run.id,
+        [
+          {
+            path: "README.md",
+            fingerprint: "inode-2:80:mtime-1",
+            bytes: 80,
+          },
+        ],
+        new Map(),
+        3000,
+      );
+      expect(store.getWorkspaceIndexState(run.id)).toEqual([
+        {
+          path: "README.md",
+          fingerprint: "inode-2:80:mtime-1",
+          bytes: 80,
+        },
+      ]);
+      expect(store.searchWorkspaceIndex(run.id, "selectModel")).toHaveLength(0);
+    } finally {
+      store.close();
+    }
+  });
+
   it("persists task dependencies and requires a verification gate before completion", () => {
     const store = makeStore();
     try {
