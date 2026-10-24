@@ -3124,7 +3124,8 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
               ) {
                 let hasPendingEvents = true;
                 try {
-                  hasPendingEvents = store.listEvents(runId, cursor, 1).length > 0;
+                  hasPendingEvents =
+                    store.listEvents(runId, cursor, 1).length > 0;
                 } catch {
                   // Do not announce completion if the event cursor cannot be checked.
                 }
