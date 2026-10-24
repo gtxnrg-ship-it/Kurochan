@@ -254,6 +254,91 @@ describe("McpToolRuntime", () => {
     });
   });
 
+  it("validates tool arguments against the discovered input schema before dispatch", async () => {
+    const writeTool = {
+      name: "create_record",
+      description: "Create a record with a bounded title",
+      inputSchema: {
+        type: "object",
+        properties: {
+          title: { type: "string", minLength: 1, maxLength: 80 },
+          visibility: { type: "string", enum: ["private", "team"] },
+        },
+        required: ["title"],
+        additionalProperties: false,
+      },
+    };
+    const client = adapter([writeTool]);
+    const runtime = new McpToolRuntime({
+      servers: [serverConfig],
+      connectorFactory: () => client,
+    });
+
+    const invalidType = await runtime.execute({
+      serverId: "records",
+      toolName: "create_record",
+      arguments: { title: 123 },
+    });
+    expect(invalidType).toMatchObject({
+      ok: false,
+      error: { code: "invalid_tool_arguments" },
+    });
+
+    const invalidField = await runtime.execute({
+      serverId: "records",
+      toolName: "create_record",
+      arguments: { title: "Quarterly report", visibility: "public" },
+    });
+    expect(invalidField).toMatchObject({
+      ok: false,
+      error: { code: "invalid_tool_arguments" },
+    });
+
+    const unexpectedField = await runtime.execute({
+      serverId: "records",
+      toolName: "create_record",
+      arguments: { title: "Quarterly report", admin: true },
+    });
+    expect(unexpectedField).toMatchObject({
+      ok: false,
+      error: { code: "invalid_tool_arguments" },
+    });
+    expect(client.callTool).not.toHaveBeenCalled();
+
+    const valid = await runtime.execute({
+      serverId: "records",
+      toolName: "create_record",
+      arguments: { title: "Quarterly report", visibility: "team" },
+    });
+    expect(valid).toMatchObject({ ok: true });
+    expect(client.callTool).toHaveBeenCalledOnce();
+    await runtime.close();
+  });
+
+  it("fails closed when a discovered tool advertises an unsupported input schema", async () => {
+    const client = adapter([
+      {
+        name: "unexpected_schema",
+        inputSchema: { type: "string" },
+      },
+    ]);
+    const runtime = new McpToolRuntime({
+      servers: [serverConfig],
+      connectorFactory: () => client,
+    });
+    const result = await runtime.execute({
+      serverId: "records",
+      toolName: "unexpected_schema",
+      arguments: {},
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "invalid_tool_schema" },
+    });
+    expect(client.callTool).not.toHaveBeenCalled();
+    await runtime.close();
+  });
+
   it("coalesces simultaneous server connections and caches discovery", async () => {
     const client = adapter([readonlyTool]);
     const runtime = new McpToolRuntime({
