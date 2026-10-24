@@ -154,7 +154,8 @@ describe("PlanService", () => {
         ],
       }),
     );
-    const planner = new PlanService({ catalog: fakeCatalog(), router });
+    const catalog = fakeCatalog();
+    const planner = new PlanService({ catalog, router });
     const plan = await planner.createPlan({
       goal: "Make it real",
       profile: "balanced",
@@ -190,6 +191,9 @@ describe("PlanService", () => {
     expect(router.complete.mock.calls[0]![0].systemPrompt).toContain(
       "A vague idea is not automatically a reason to interrogate the user",
     );
+    const catalogGoalSearch = vi.mocked(catalog.search).mock.calls[0]?.[0];
+    expect(catalogGoalSearch).toContain("Make it real");
+    expect(catalogGoalSearch).toContain("study planner");
   });
 
   it("retrieves runbook specialists from the complete catalog even when they were absent from search results", async () => {
