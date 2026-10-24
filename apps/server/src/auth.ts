@@ -1,5 +1,15 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
+export interface OAuthSessionRevocationStore {
+  revokeOAuthSession(
+    sessionId: string,
+    userId: string,
+    expiresAt: number,
+    now?: number,
+  ): void;
+  isOAuthSessionRevoked(sessionId: string, now?: number): boolean;
+}
+
 export type OAuthProviderId = "github" | "google";
 export type PrincipalProvider = OAuthProviderId | "local";
 
@@ -46,6 +56,7 @@ interface TokenPayload {
   readonly email?: string;
   readonly iat: number;
   readonly exp: number;
+  readonly jti: string;
 }
 
 const SESSION_SECONDS = 8 * 60 * 60;
@@ -160,6 +171,7 @@ export class OAuthService {
     private readonly env: Readonly<Record<string, string | undefined>>,
     private readonly fetchImpl: typeof fetch = globalThis.fetch,
     private readonly now: () => number = Date.now,
+    private readonly revocationStore?: OAuthSessionRevocationStore,
   ) {
     this.secret = env.KUROCHAN_SESSION_SECRET?.trim() ?? "";
     this.apiOrigin = originOf(env.KUROCHAN_PUBLIC_API_URL);
@@ -290,6 +302,7 @@ export class OAuthService {
       ...(pending.principal.email ? { email: pending.principal.email } : {}),
       iat: issuedAt,
       exp: expiresAt,
+      jti: randomCode(),
     };
     const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
     const signature = createHmac("sha256", this.secret).update(encoded).digest("base64url");
@@ -319,12 +332,23 @@ export class OAuthService {
       !/^(github|google):[A-Za-z0-9._:-]{1,200}$/.test(payload.sub) ||
       (payload.provider !== "github" && payload.provider !== "google") ||
       !payload.sub.startsWith(payload.provider + ":") ||
+      !this.providers.has(payload.provider) ||
+      typeof payload.jti !== "string" ||
+      !/^[A-Za-z0-9_-]{32,100}$/.test(payload.jti) ||
       typeof payload.name !== "string" || !payload.name.trim() ||
       typeof payload.iat !== "number" || !Number.isInteger(payload.iat) ||
       payload.iat > now + 60 ||
       typeof payload.exp !== "number" || !Number.isInteger(payload.exp) ||
       payload.exp <= now || payload.exp - payload.iat > SESSION_SECONDS
     ) return undefined;
+    try {
+      if (this.revocationStore?.isOAuthSessionRevoked(payload.jti, this.now())) {
+        return undefined;
+      }
+    } catch {
+      // A storage outage must fail closed rather than accept a possibly revoked session.
+      return undefined;
+    }
     return {
       userId: payload.sub,
       provider: payload.provider,
@@ -332,6 +356,40 @@ export class OAuthService {
       ...(typeof payload.email === "string" && payload.email.length <= 320 ? { email: payload.email } : {}),
       expiresAt: payload.exp * 1000,
     };
+  }
+
+  revokeSessionToken(token: string): boolean {
+    const principal = this.verifySessionToken(token);
+    if (!principal || !this.revocationStore) return false;
+    const encoded = token.split(".")[0];
+    if (!encoded) return false;
+    const decoded = decodeBase64Url(encoded);
+    if (!decoded) return false;
+    let payload: unknown;
+    try {
+      payload = JSON.parse(decoded.toString("utf8"));
+    } catch {
+      return false;
+    }
+    if (
+      !payload ||
+      typeof payload !== "object" ||
+      typeof (payload as Partial<TokenPayload>).jti !== "string"
+    ) {
+      return false;
+    }
+    const jti = (payload as TokenPayload).jti;
+    try {
+      this.revocationStore.revokeOAuthSession(
+        jti,
+        principal.userId,
+        principal.expiresAt ?? this.now(),
+        this.now(),
+      );
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   signInErrorRedirect(code = "oauth_failed"): string {
