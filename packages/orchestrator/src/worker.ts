@@ -751,7 +751,9 @@ export class TaskWorker {
         // crash the worker process. Fence the output and let the task retry.
         const detail = String(
           redactMcpSensitiveValues(
-            error instanceof Error ? error.message : "Task heartbeat failed.",
+            error instanceof Error
+              ? error.message
+              : "Task heartbeat failed.",
           ),
         ).slice(0, 500);
         leaseFailure = Object.assign(
