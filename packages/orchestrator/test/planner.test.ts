@@ -200,11 +200,13 @@ describe("PlanService", () => {
     const unseen: AgentProfile = {
       id: "security/security-architect",
       name: "Security Architect",
-      description: "Threat modeling, security review, and secure system design",
+      description: "Threat modeling, security review, and secure system design. ".repeat(
+        30,
+      ),
       division: "security",
       sourcePath: "security/security-architect.md",
       sourceSha256: "d".repeat(64),
-      tools: [],
+      tools: Array.from({ length: 20 }, (_, index) => "security-tool-" + index),
     };
     const catalog = fakeCatalog();
     vi.mocked(catalog.list).mockResolvedValue([...candidates, unseen]);
@@ -274,11 +276,14 @@ describe("PlanService", () => {
     const prompt = JSON.parse(
       router.complete.mock.calls[0]![0].messages[0]!.content,
     );
-    expect(
-      prompt.allowedSpecialists.some(
-        (agent: { id: string }) => agent.id === unseen.id,
-      ),
-    ).toBe(true);
+    const compactSpecialist = prompt.allowedSpecialists.find(
+      (agent: { id: string }) => agent.id === unseen.id,
+    );
+    expect(compactSpecialist).toBeDefined();
+    expect(compactSpecialist.description.length).toBeLessThanOrEqual(320);
+    expect(compactSpecialist.tools).toHaveLength(8);
+    // Full pinned instructions remain available to the worker after selection.
+    expect(plan.selectedAgents.some((agent) => agent.id === unseen.id)).toBe(true);
   });
 
   it("plans project checkout before repo edits and exposes only configured capabilities", async () => {
