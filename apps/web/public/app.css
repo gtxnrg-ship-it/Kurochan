@@ -2287,7 +2287,6 @@ button:disabled {
   height: 36px;
 }
 
-
 /* Integration directory */
 .integration-intro {
   max-width: 720px;
@@ -2337,7 +2336,10 @@ button:disabled {
 }
 .integration-filters {
   display: grid;
-  grid-template-columns: minmax(160px, 1fr) minmax(140px, 190px) minmax(140px, 190px);
+  grid-template-columns: minmax(160px, 1fr) minmax(140px, 190px) minmax(
+      140px,
+      190px
+    );
   align-items: end;
   gap: 9px;
   margin-bottom: 13px;
@@ -2592,7 +2594,8 @@ button:disabled {
   border-radius: 10px;
   background: #f1efe8;
   color: #383d34;
-  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-family:
+    ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
   font-size: 10px;
   line-height: 1.7;
   white-space: pre-wrap;
