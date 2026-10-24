@@ -514,6 +514,10 @@ export class TaskWorker {
   >();
   private readonly finalizationControllers = new Map<string, AbortController>();
   private readonly finalizationPromises = new Map<string, Promise<void>>();
+  private readonly finalizationRetries = new Map<
+    string,
+    { attempts: number; retryAt: number }
+  >();
   private readonly workspaceQueues = new Map<string, Promise<void>>();
   private readonly concurrency: number;
   private readonly communitySkills: CommunitySkillCatalog;
@@ -1537,21 +1541,54 @@ export class TaskWorker {
   }
 
   private async finalizePendingRuns(): Promise<void> {
-    const runs = this.options.store
-      .listRuns(200)
-      .filter((run) => run.status === "verifying");
-    for (const run of runs) await this.finalizeRun(run);
+    for (const run of this.options.store.listVerifyingRuns()) {
+      await this.finalizeRun(run);
+    }
   }
 
   private finalizeRun(run: RunRecord, taskSignal?: AbortSignal): Promise<void> {
     const existing = this.finalizationPromises.get(run.id);
     if (existing) return existing;
 
-    const pending = this.performFinalizeRun(run, taskSignal).finally(() => {
-      if (this.finalizationPromises.get(run.id) === pending) {
-        this.finalizationPromises.delete(run.id);
-      }
-    });
+    const retry = this.finalizationRetries.get(run.id);
+    if (!taskSignal && retry && retry.retryAt > Date.now()) {
+      return Promise.resolve();
+    }
+
+    const pending = this.performFinalizeRun(run, taskSignal)
+      .then(() => {
+        const latest = this.options.store.getRun(run.id);
+        if (!latest || latest.status !== "verifying") {
+          this.finalizationRetries.delete(run.id);
+        }
+      })
+      .catch((error: unknown) => {
+        const latest = this.options.store.getRun(run.id);
+        if (taskSignal?.aborted || latest?.status !== "verifying") return;
+
+        const previous = this.finalizationRetries.get(run.id);
+        const attempts = (previous?.attempts ?? 0) + 1;
+        const delayMs = Math.min(300_000, 1_000 * 2 ** Math.min(attempts - 1, 8));
+        this.finalizationRetries.set(run.id, {
+          attempts,
+          retryAt: Date.now() + delayMs,
+        });
+        // Report a bounded, secret-free diagnostic instead of immediately
+        // retrying an expensive reviewer call on every worker polling cycle.
+        this.options.onError?.(
+          Object.assign(
+            new Error(
+              `Run verification deferred after attempt ${attempts}; retrying in ${Math.ceil(delayMs / 1000)} seconds.`,
+            ),
+            { code: "verification_retry_scheduled", retryable: true },
+          ),
+        );
+      })
+      .finally(() => {
+        if (this.finalizationPromises.get(run.id) === pending) {
+          this.finalizationPromises.delete(run.id);
+        }
+      });
     this.finalizationPromises.set(run.id, pending);
     return pending;
   }
