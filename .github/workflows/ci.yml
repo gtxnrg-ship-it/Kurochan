@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -20,6 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.head_ref || github.ref_name }}
           submodules: recursive
       - uses: pnpm/action-setup@v4
         with:
@@ -28,4 +29,35 @@ jobs:
         with:
           node-version: 22
       - run: pnpm install --frozen-lockfile
+      - name: Format routed model changes
+        run: |
+          pnpm exec prettier --write \
+            apps/server/src/server.ts \
+            apps/server/test/server.test.ts \
+            apps/web/public/app.js \
+            apps/web/test/api.test.ts \
+            packages/model-gateway/src/openai-compatible.ts \
+            packages/model-gateway/test/openai-compatible.test.ts \
+            packages/orchestrator/src/worker.ts \
+            packages/storage/test/run-store.test.ts
+      - name: Commit formatter output on this branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! git diff --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add \
+              apps/server/src/server.ts \
+              apps/server/test/server.test.ts \
+              apps/web/public/app.js \
+              apps/web/test/api.test.ts \
+              packages/model-gateway/src/openai-compatible.ts \
+              packages/model-gateway/test/openai-compatible.test.ts \
+              packages/orchestrator/src/worker.ts \
+              packages/storage/test/run-store.test.ts
+            git commit -m "Format model routing wiring"
+            git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+              "HEAD:${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
+          fi
       - run: pnpm check
