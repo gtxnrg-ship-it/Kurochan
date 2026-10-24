@@ -28,4 +28,6 @@ jobs:
         with:
           node-version: 22
       - run: pnpm install --frozen-lockfile
+      - run: pnpm format
+      - run: git diff -- packages/orchestrator/src/worker.ts packages/orchestrator/src/web-research.ts packages/orchestrator/test/worker.test.ts packages/orchestrator/test/web-research.test.ts
       - run: pnpm check
