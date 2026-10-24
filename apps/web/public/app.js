@@ -35,6 +35,10 @@ const state = {
   lastEventIds: new Map(),
   selectedRunId: null,
   selectedModel: "auto",
+  modelCatalog: [],
+  modelCatalogLoaded: false,
+  modelCatalogLoading: false,
+  modelCatalogUpdatedAt: null,
   connected: false,
   authenticated: false,
   providers: [],
@@ -332,9 +336,86 @@ function renderView() {
 }
 
 function selectedRouteProfile() {
-  // Auto uses the strongest existing route profile until catalog-aware model
-  // ranking is available in OmniRouter.
-  return state.selectedModel === "auto" ? "quality" : state.selectedModel;
+  return ["fast", "balanced", "quality"].includes(state.selectedModel)
+    ? state.selectedModel
+    : "quality";
+}
+
+function selectedChatModel() {
+  if (state.selectedModel === "auto") return "omni/quality";
+  if (["fast", "balanced", "quality"].includes(state.selectedModel))
+    return "omni/" + state.selectedModel;
+  return state.selectedModel;
+}
+
+function populateModelOptions(select) {
+  const currentValue = state.selectedModel;
+  select.replaceChildren();
+  const addOption = (parent, value, label, title) => {
+    const option = makeElement("option", "", label);
+    option.value = value;
+    if (title) option.title = title;
+    parent.append(option);
+  };
+
+  addOption(select, "auto", "Auto · OmniRoute", "Automatic routing with provider fallback.");
+  const profiles = document.createElement("optgroup");
+  profiles.label = "Routing profiles";
+  [
+    ["fast", "Fast"],
+    ["balanced", "Balanced"],
+    ["quality", "Quality"],
+  ].forEach(([value, label]) => addOption(profiles, value, label));
+  select.append(profiles);
+
+  for (const provider of state.modelCatalog) {
+    if (!Array.isArray(provider.models) || provider.models.length === 0) continue;
+    const group = document.createElement("optgroup");
+    group.label = provider.name || provider.providerId;
+    for (const model of provider.models) {
+      const id = String(model.id || "");
+      const value = String(model.value || (provider.providerId + "/" + id));
+      if (!id || !value) continue;
+      const name = String(model.name || id);
+      const label =
+        name === id ? id : name + " · " + id;
+      const titleParts = [id, model.description, model.contextLength ? "Context: " + model.contextLength : ""]
+        .filter(Boolean);
+      addOption(group, value, label, titleParts.join("\n"));
+    }
+    select.append(group);
+  }
+
+  if ([...select.options].some((option) => option.value === currentValue)) {
+    select.value = currentValue;
+  } else if (state.modelCatalogLoaded && currentValue !== "auto") {
+    state.selectedModel = "auto";
+    select.value = "auto";
+  } else {
+    select.value = "auto";
+  }
+}
+
+async function loadModelCatalog() {
+  if (FRONTEND_PREVIEW || !state.authenticated || state.modelCatalogLoading || state.modelCatalogLoaded)
+    return;
+  state.modelCatalogLoading = true;
+  try {
+    const response = await api.models();
+    state.modelCatalog = Array.isArray(response?.providers)
+      ? response.providers
+      : [];
+    state.modelCatalogUpdatedAt = response?.fetchedAt || new Date().toISOString();
+    state.modelCatalogLoaded = true;
+  } catch {
+    // Model selection must still work with route profiles if upstream
+    // discovery is offline or unsupported.
+    state.modelCatalog = [];
+  } finally {
+    state.modelCatalogLoading = false;
+    const select = $("#model-profile");
+    if (select) populateModelOptions(select);
+  }
 }
 
 function renderChatView(workspace) {
@@ -415,17 +496,7 @@ function renderChatView(workspace) {
   const modelSelect = makeElement("select", "model-profile-select");
   modelSelect.id = "model-profile";
   modelSelect.setAttribute("aria-label", "Model routing mode");
-  [
-    ["auto", "Auto · OmniRoute"],
-    ["fast", "Fast"],
-    ["balanced", "Balanced"],
-    ["quality", "Quality"],
-  ].forEach(([value, label]) => {
-    const option = makeElement("option", "", label);
-    option.value = value;
-    modelSelect.append(option);
-  });
-  modelSelect.value = state.selectedModel;
+  populateModelOptions(modelSelect);
   modelLabel.append(modelSelect);
   modelRow.append(modelLabel);
 
@@ -694,7 +765,7 @@ async function sendMessage() {
     renderView();
     const input = $("#message-input");
     if (input) input.value = "";
-    const model = "omni/" + selectedRouteProfile();
+    const model = selectedChatModel();
     const clientMessageId = makeId();
     await api.streamChat(conversationId, {
       content,
@@ -911,7 +982,7 @@ async function submitVoiceTurn(blob, details) {
     const form = new FormData();
     form.append("file", blob, "kurochan-recording." + details.extension);
     form.append("clientMessageId", makeId());
-    form.append("model", "omni/" + selectedRouteProfile());
+    form.append("model", selectedChatModel());
     const language = state.speech?.transcription?.defaultLanguage;
     if (typeof language === "string" && language.trim()) {
       form.append("language", language.trim());
@@ -2850,6 +2921,7 @@ async function boot() {
     refreshConversations({ preserveSelection: true }),
     loadRuns(),
   ]);
+  void loadModelCatalog();
   if (state.conversations.length) {
     const current =
       state.conversations.find(
