@@ -280,7 +280,7 @@ describe("PlanService", () => {
     expect(compactSpecialist).toBeDefined();
     expect(compactSpecialist.description.length).toBeLessThanOrEqual(320);
     expect(compactSpecialist.tools).toHaveLength(8);
-    // Full pinned instructions remain available to the worker after selection.
+    // The worker still receives the selected specialist's execution instructions.
     expect(plan.selectedAgents.some((agent) => agent.id === unseen.id)).toBe(
       true,
     );
