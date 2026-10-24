@@ -2588,8 +2588,60 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       const plan = await planner.createPlan({
         goal: parsed.data.goal,
         profile: parsed.data.profile,
+        conversationContext: store
+          .listConversationMessages(conversationId, { limit: 10 })
+          .filter((message) => message.role === "user" || message.role === "assistant")
+          .map((message) => ({
+            role: message.role as "user" | "assistant",
+            content: message.content,
+          })),
         signal: abort.signal,
       });
+      if (plan.clarificationRequired) {
+        const question =
+          plan.clarificationQuestion ??
+          "What is the most important outcome you want this work to achieve?";
+        const clarificationKey =
+          "run-clarification-" +
+          createHash("sha256")
+            .update(conversationId + ":" + parsed.data.goal + ":" + question)
+            .digest("hex")
+            .slice(0, 32);
+        const message = store.appendConversationMessage(conversationId, {
+          role: "assistant",
+          content: question,
+          clientMessageId: clarificationKey,
+          metadata: {
+            kind: "run_clarification",
+            intent: plan.intent,
+            summary: plan.summary,
+            assumptions: plan.assumptions,
+          },
+        });
+        return reply.code(200).send({
+          status: "clarification_required",
+          conversation: store.getConversation(conversationId),
+          message: message.message,
+          clarification: {
+            question,
+            intent: plan.intent,
+            assumptions: plan.assumptions,
+          },
+          plan: {
+            intent: plan.intent,
+            summary: plan.summary,
+            assumptions: plan.assumptions,
+            selectedAgents: plan.selectedAgents,
+            selectedRunbook: plan.selectedRunbook,
+            provider: {
+              id: plan.providerId,
+              model: plan.model,
+              latencyMs: plan.latencyMs,
+            },
+            planningAttempts: plan.attempts,
+          },
+        });
+      }
       const run = store.createRun({
         goal: parsed.data.goal,
         profile: parsed.data.profile,
@@ -2612,7 +2664,9 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         message: eventMessage.message,
         run,
         plan: {
+          intent: plan.intent,
           summary: plan.summary,
+          assumptions: plan.assumptions,
           selectedAgents: plan.selectedAgents,
           selectedRunbook: plan.selectedRunbook,
           provider: {
@@ -2774,6 +2828,33 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         profile: parsed.data.profile,
         signal: abort.signal,
       });
+      if (plan.clarificationRequired) {
+        return reply.code(200).send({
+          status: "clarification_required",
+          clarification: {
+            question:
+              plan.clarificationQuestion ??
+              "What is the most important outcome you want this work to achieve?",
+            intent: plan.intent,
+            assumptions: plan.assumptions,
+          },
+          plan: {
+            intent: plan.intent,
+            summary: plan.summary,
+            assumptions: plan.assumptions,
+            selectedAgents: plan.selectedAgents,
+            ...(plan.selectedRunbook
+              ? { selectedRunbook: plan.selectedRunbook }
+              : {}),
+            provider: {
+              id: plan.providerId,
+              model: plan.model,
+              latencyMs: plan.latencyMs,
+            },
+            planningAttempts: plan.attempts,
+          },
+        });
+      }
       const input: CreateRunInput = {
         goal: parsed.data.goal,
         profile: parsed.data.profile,
@@ -2784,8 +2865,13 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       return reply.code(201).send({
         run,
         plan: {
+          intent: plan.intent,
           summary: plan.summary,
+          assumptions: plan.assumptions,
           selectedAgents: plan.selectedAgents,
+          ...(plan.selectedRunbook
+            ? { selectedRunbook: plan.selectedRunbook }
+            : {}),
           provider: {
             id: plan.providerId,
             model: plan.model,
