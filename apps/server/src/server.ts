@@ -1,6 +1,6 @@
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { resolve } from "node:path";
-import Fastify, { type FastifyInstance } from "fastify";
+import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { Readable } from "node:stream";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
@@ -55,6 +55,21 @@ export interface ServerOptions {
   readonly mcpTools?: McpToolRuntime;
   readonly communitySkills?: CommunitySkillCatalog;
   readonly speech?: OpenAICompatibleSpeechRuntime;
+}
+
+function createRequestAbortController(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): AbortController {
+  const controller = new AbortController();
+  const abortOnRequestAborted = () => controller.abort();
+  const abortOnResponseClose = () => {
+    if (!reply.raw.writableEnded) controller.abort();
+    request.raw.off("aborted", abortOnRequestAborted);
+  };
+  request.raw.once("aborted", abortOnRequestAborted);
+  reply.raw.once("close", abortOnResponseClose);
+  return controller;
 }
 
 function safeEqual(a: string, b: string): boolean {
@@ -497,8 +512,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       });
     }
 
-    const abort = new AbortController();
-    request.raw.on("aborted", () => abort.abort());
+    const abort = createRequestAbortController(request, reply);
     try {
       const result = await router.complete({
         profile: "balanced",
@@ -834,8 +848,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           },
         });
       }
-      const abort = new AbortController();
-      request.raw.on("aborted", () => abort.abort());
+      const abort = createRequestAbortController(request, reply);
       try {
         const result = await speech.transcribe({
           audio,
@@ -927,8 +940,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           },
         });
       }
-      const abort = new AbortController();
-      request.raw.on("aborted", () => abort.abort());
+      const abort = createRequestAbortController(request, reply);
       try {
         const result = await speech.synthesize({
           text: parsed.data.input,
@@ -1723,8 +1735,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       const history = store
         .listConversationMessages(conversationId, { limit: 40 })
         .map((message) => ({ role: message.role, content: message.content }));
-      const abort = new AbortController();
-      request.raw.on("aborted", () => abort.abort());
+      const abort = createRequestAbortController(request, reply);
       try {
         if (parsed.data.stream) {
           const routed = await router.stream({
@@ -2192,8 +2203,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         speech.status.transcription.defaultLanguage ||
         "en";
       const audioSha256 = createHash("sha256").update(audio).digest("hex");
-      const abort = new AbortController();
-      request.raw.on("aborted", () => abort.abort());
+      const abort = createRequestAbortController(request, reply);
 
       try {
         let userMessage: ReturnType<
@@ -2569,8 +2579,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         },
       });
     }
-    const abort = new AbortController();
-    request.raw.on("aborted", () => abort.abort());
+    const abort = createRequestAbortController(request, reply);
     try {
       const plan = await planner.createPlan({
         goal: parsed.data.goal,
@@ -2754,8 +2763,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         },
       });
     }
-    const abort = new AbortController();
-    request.raw.on("aborted", () => abort.abort());
+    const abort = createRequestAbortController(request, reply);
     try {
       const plan = await planner.createPlan({
         goal: parsed.data.goal,
@@ -3275,8 +3283,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       });
     }
 
-    const abort = new AbortController();
-    request.raw.on("aborted", () => abort.abort());
+    const abort = createRequestAbortController(request, reply);
 
     try {
       if (body.stream) {
