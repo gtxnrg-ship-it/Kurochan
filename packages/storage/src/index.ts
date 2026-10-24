@@ -504,7 +504,9 @@ export class RunStore {
     this.db.pragma("foreign_keys = ON");
     this.db.pragma("journal_mode = WAL");
     this.db.pragma("busy_timeout = 5000");
-    const schemaVersion = this.db.pragma("user_version", { simple: true }) as number;
+    const schemaVersion = this.db.pragma("user_version", {
+      simple: true,
+    }) as number;
     const currentSchemaVersion = 5;
     if (!Number.isInteger(schemaVersion) || schemaVersion < 0) {
       this.db.close();
