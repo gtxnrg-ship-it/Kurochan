@@ -21,7 +21,16 @@ The development server binds to `127.0.0.1:5173` by default. Set `WEB_HOST` and 
 - Saved run list, task status, specialist handoffs, evidence, cancellation, and resumable server-sent events.
 - Search across the pinned Agency Agents catalog.
 - Connection, provider, worker, router, and speech capability diagnostics.
+- Recorded microphone turns with server-side transcription, routed text response, and generated audio playback when both speech adapters are configured.
 - Mobile navigation, accessible labels, keyboard-friendly composer, installable PWA shell, and shell-only offline cache.
+
+## Voice setup
+
+The **Voice turn** button uses the existing recorded-audio pipeline, not a realtime duplex session. Configure both `KUROCHAN_STT_BASE_URL` / `KUROCHAN_STT_MODEL` and `KUROCHAN_TTS_BASE_URL` / `KUROCHAN_TTS_MODEL` in the server environment. Keep any speech credentials on the server.
+
+Browser microphone access requires a secure context. On phones, use HTTPS for a deployed or LAN-hosted workbench; plain HTTP is generally only permitted on localhost. The button records one clip, sends it to the API, then retrieves the saved audio reply using the bearer-authenticated API client.
+
+This is not yet a native realtime speech-to-speech integration: the selected STT/TTS provider, naturalness, latency, and interruption behavior still need live evaluation. The current API correctly reports `realtimeDuplex: false`.
 
 ## Data and security
 
