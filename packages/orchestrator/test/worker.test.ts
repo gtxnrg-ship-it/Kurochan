@@ -13,6 +13,7 @@ import { OmniRouter } from "@kurochan/omnirouter";
 import { RunStore } from "@kurochan/storage";
 import {
   approvalGranted,
+  fingerprintMcpArguments,
   jsonCharacterLimit,
   selectMcpToolsForContext,
   selectMcpToolsForTask,
@@ -87,6 +88,20 @@ describe("Bounded worker context", () => {
     );
   });
 });
+
+describe("Approval scope", () => {
+  it("fingerprints JSON arguments independent of object key order", () => {
+    expect(
+      fingerprintMcpArguments({ record: { title: "draft", id: 7 }, tags: ["a", "b"] }),
+    ).toBe(
+      fingerprintMcpArguments({ tags: ["a", "b"], record: { id: 7, title: "draft" } }),
+    );
+    expect(
+      fingerprintMcpArguments({ record: { title: "draft", id: 7 }, tags: ["a", "b"] }),
+    ).not.toBe(
+      fingerprintMcpArguments({ record: { title: "published", id: 7 }, tags: ["a", "b"] }),
+    );
+  });
 
 describe("MCP tool relevance routing", () => {
   it("only exposes bounded schemas in the task-specific tool context", () => {
@@ -190,6 +205,7 @@ describe("Approval scope", () => {
           approvalType: "external-write",
           mcpServerId: "service-one",
           mcpToolName: "write_one",
+          argumentsHash: "hash-one",
         },
         3,
       );
@@ -205,6 +221,7 @@ describe("Approval scope", () => {
           approvalType: "external-write",
           mcpServerId: "service-two",
           mcpToolName: "write_two",
+          argumentsHash: "hash-two",
         },
         6,
       );
@@ -221,6 +238,14 @@ describe("Approval scope", () => {
         approvalGranted(store, currentTask, "external-write", {
           mcpServerId: "service-two",
           mcpToolName: "write_two",
+          argumentsHash: "wrong-hash",
+        }),
+      ).toBe(false);
+      expect(
+        approvalGranted(store, currentTask, "external-write", {
+          mcpServerId: "service-two",
+          mcpToolName: "write_two",
+          argumentsHash: "hash-two",
         }),
       ).toBe(true);
     } finally {
