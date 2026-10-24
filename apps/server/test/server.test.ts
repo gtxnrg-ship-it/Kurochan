@@ -1224,7 +1224,9 @@ describe("Kuro-chan API", () => {
     app = buildServer({
       env: {},
       providers: {
-        providers: new Map<ProviderId, ChatProvider>([["openrouter", provider]]),
+        providers: new Map<ProviderId, ChatProvider>([
+          ["openrouter", provider],
+        ]),
         statuses: [
           {
             id: "openrouter",
@@ -1260,7 +1262,11 @@ describe("Kuro-chan API", () => {
     expect(response.json()).toMatchObject({
       object: "list",
       data: expect.arrayContaining([
-        { id: "openrouter/openrouter/free", object: "model", owned_by: "openrouter" },
+        {
+          id: "openrouter/openrouter/free",
+          object: "model",
+          owned_by: "openrouter",
+        },
         { id: "omni/quality", object: "model", owned_by: "kurochan" },
       ]),
     });
@@ -1362,7 +1368,9 @@ describe("Kuro-chan API", () => {
 
   it("passes a selected provider model into planning and persists it on the run", async () => {
     const store = new RunStore(":memory:");
-    const conversation = store.createConversation({ title: "Selected model test" });
+    const conversation = store.createConversation({
+      title: "Selected model test",
+    });
     const planned = {
       intent: "Implement a feature with a selected model",
       summary: "A test plan",
@@ -1491,12 +1499,17 @@ describe("Kuro-chan API", () => {
 
   it("accepts auto as the free-first OmniRouter quality alias", async () => {
     const calls: ProviderId[] = [];
-    const fakeProvider = (id: ProviderId, defaultModel: string): ChatProvider => ({
+    const fakeProvider = (
+      id: ProviderId,
+      defaultModel: string,
+    ): ChatProvider => ({
       id,
       displayName: id,
       defaultModel,
       isConfigured: true,
-      complete: async (input: ChatCompletionInput): Promise<ChatCompletionOutput> => {
+      complete: async (
+        input: ChatCompletionInput,
+      ): Promise<ChatCompletionOutput> => {
         calls.push(id);
         return {
           providerId: id,

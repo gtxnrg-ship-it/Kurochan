@@ -638,7 +638,11 @@ function routeOptionsForRun(model: string | undefined): {
     if (model.startsWith(prefix)) {
       const providerModel = model.slice(prefix.length).trim();
       return providerModel
-        ? { preferredProvider: providerId, lockProvider: true, model: providerModel }
+        ? {
+            preferredProvider: providerId,
+            lockProvider: true,
+            model: providerModel,
+          }
         : {};
     }
   }

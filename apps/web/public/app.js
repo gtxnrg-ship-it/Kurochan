@@ -358,7 +358,12 @@ function populateModelOptions(select) {
     parent.append(option);
   };
 
-  addOption(select, "auto", "Auto · OmniRoute", "Automatic routing with provider fallback.");
+  addOption(
+    select,
+    "auto",
+    "Auto · OmniRoute",
+    "Automatic routing with provider fallback.",
+  );
   const profiles = document.createElement("optgroup");
   profiles.label = "Routing profiles";
   [
@@ -369,18 +374,21 @@ function populateModelOptions(select) {
   select.append(profiles);
 
   for (const provider of state.modelCatalog) {
-    if (!Array.isArray(provider.models) || provider.models.length === 0) continue;
+    if (!Array.isArray(provider.models) || provider.models.length === 0)
+      continue;
     const group = document.createElement("optgroup");
     group.label = provider.name || provider.providerId;
     for (const model of provider.models) {
       const id = String(model.id || "");
-      const value = String(model.value || (provider.providerId + "/" + id));
+      const value = String(model.value || provider.providerId + "/" + id);
       if (!id || !value) continue;
       const name = String(model.name || id);
-      const label =
-        name === id ? id : name + " · " + id;
-      const titleParts = [id, model.description, model.contextLength ? "Context: " + model.contextLength : ""]
-        .filter(Boolean);
+      const label = name === id ? id : name + " · " + id;
+      const titleParts = [
+        id,
+        model.description,
+        model.contextLength ? "Context: " + model.contextLength : "",
+      ].filter(Boolean);
       addOption(group, value, label, titleParts.join("\n"));
     }
     select.append(group);
@@ -397,7 +405,12 @@ function populateModelOptions(select) {
 }
 
 async function loadModelCatalog() {
-  if (FRONTEND_PREVIEW || !state.authenticated || state.modelCatalogLoading || state.modelCatalogLoaded)
+  if (
+    FRONTEND_PREVIEW ||
+    !state.authenticated ||
+    state.modelCatalogLoading ||
+    state.modelCatalogLoaded
+  )
     return;
   state.modelCatalogLoading = true;
   try {
@@ -405,7 +418,8 @@ async function loadModelCatalog() {
     state.modelCatalog = Array.isArray(response?.providers)
       ? response.providers
       : [];
-    state.modelCatalogUpdatedAt = response?.fetchedAt || new Date().toISOString();
+    state.modelCatalogUpdatedAt =
+      response?.fetchedAt || new Date().toISOString();
     state.modelCatalogLoaded = true;
   } catch {
     // Model selection must still work with route profiles if upstream

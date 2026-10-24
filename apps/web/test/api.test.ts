@@ -194,10 +194,10 @@ describe("Kuro-chan web API helpers", () => {
   it("sends the selected model with an agent run request", async () => {
     const fetchImpl = vi.fn(
       async () =>
-        new Response(
-          JSON.stringify({ run: { id: "run-1" } }),
-          { status: 201, headers: { "content-type": "application/json" } },
-        ),
+        new Response(JSON.stringify({ run: { id: "run-1" } }), {
+          status: 201,
+          headers: { "content-type": "application/json" },
+        }),
     );
     const client = new ApiClient({
       getBaseUrl: () => "https://api.example.test",
@@ -205,12 +205,9 @@ describe("Kuro-chan web API helpers", () => {
       fetchImpl,
     });
 
-    await client.startRun(
-      "conversation-1",
-      "Implement a feature",
-      "quality",
-      { model: "openrouter/openrouter/free" },
-    );
+    await client.startRun("conversation-1", "Implement a feature", "quality", {
+      model: "openrouter/openrouter/free",
+    });
 
     const [url, options] = fetchImpl.mock.calls[0] || [];
     expect(url).toBe(

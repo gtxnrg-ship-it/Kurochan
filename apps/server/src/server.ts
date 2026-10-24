@@ -606,8 +606,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   // Model discovery never exposes provider credentials. Cache the normalized
   // catalog briefly so opening the model picker does not repeatedly call vendors.
   let modelCatalogCache:
-    | { expiresAt: number; value: Record<string, unknown> }
-    | undefined;
+    { expiresAt: number; value: Record<string, unknown> } | undefined;
   app.get("/v1/models", async () => {
     const now = Date.now();
     if (modelCatalogCache && modelCatalogCache.expiresAt > now)
@@ -632,7 +631,10 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
             ? await provider.listModels()
             : [];
           const models = [...discovered];
-          if (defaultModel && !models.some((model) => model.id === defaultModel)) {
+          if (
+            defaultModel &&
+            !models.some((model) => model.id === defaultModel)
+          ) {
             const name =
               status.id === "openrouter" && defaultModel === "openrouter/free"
                 ? "Free Models Router"
@@ -2732,7 +2734,8 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       return reply.code(400).send({
         error: {
           code: "unknown_model",
-          message: "Select Auto, an OmniRouter profile, or a model listed by a configured provider.",
+          message:
+            "Select Auto, an OmniRouter profile, or a model listed by a configured provider.",
           retryable: false,
           requestId: request.id,
         },
@@ -2939,7 +2942,8 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       return reply.code(400).send({
         error: {
           code: "unknown_model",
-          message: "Select Auto, an OmniRouter profile, or a model listed by a configured provider.",
+          message:
+            "Select Auto, an OmniRouter profile, or a model listed by a configured provider.",
           retryable: false,
           requestId: request.id,
         },
@@ -3036,7 +3040,8 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       return reply.code(400).send({
         error: {
           code: "unknown_model",
-          message: "Select Auto, an OmniRouter profile, or a model listed by a configured provider.",
+          message:
+            "Select Auto, an OmniRouter profile, or a model listed by a configured provider.",
           retryable: false,
           requestId: request.id,
         },

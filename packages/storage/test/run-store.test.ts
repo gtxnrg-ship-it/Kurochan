@@ -97,7 +97,9 @@ describe("RunStore", () => {
       });
 
       expect(created.model).toBe("openrouter/openrouter/free");
-      expect(store.getRun(created.id)?.model).toBe("openrouter/openrouter/free");
+      expect(store.getRun(created.id)?.model).toBe(
+        "openrouter/openrouter/free",
+      );
     } finally {
       store.close();
     }
