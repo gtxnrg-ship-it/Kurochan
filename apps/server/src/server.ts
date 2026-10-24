@@ -1189,6 +1189,16 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   }));
 
   app.get("/v1/usage", async (request, reply) => {
+    if (oauth.isEnabled && principalId(request) !== "local") {
+      return reply.code(501).send({
+        error: {
+          code: "account_usage_not_implemented",
+          message: "Per-account provider usage tracking is not yet available.",
+          retryable: false,
+          requestId: request.id,
+        },
+      });
+    }
     const query = request.query as Record<string, unknown>;
     const rawPeriod = typeof query.period === "string" ? query.period : "24h";
     const windows: Readonly<Record<string, number>> = {
@@ -3870,9 +3880,13 @@ export function validateServerConfiguration(env: Environment = process.env): {
   const parsedPort = parseEnvironmentInteger("PORT", env.PORT, 8787, 1, 65535);
   const loopback =
     host === "127.0.0.1" || host === "localhost" || host === "::1";
-  if (!loopback && !env.KUROCHAN_API_TOKEN?.trim()) {
+  if (
+    !loopback &&
+    !env.KUROCHAN_API_TOKEN?.trim() &&
+    !isOAuthEnvironmentConfigured(env)
+  ) {
     throw new Error(
-      "Refusing to bind Kuro-chan API to a non-loopback host without KUROCHAN_API_TOKEN.",
+      "Refusing to bind Kuro-chan API to a non-loopback host without an API token or fully configured HTTPS OAuth authentication.",
     );
   }
   parseEnvironmentInteger(
