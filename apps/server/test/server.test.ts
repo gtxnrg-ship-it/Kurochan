@@ -1373,7 +1373,7 @@ describe("Kuro-chan API", () => {
     expect(
       events.json().data.map((event: { type: string }) => event.type),
     ).toContain("run.plan_created");
-    expect(events.body).toContain("Bearer [REDACTED]");
+    expect(events.body).toContain("[REDACTED_SECRET]");
     expect(events.body).not.toContain("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
     const cancelled = await app.inject({
       method: "POST",
@@ -1401,7 +1401,7 @@ describe("Kuro-chan API", () => {
     expect(stream.body).toContain("event: run.plan_created");
     expect(stream.body).toContain("event: run.cancelled");
     expect(stream.body).toContain("event: stream.end");
-    expect(stream.body).toContain("Bearer [REDACTED]");
+    expect(stream.body).toContain("[REDACTED_SECRET]");
     expect(stream.body).not.toContain("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
 
     const priorEvents = events.json().data as Array<{ id: number }>;
