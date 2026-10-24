@@ -102,6 +102,7 @@ describe("Approval scope", () => {
       fingerprintMcpArguments({ record: { title: "published", id: 7 }, tags: ["a", "b"] }),
     );
   });
+});
 
 describe("MCP tool relevance routing", () => {
   it("only exposes bounded schemas in the task-specific tool context", () => {
