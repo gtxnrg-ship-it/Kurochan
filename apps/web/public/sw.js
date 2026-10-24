@@ -1,9 +1,10 @@
-const CACHE_NAME = "kurochan-shell-v1";
+const CACHE_NAME = "kurochan-shell-v2";
 const SHELL = [
   "/",
   "/app.css",
   "/app.js",
   "/api.mjs",
+  "/integrations.mjs",
   "/manifest.webmanifest",
   "/icons/kurochan.svg",
 ];
