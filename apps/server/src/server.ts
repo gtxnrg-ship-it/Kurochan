@@ -3508,7 +3508,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
 
   app.get("/v1/runs/:runId/events", async (request, reply) => {
     const { runId } = request.params as { runId: string };
-    if (!store.getRun(runId))
+    if (!ownsRun(store.getRun(runId), principalId(request)))
       return reply.code(404).send({
         error: {
           code: "run_not_found",

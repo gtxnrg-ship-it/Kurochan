@@ -223,6 +223,20 @@ describe("Kuro-chan OAuth API", () => {
     });
     expect(crossedRun.statusCode).toBe(404);
 
+    const crossedEvents = await app.inject({
+      method: "GET",
+      url: "/v1/runs/run-alice/events",
+      headers: { authorization: "Bearer " + bobToken },
+    });
+    expect(crossedEvents.statusCode).toBe(404);
+
+    const crossedArtifacts = await app.inject({
+      method: "GET",
+      url: "/v1/runs/run-alice/artifacts",
+      headers: { authorization: "Bearer " + bobToken },
+    });
+    expect(crossedArtifacts.statusCode).toBe(404);
+
     const ownedRun = await app.inject({
       method: "GET",
       url: "/v1/runs/run-alice",
