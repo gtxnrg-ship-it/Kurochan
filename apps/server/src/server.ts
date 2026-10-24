@@ -598,6 +598,99 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     providers: registry.statuses,
   }));
 
+  // Model discovery never exposes provider credentials. Cache the normalized
+  // catalog briefly so opening the model picker does not repeatedly call vendors.
+  let modelCatalogCache:
+    | { expiresAt: number; value: Record<string, unknown> }
+    | undefined;
+  app.get("/v1/models", async () => {
+    const now = Date.now();
+    if (modelCatalogCache && modelCatalogCache.expiresAt > now)
+      return modelCatalogCache.value;
+
+    const providers = await Promise.all(
+      registry.statuses.map(async (status) => {
+        const provider = registry.providers.get(status.id);
+        if (!provider?.isConfigured) {
+          return {
+            providerId: status.id,
+            name: status.name,
+            configured: false,
+            catalogAvailable: false,
+            models: [],
+          };
+        }
+
+        const defaultModel = provider.defaultModel;
+        try {
+          const discovered = provider.listModels
+            ? await provider.listModels()
+            : [];
+          const models =
+            discovered.length > 0
+              ? discovered
+              : defaultModel
+                ? [{ id: defaultModel, name: defaultModel }]
+                : [];
+          return {
+            providerId: status.id,
+            name: status.name,
+            configured: true,
+            catalogAvailable: discovered.length > 0,
+            ...(discovered.length > 0
+              ? {}
+              : {
+                  catalogNote:
+                    "The provider did not return a model catalog; showing its configured default.",
+                }),
+            models: models.map((model) => ({
+              ...model,
+              value: status.id + "/" + model.id,
+              isDefault: model.id === defaultModel,
+            })),
+          };
+        } catch {
+          // Do not send raw provider errors to the browser, as they can contain
+          // account, endpoint, or credential-adjacent diagnostic details.
+          const models = defaultModel
+            ? [
+                {
+                  id: defaultModel,
+                  name: defaultModel,
+                  value: status.id + "/" + defaultModel,
+                  isDefault: true,
+                },
+              ]
+            : [];
+          return {
+            providerId: status.id,
+            name: status.name,
+            configured: true,
+            catalogAvailable: false,
+            catalogNote:
+              "The upstream model catalog is unavailable; showing its configured default.",
+            models,
+          };
+        }
+      }),
+    );
+
+    const value = {
+      name: "OmniRoute",
+      profiles: [
+        { id: "auto", label: "Auto · OmniRoute" },
+        { id: "fast", label: "Fast" },
+        { id: "balanced", label: "Balanced" },
+        { id: "quality", label: "Quality" },
+      ],
+      providers,
+      fetchedAt: new Date(now).toISOString(),
+      cacheTtlMs: 300_000,
+    };
+    modelCatalogCache = { expiresAt: now + 300_000, value };
+    return value;
+  });
+
   app.get("/v1/workers", async (request, reply) => {
     const query = request.query as Record<string, unknown>;
     let staleAfterMs: number;
