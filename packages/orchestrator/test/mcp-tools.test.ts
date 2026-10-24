@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   McpToolRuntime,
+  redactMcpSensitiveValues,
   type McpClientAdapter,
   type McpServerConfig,
 } from "../src/mcp-tools.js";
@@ -171,6 +172,85 @@ describe("McpToolRuntime", () => {
     });
     await runtime.close();
     expect(client.close).toHaveBeenCalledOnce();
+  });
+
+  it("redacts credential fields and token-shaped strings from tool results", async () => {
+    const githubToken = "ghp_" + "A".repeat(36);
+    const bearerToken = "B".repeat(40);
+    const client = adapter([readonlyTool], async () => ({
+      isError: false,
+      credentials: {
+        access_token: "access-secret",
+        refreshToken: "refresh-secret",
+        nested: { password: "password-secret" },
+      },
+      content: [
+        { type: "text", text: "Authorization: Bearer " + bearerToken },
+        { type: "text", text: "GitHub token: " + githubToken },
+        { type: "text", text: "A safe status message." },
+      ],
+    }));
+    const runtime = new McpToolRuntime({
+      servers: [serverConfig],
+      connectorFactory: () => client,
+    });
+
+    const result = await runtime.execute({
+      serverId: "records",
+      toolName: "search_records",
+      arguments: { query: "status" },
+    });
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain("access-secret");
+    expect(serialized).not.toContain("refresh-secret");
+    expect(serialized).not.toContain("password-secret");
+    expect(serialized).not.toContain(bearerToken);
+    expect(serialized).not.toContain(githubToken);
+    expect(serialized).toContain("A safe status message.");
+    expect(serialized).toContain("[REDACTED_SECRET]");
+    await runtime.close();
+  });
+
+  it("returns a typed error for undefined or non-JSON MCP results", async () => {
+    const client = adapter([readonlyTool], async () => undefined);
+    const runtime = new McpToolRuntime({
+      servers: [serverConfig],
+      connectorFactory: () => client,
+    });
+
+    const result = await runtime.execute({
+      serverId: "records",
+      toolName: "search_records",
+      arguments: { query: "status" },
+    });
+    expect(result).toMatchObject({
+      name: "mcp.call",
+      ok: false,
+      error: {
+        code: "invalid_result",
+        message: "MCP tool returned a value that cannot be represented as JSON.",
+      },
+    });
+    await runtime.close();
+  });
+
+  it("redacts sensitive values when preparing approval previews", () => {
+    const safe = redactMcpSensitiveValues({
+      query: "find records",
+      authorization: "Bearer B".repeat(20),
+      connection: {
+        apiKey: "visible-key",
+        status: "healthy",
+      },
+    });
+    expect(safe).toEqual({
+      query: "find records",
+      authorization: "[REDACTED_SECRET]",
+      connection: {
+        apiKey: "[REDACTED_SECRET]",
+        status: "healthy",
+      },
+    });
   });
 
   it("coalesces simultaneous server connections and caches discovery", async () => {
