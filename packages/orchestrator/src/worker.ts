@@ -1054,7 +1054,9 @@ export class TaskWorker {
           dependencyResults.length +
           " prerequisite result(s) with bounded evidence for this step.",
         {
-          sources: dependencyResults.flatMap((dependency) => dependency.evidence),
+          sources: dependencyResults.flatMap(
+            (dependency) => dependency.evidence,
+          ),
         },
       );
     }
