@@ -720,6 +720,15 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     }
   });
 
+  app.get("/v1/session", async (request) => ({
+    user: request.kurochanPrincipal ?? {
+      userId: "local",
+      provider: "local",
+      displayName: "Local workspace",
+    },
+    sessionDurationSeconds: oauth.isEnabled ? 8 * 60 * 60 : null,
+  }));
+
   app.get("/v1/config", async () => ({
     appName: "Kuro-chan",
     version: env.npm_package_version ?? "0.1.0",
