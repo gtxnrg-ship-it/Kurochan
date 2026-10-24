@@ -264,11 +264,11 @@ function boundedJsonValue(value: unknown, maxCharacters: number): unknown {
 function boundedEvidence(evidence: readonly Evidence[]): readonly unknown[] {
   return evidence.slice(0, 1).map((item) => ({
     kind: boundedText(item.kind, 80),
-    summary: boundedText(item.summary, 350),
-    ...(item.uri ? { uri: boundedText(item.uri, 500) } : {}),
+    summary: boundedText(item.summary, 250),
+    ...(item.uri ? { uri: boundedText(item.uri, 300) } : {}),
     ...(item.metadata === undefined
       ? {}
-      : { metadata: boundedJsonValue(item.metadata, 500) }),
+      : { metadata: boundedJsonValue(item.metadata, 300) }),
   }));
 }
 
@@ -279,8 +279,8 @@ export function selectMcpToolsForContext(
   readonly omittedCount: number;
 } {
   const maxTools = 6;
-  const maxSchemaCharacters = 1_600;
-  let remainingSchemaCharacters = 9_000;
+  const maxSchemaCharacters = 1_400;
+  let remainingSchemaCharacters = 7_000;
   const tools: McpToolDescriptor[] = [];
   for (const tool of rankedTools) {
     if (tools.length >= maxTools) break;
@@ -913,7 +913,7 @@ export class TaskWorker {
     try {
       supplementalSkills = await this.communitySkills.selectForTask(
         run.goal + " " + task.objective,
-        { maxSkills: 3, maxCharacters: 5_000 },
+        { maxSkills: 3, maxCharacters: 4_000 }, 
       );
     } catch (error) {
       this.options.onError?.(error);
@@ -944,16 +944,16 @@ export class TaskWorker {
               instructions: profileText(agent.instructions, 16_000),
             },
             completedDependencies: dependencyResults
-              .slice(0, 4)
+              .slice(0, 3)
               .map((dependency) => ({
                 taskId: dependency.taskId,
                 planKey: dependency.planKey,
                 agentId: dependency.agentId,
-                objective: boundedText(dependency.objective, 800),
-                output: boundedJsonValue(dependency.output, 1_200),
+                objective: boundedText(dependency.objective, 600),
+                output: boundedJsonValue(dependency.output, 1_000),
                 evidence: boundedEvidence(dependency.evidence),
               })),
-            omittedDependencyCount: Math.max(0, dependencyResults.length - 4),
+            omittedDependencyCount: Math.max(0, dependencyResults.length - 3),
             communitySkills: supplementalSkills.map(
             ({
               id,
