@@ -133,7 +133,10 @@ export function isOAuthEnvironmentConfigured(
   const apiOrigin = originOf(env.KUROCHAN_PUBLIC_API_URL);
   const webOrigin = originOf(env.WEB_ORIGIN);
   if (secret.length < 32 || !apiOrigin || !webOrigin) return false;
-  if (!isLoopback(apiOrigin) && (!apiOrigin.startsWith("https://") || !webOrigin.startsWith("https://"))) {
+  if (
+    (!isLoopback(apiOrigin) || !isLoopback(webOrigin)) &&
+    (!apiOrigin.startsWith("https://") || !webOrigin.startsWith("https://"))
+  ) {
     return false;
   }
   const github = Boolean(
