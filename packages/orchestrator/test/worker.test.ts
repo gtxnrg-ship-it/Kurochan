@@ -125,7 +125,9 @@ describe("Bounded worker context", () => {
               result: {
                 path: "src/file-" + round + ".ts",
                 content:
-                  "raw-payload-" + round + "-" + "x".repeat(5_000),
+                  round === 5
+                    ? "latest-result"
+                    : "raw-payload-" + round + "-" + "x".repeat(15_000),
               },
               evidence: [],
             },
