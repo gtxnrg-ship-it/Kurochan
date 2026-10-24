@@ -3410,13 +3410,16 @@ input::placeholder {
   color: #a1a1aa;
 }
 
-
 .auth-provider-panel {
   margin-top: 18px;
   padding: 16px;
   border: 1px solid rgba(206, 214, 198, 0.9);
   border-radius: 15px;
-  background: linear-gradient(145deg, rgba(255, 255, 252, 0.86), rgba(242, 245, 235, 0.74));
+  background: linear-gradient(
+    145deg,
+    rgba(255, 255, 252, 0.86),
+    rgba(242, 245, 235, 0.74)
+  );
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 .auth-provider-panel[hidden] {
@@ -3491,4 +3494,3 @@ input::placeholder {
     min-height: 44px;
   }
 }
-

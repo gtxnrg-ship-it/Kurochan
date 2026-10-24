@@ -279,8 +279,11 @@ function renderAuthProviderPanel() {
       "Signed in as " + (state.authUser.displayName || "your account"),
     );
     note.textContent = state.authUser.email
-      ? state.authUser.email + " · " + (state.authUser.provider === "google" ? "Google" : "GitHub")
-      : "Connected with " + (state.authUser.provider === "google" ? "Google" : "GitHub");
+      ? state.authUser.email +
+        " · " +
+        (state.authUser.provider === "google" ? "Google" : "GitHub")
+      : "Connected with " +
+        (state.authUser.provider === "google" ? "Google" : "GitHub");
     signOutRow.hidden = false;
   } else if (state.authStatus?.enabled && providers.length) {
     panel.hidden = false;
@@ -295,17 +298,25 @@ function renderAuthProviderPanel() {
   }
 
   for (const provider of providers) {
-    const button = makeElement("button", "button button-subtle auth-provider-button");
+    const button = makeElement(
+      "button",
+      "button button-subtle auth-provider-button",
+    );
     button.type = "button";
     button.dataset.oauthProvider = provider.id;
     button.append(
-      makeElement("span", "auth-provider-logo", provider.id === "github" ? "⌘" : "G"),
+      makeElement(
+        "span",
+        "auth-provider-logo",
+        provider.id === "github" ? "⌘" : "G",
+      ),
       makeElement("span", "", "Continue with " + provider.name),
     );
     button.addEventListener("click", () => {
       try {
         const base = normalizeApiBaseUrl(state.apiBaseUrl);
-        location.href = base + "/auth/" + encodeURIComponent(provider.id) + "/start";
+        location.href =
+          base + "/auth/" + encodeURIComponent(provider.id) + "/start";
       } catch (error) {
         showToast(errorMessage(error), "error");
       }
@@ -358,11 +369,16 @@ async function handleOAuthReturn() {
     const friendly = {
       oauth_not_configured: "Account sign-in is not configured on this server.",
       oauth_provider_unavailable: "That sign-in provider is not configured.",
-      oauth_state_invalid: "The sign-in could not be verified. Please try again.",
+      oauth_state_invalid:
+        "The sign-in could not be verified. Please try again.",
       oauth_state_expired: "The sign-in took too long. Please try again.",
-      email_not_verified: "The Google account must have a verified email address.",
+      email_not_verified:
+        "The Google account must have a verified email address.",
     };
-    showToast(friendly[errorCode] || "Sign-in did not complete. Please try again.", "error");
+    showToast(
+      friendly[errorCode] || "Sign-in did not complete. Please try again.",
+      "error",
+    );
     return;
   }
 
@@ -371,7 +387,10 @@ async function handleOAuthReturn() {
     state.apiToken = session.token;
     state.authUser = session.user;
     sessionStorage.setItem(API_TOKEN_KEY, session.token);
-    showToast("Signed in as " + (session.user?.displayName || "your account") + ".", "success");
+    showToast(
+      "Signed in as " + (session.user?.displayName || "your account") + ".",
+      "success",
+    );
   } catch (error) {
     state.apiToken = "";
     state.authUser = null;
@@ -395,7 +414,8 @@ async function refreshConnection({ quiet = true } = {}) {
         : [];
       const currentSession = await api.session().catch(() => null);
       state.authUser =
-        currentSession?.user?.provider && currentSession.user.provider !== "local"
+        currentSession?.user?.provider &&
+        currentSession.user.provider !== "local"
           ? currentSession.user
           : null;
       updateConnectionBadge("Connected", "is-online");
@@ -405,7 +425,9 @@ async function refreshConnection({ quiet = true } = {}) {
         state.authUser = null;
         state.apiToken = "";
         sessionStorage.removeItem(API_TOKEN_KEY);
-        state.authStatus = await api.authProviders().catch(() => state.authStatus);
+        state.authStatus = await api
+          .authProviders()
+          .catch(() => state.authStatus);
         updateConnectionBadge(
           state.authStatus?.enabled ? "Sign in required" : "Token needed",
           "is-warning",

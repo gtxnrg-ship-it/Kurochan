@@ -944,7 +944,6 @@ describe("RunStore", () => {
     }
   });
 
-
   it("scopes run lists to the requested owner and preserves unowned legacy runs for local mode", () => {
     const store = makeStore();
     try {
@@ -955,7 +954,11 @@ describe("RunStore", () => {
           profile: "balanced",
           createdBy: "local",
           tasks: [
-            { key: "task", agentId: "engineering/backend-architect", objective: "Local task" },
+            {
+              key: "task",
+              agentId: "engineering/backend-architect",
+              objective: "Local task",
+            },
           ],
         },
         100,
@@ -967,7 +970,11 @@ describe("RunStore", () => {
           profile: "balanced",
           createdBy: "github:101",
           tasks: [
-            { key: "task", agentId: "engineering/backend-architect", objective: "Alice task" },
+            {
+              key: "task",
+              agentId: "engineering/backend-architect",
+              objective: "Alice task",
+            },
           ],
         },
         110,
@@ -979,19 +986,32 @@ describe("RunStore", () => {
           profile: "balanced",
           createdBy: "github:202",
           tasks: [
-            { key: "task", agentId: "engineering/backend-architect", objective: "Bob task" },
+            {
+              key: "task",
+              agentId: "engineering/backend-architect",
+              objective: "Bob task",
+            },
           ],
         },
         120,
       );
 
-      expect(store.listRuns(50, undefined, "local").map((run) => run.id)).toEqual(["run-local"]);
-      expect(store.listRuns(50, undefined, "github:101").map((run) => run.id)).toEqual(["run-alice"]);
-      expect(store.listRuns(50, 115, "github:101").map((run) => run.id)).toEqual(["run-alice"]);
-      expect(store.listRuns(50).map((run) => run.id)).toEqual(["run-bob", "run-alice", "run-local"]);
+      expect(
+        store.listRuns(50, undefined, "local").map((run) => run.id),
+      ).toEqual(["run-local"]);
+      expect(
+        store.listRuns(50, undefined, "github:101").map((run) => run.id),
+      ).toEqual(["run-alice"]);
+      expect(
+        store.listRuns(50, 115, "github:101").map((run) => run.id),
+      ).toEqual(["run-alice"]);
+      expect(store.listRuns(50).map((run) => run.id)).toEqual([
+        "run-bob",
+        "run-alice",
+        "run-local",
+      ]);
     } finally {
       store.close();
     }
   });
-
 });

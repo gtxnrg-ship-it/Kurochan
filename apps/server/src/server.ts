@@ -191,7 +191,8 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   const store =
     options.store ??
     new RunStore(env.KUROCHAN_DB_PATH?.trim() || "data/kurochan.sqlite");
-  const oauth = options.oauth ?? new OAuthService(env, undefined, Date.now, store);
+  const oauth =
+    options.oauth ?? new OAuthService(env, undefined, Date.now, store);
   const catalog = options.catalog ?? new AgentCatalog();
   const communitySkills =
     options.communitySkills ?? new CommunitySkillCatalog();
@@ -460,18 +461,30 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     const parsedProvider = oauthProviderSchema.safeParse(params.provider);
     if (!parsedProvider.success) {
       return reply.code(404).send({
-        error: { code: "oauth_provider_unavailable", message: "That sign-in provider is not supported." },
+        error: {
+          code: "oauth_provider_unavailable",
+          message: "That sign-in provider is not supported.",
+        },
       });
     }
     try {
       const start = oauth.start(parsedProvider.data);
       return reply.header("set-cookie", start.cookie).redirect(start.url);
     } catch (error) {
-      const typed = error instanceof OAuthError
-        ? error
-        : new OAuthError("oauth_start_failed", "Sign-in could not be started.", 500);
+      const typed =
+        error instanceof OAuthError
+          ? error
+          : new OAuthError(
+              "oauth_start_failed",
+              "Sign-in could not be started.",
+              500,
+            );
       return reply.code(typed.status).send({
-        error: { code: typed.code, message: typed.message, retryable: typed.status >= 500 },
+        error: {
+          code: typed.code,
+          message: typed.message,
+          retryable: typed.status >= 500,
+        },
       });
     }
   });
@@ -480,7 +493,9 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     const params = request.params as { provider?: string };
     const parsedProvider = oauthProviderSchema.safeParse(params.provider);
     if (!parsedProvider.success) {
-      return reply.redirect(oauth.signInErrorRedirect("oauth_provider_unavailable"));
+      return reply.redirect(
+        oauth.signInErrorRedirect("oauth_provider_unavailable"),
+      );
     }
     const query = request.query as Record<string, unknown>;
     const code = typeof query.code === "string" ? query.code : "";
@@ -499,7 +514,10 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       const typed = error instanceof OAuthError ? error : undefined;
       const code = typed?.code ?? "oauth_failed";
       return reply
-        .header("set-cookie", clearOAuthStateCookie(parsedProvider.data, oauth.usesHttps))
+        .header(
+          "set-cookie",
+          clearOAuthStateCookie(parsedProvider.data, oauth.usesHttps),
+        )
         .redirect(oauth.signInErrorRedirect(code));
     }
   });
@@ -508,22 +526,41 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     "/auth/session/exchange",
     { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } },
     async (request, reply) => {
-      const body = z.object({ code: z.string().trim().min(20).max(256) }).strict().safeParse(request.body);
+      const body = z
+        .object({ code: z.string().trim().min(20).max(256) })
+        .strict()
+        .safeParse(request.body);
       if (!body.success) {
         return reply.code(400).send({
-          error: { code: "invalid_oauth_code", message: "A valid single-use sign-in code is required.", retryable: false },
+          error: {
+            code: "invalid_oauth_code",
+            message: "A valid single-use sign-in code is required.",
+            retryable: false,
+          },
         });
       }
       try {
         const session = oauth.exchangeCode(body.data.code);
         return reply.header("cache-control", "no-store").send(session);
       } catch (error) {
-        const typed = error instanceof OAuthError
-          ? error
-          : new OAuthError("oauth_exchange_failed", "Sign-in could not be completed.", 500);
-        return reply.code(typed.status).header("cache-control", "no-store").send({
-          error: { code: typed.code, message: typed.message, retryable: typed.status >= 500 },
-        });
+        const typed =
+          error instanceof OAuthError
+            ? error
+            : new OAuthError(
+                "oauth_exchange_failed",
+                "Sign-in could not be completed.",
+                500,
+              );
+        return reply
+          .code(typed.status)
+          .header("cache-control", "no-store")
+          .send({
+            error: {
+              code: typed.code,
+              message: typed.message,
+              retryable: typed.status >= 500,
+            },
+          });
       }
     },
   );
@@ -546,7 +583,9 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       return;
     }
 
-    const principal = candidate ? oauth.verifySessionToken(candidate) : undefined;
+    const principal = candidate
+      ? oauth.verifySessionToken(candidate)
+      : undefined;
     if (principal) {
       request.kurochanPrincipal = principal;
       return;
@@ -744,9 +783,8 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     const isApiToken = Boolean(
       candidate && apiToken && safeEqual(candidate, apiToken),
     );
-    const revoked = candidate && !isApiToken
-      ? oauth.revokeSessionToken(candidate)
-      : false;
+    const revoked =
+      candidate && !isApiToken ? oauth.revokeSessionToken(candidate) : false;
     return reply.header("cache-control", "no-store").send({
       signedOut: true,
       revoked,
@@ -1791,7 +1829,11 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         },
       });
     }
-    const data = store.listConversations({ limit, offset, createdBy: principalId(request) });
+    const data = store.listConversations({
+      limit,
+      offset,
+      createdBy: principalId(request),
+    });
     return {
       data,
       pagination: { limit, offset, returned: data.length },

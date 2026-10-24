@@ -78,7 +78,8 @@ function originOf(raw: string | undefined): string | undefined {
     const local = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(
       url.hostname.toLowerCase(),
     );
-    if (url.username || url.password || url.search || url.hash) return undefined;
+    if (url.username || url.password || url.search || url.hash)
+      return undefined;
     if (url.pathname !== "/" && url.pathname !== "") return undefined;
     if (url.protocol !== "https:" && !(local && url.protocol === "http:")) {
       return undefined;
@@ -119,7 +120,8 @@ export function readOAuthStateCookie(
   const cookieName = COOKIE_PREFIX + provider;
   for (const part of (cookieHeader ?? "").split(";")) {
     const separator = part.indexOf("=");
-    if (separator < 0 || part.slice(0, separator).trim() !== cookieName) continue;
+    if (separator < 0 || part.slice(0, separator).trim() !== cookieName)
+      continue;
     try {
       return decodeURIComponent(part.slice(separator + 1).trim());
     } catch {
@@ -133,8 +135,12 @@ export function clearOAuthStateCookie(
   provider: OAuthProviderId,
   secure: boolean,
 ): string {
-  return COOKIE_PREFIX + provider + "=; Path=/auth; Max-Age=0; HttpOnly; SameSite=Lax" +
-    (secure ? "; Secure" : "");
+  return (
+    COOKIE_PREFIX +
+    provider +
+    "=; Path=/auth; Max-Age=0; HttpOnly; SameSite=Lax" +
+    (secure ? "; Secure" : "")
+  );
 }
 
 export function isOAuthEnvironmentConfigured(
@@ -151,10 +157,12 @@ export function isOAuthEnvironmentConfigured(
     return false;
   }
   const github = Boolean(
-    env.GITHUB_OAUTH_CLIENT_ID?.trim() && env.GITHUB_OAUTH_CLIENT_SECRET?.trim(),
+    env.GITHUB_OAUTH_CLIENT_ID?.trim() &&
+    env.GITHUB_OAUTH_CLIENT_SECRET?.trim(),
   );
   const google = Boolean(
-    env.GOOGLE_OAUTH_CLIENT_ID?.trim() && env.GOOGLE_OAUTH_CLIENT_SECRET?.trim(),
+    env.GOOGLE_OAUTH_CLIENT_ID?.trim() &&
+    env.GOOGLE_OAUTH_CLIENT_SECRET?.trim(),
   );
   return github || google;
 }
@@ -164,8 +172,14 @@ export class OAuthService {
   private readonly apiOrigin: string | undefined;
   private readonly webOrigin: string | undefined;
   private readonly providers = new Map<OAuthProviderId, ProviderConfig>();
-  private readonly states = new Map<string, { provider: OAuthProviderId; at: number }>();
-  private readonly codes = new Map<string, { principal: Omit<AuthPrincipal, "expiresAt">; expiresAt: number }>();
+  private readonly states = new Map<
+    string,
+    { provider: OAuthProviderId; at: number }
+  >();
+  private readonly codes = new Map<
+    string,
+    { principal: Omit<AuthPrincipal, "expiresAt">; expiresAt: number }
+  >();
 
   constructor(
     private readonly env: Readonly<Record<string, string | undefined>>,
@@ -197,9 +211,11 @@ export class OAuthService {
   }
 
   get isEnabled(): boolean {
-    return this.secret.length >= 32 &&
+    return (
+      this.secret.length >= 32 &&
       Boolean(this.apiOrigin && this.webOrigin) &&
-      isOAuthEnvironmentConfigured(this.env);
+      isOAuthEnvironmentConfigured(this.env)
+    );
   }
 
   get usesHttps(): boolean {
@@ -221,20 +237,29 @@ export class OAuthService {
 
   start(providerId: OAuthProviderId): { url: string; cookie: string } {
     if (!this.isEnabled) {
-      throw new OAuthError("oauth_not_configured", "OAuth sign-in is not configured.", 503);
+      throw new OAuthError(
+        "oauth_not_configured",
+        "OAuth sign-in is not configured.",
+        503,
+      );
     }
     const provider = this.providers.get(providerId);
     if (!provider) {
-      throw new OAuthError("oauth_provider_unavailable", "That provider is not configured.", 404);
+      throw new OAuthError(
+        "oauth_provider_unavailable",
+        "That provider is not configured.",
+        404,
+      );
     }
     this.prune();
     this.makeRoom(this.states);
     const state = randomCode();
     this.states.set(state, { provider: providerId, at: this.now() });
     const callback = this.callbackUrl(providerId);
-    const url = providerId === "github"
-      ? new URL("https://github.com/login/oauth/authorize")
-      : new URL("https://accounts.google.com/o/oauth2/v2/auth");
+    const url =
+      providerId === "github"
+        ? new URL("https://github.com/login/oauth/authorize")
+        : new URL("https://accounts.google.com/o/oauth2/v2/auth");
     url.searchParams.set("client_id", provider.clientId);
     url.searchParams.set("redirect_uri", callback);
     url.searchParams.set("response_type", "code");
@@ -246,7 +271,11 @@ export class OAuthService {
       url.searchParams.set("scope", "openid email profile");
       url.searchParams.set("prompt", "select_account");
     }
-    const cookie = COOKIE_PREFIX + providerId + "=" + encodeURIComponent(state) +
+    const cookie =
+      COOKIE_PREFIX +
+      providerId +
+      "=" +
+      encodeURIComponent(state) +
       "; Path=/auth; Max-Age=600; HttpOnly; SameSite=Lax" +
       (this.usesHttps ? "; Secure" : "");
     return { url: url.toString(), cookie };
@@ -259,38 +288,75 @@ export class OAuthService {
     cookieState: string | undefined,
   ): Promise<{ redirectUrl: string; clearCookie: string }> {
     if (!this.isEnabled || !this.providers.has(providerId)) {
-      throw new OAuthError("oauth_not_configured", "Sign-in is not configured.", 503);
+      throw new OAuthError(
+        "oauth_not_configured",
+        "Sign-in is not configured.",
+        503,
+      );
     }
-    if (!code || code.length > 4096 || !state || state.length > 200 ||
-        !cookieState || !secureEqual(state, cookieState)) {
-      throw new OAuthError("oauth_state_invalid", "Sign-in state validation failed.");
+    if (
+      !code ||
+      code.length > 4096 ||
+      !state ||
+      state.length > 200 ||
+      !cookieState ||
+      !secureEqual(state, cookieState)
+    ) {
+      throw new OAuthError(
+        "oauth_state_invalid",
+        "Sign-in state validation failed.",
+      );
     }
     const pending = this.states.get(state);
     this.states.delete(state);
-    if (!pending || pending.provider !== providerId || this.now() - pending.at > STATE_TTL_MS) {
-      throw new OAuthError("oauth_state_expired", "Sign-in expired. Please try again.");
+    if (
+      !pending ||
+      pending.provider !== providerId ||
+      this.now() - pending.at > STATE_TTL_MS
+    ) {
+      throw new OAuthError(
+        "oauth_state_expired",
+        "Sign-in expired. Please try again.",
+      );
     }
-    const principal = providerId === "github"
-      ? await this.githubIdentity(code)
-      : await this.googleIdentity(code);
+    const principal =
+      providerId === "github"
+        ? await this.githubIdentity(code)
+        : await this.googleIdentity(code);
     this.prune();
     this.makeRoom(this.codes);
     const oneTimeCode = randomCode();
-    this.codes.set(oneTimeCode, { principal, expiresAt: this.now() + CODE_TTL_MS });
+    this.codes.set(oneTimeCode, {
+      principal,
+      expiresAt: this.now() + CODE_TTL_MS,
+    });
     return {
-      redirectUrl: this.webOrigin + "/#auth_code=" + encodeURIComponent(oneTimeCode),
+      redirectUrl:
+        this.webOrigin + "/#auth_code=" + encodeURIComponent(oneTimeCode),
       clearCookie: clearOAuthStateCookie(providerId, this.usesHttps),
     };
   }
 
-  exchangeCode(code: string): { token: string; user: AuthPrincipal; expiresAt: number } {
+  exchangeCode(code: string): {
+    token: string;
+    user: AuthPrincipal;
+    expiresAt: number;
+  } {
     if (!this.isEnabled) {
-      throw new OAuthError("oauth_not_configured", "Sign-in is not configured.", 503);
+      throw new OAuthError(
+        "oauth_not_configured",
+        "Sign-in is not configured.",
+        503,
+      );
     }
     const pending = this.codes.get(code);
     this.codes.delete(code);
     if (!pending || pending.expiresAt <= this.now()) {
-      throw new OAuthError("oauth_code_expired", "That sign-in code expired or was already used.", 400);
+      throw new OAuthError(
+        "oauth_code_expired",
+        "That sign-in code expired or was already used.",
+        400,
+      );
     }
     const issuedAt = Math.floor(this.now() / 1000);
     const expiresAt = issuedAt + SESSION_SECONDS;
@@ -305,7 +371,9 @@ export class OAuthService {
       jti: randomCode(),
     };
     const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
-    const signature = createHmac("sha256", this.secret).update(encoded).digest("base64url");
+    const signature = createHmac("sha256", this.secret)
+      .update(encoded)
+      .digest("base64url");
     return {
       token: encoded + "." + signature,
       user: { ...pending.principal, expiresAt: expiresAt * 1000 },
@@ -319,10 +387,16 @@ export class OAuthService {
     if (parts.length !== 2 || !parts[0] || !parts[1]) return undefined;
     const decoded = decodeBase64Url(parts[0]);
     if (!decoded) return undefined;
-    const expected = createHmac("sha256", this.secret).update(parts[0]).digest("base64url");
+    const expected = createHmac("sha256", this.secret)
+      .update(parts[0])
+      .digest("base64url");
     if (!secureEqual(parts[1], expected)) return undefined;
     let value: unknown;
-    try { value = JSON.parse(decoded.toString("utf8")); } catch { return undefined; }
+    try {
+      value = JSON.parse(decoded.toString("utf8"));
+    } catch {
+      return undefined;
+    }
     if (!value || typeof value !== "object") return undefined;
     const payload = value as Partial<TokenPayload>;
     const now = Math.floor(this.now() / 1000);
@@ -335,14 +409,21 @@ export class OAuthService {
       !this.providers.has(payload.provider) ||
       typeof payload.jti !== "string" ||
       !/^[A-Za-z0-9_-]{32,100}$/.test(payload.jti) ||
-      typeof payload.name !== "string" || !payload.name.trim() ||
-      typeof payload.iat !== "number" || !Number.isInteger(payload.iat) ||
+      typeof payload.name !== "string" ||
+      !payload.name.trim() ||
+      typeof payload.iat !== "number" ||
+      !Number.isInteger(payload.iat) ||
       payload.iat > now + 60 ||
-      typeof payload.exp !== "number" || !Number.isInteger(payload.exp) ||
-      payload.exp <= now || payload.exp - payload.iat > SESSION_SECONDS
-    ) return undefined;
+      typeof payload.exp !== "number" ||
+      !Number.isInteger(payload.exp) ||
+      payload.exp <= now ||
+      payload.exp - payload.iat > SESSION_SECONDS
+    )
+      return undefined;
     try {
-      if (this.revocationStore?.isOAuthSessionRevoked(payload.jti, this.now())) {
+      if (
+        this.revocationStore?.isOAuthSessionRevoked(payload.jti, this.now())
+      ) {
         return undefined;
       }
     } catch {
@@ -353,7 +434,9 @@ export class OAuthService {
       userId: payload.sub,
       provider: payload.provider,
       displayName: payload.name.slice(0, 200),
-      ...(typeof payload.email === "string" && payload.email.length <= 320 ? { email: payload.email } : {}),
+      ...(typeof payload.email === "string" && payload.email.length <= 320
+        ? { email: payload.email }
+        : {}),
       expiresAt: payload.exp * 1000,
     };
   }
@@ -394,34 +477,67 @@ export class OAuthService {
 
   signInErrorRedirect(code = "oauth_failed"): string {
     const allowed = new Set([
-      "oauth_failed", "oauth_not_configured", "oauth_provider_unavailable",
-      "oauth_state_invalid", "oauth_state_expired", "email_not_verified",
+      "oauth_failed",
+      "oauth_not_configured",
+      "oauth_provider_unavailable",
+      "oauth_state_invalid",
+      "oauth_state_expired",
+      "email_not_verified",
     ]);
     const reason = allowed.has(code) ? code : "oauth_failed";
-    return (this.webOrigin ?? "http://127.0.0.1:5173") + "/#auth_error=" + encodeURIComponent(reason);
+    return (
+      (this.webOrigin ?? "http://127.0.0.1:5173") +
+      "/#auth_error=" +
+      encodeURIComponent(reason)
+    );
   }
 
   private callbackUrl(provider: OAuthProviderId): string {
     return this.apiOrigin + "/auth/" + provider + "/callback";
   }
 
-  private async githubIdentity(code: string): Promise<Omit<AuthPrincipal, "expiresAt">> {
+  private async githubIdentity(
+    code: string,
+  ): Promise<Omit<AuthPrincipal, "expiresAt">> {
     const provider = this.providers.get("github");
-    if (!provider) throw new OAuthError("oauth_provider_unavailable", "GitHub sign-in is unavailable.", 503);
-    const response = await this.fetchImpl("https://github.com/login/oauth/access_token", {
-      method: "POST",
-      headers: { accept: "application/json", "content-type": "application/json" },
-      body: JSON.stringify({
-        client_id: provider.clientId, client_secret: provider.clientSecret,
-        code, redirect_uri: this.callbackUrl("github"),
-      }),
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!response.ok) throw new OAuthError("oauth_exchange_failed", "GitHub sign-in could not be completed.", 502);
-    const token = await response.json() as Record<string, unknown>;
-    const accessToken = typeof token.access_token === "string" ? token.access_token : "";
+    if (!provider)
+      throw new OAuthError(
+        "oauth_provider_unavailable",
+        "GitHub sign-in is unavailable.",
+        503,
+      );
+    const response = await this.fetchImpl(
+      "https://github.com/login/oauth/access_token",
+      {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          client_id: provider.clientId,
+          client_secret: provider.clientSecret,
+          code,
+          redirect_uri: this.callbackUrl("github"),
+        }),
+        signal: AbortSignal.timeout(10_000),
+      },
+    );
+    if (!response.ok)
+      throw new OAuthError(
+        "oauth_exchange_failed",
+        "GitHub sign-in could not be completed.",
+        502,
+      );
+    const token = (await response.json()) as Record<string, unknown>;
+    const accessToken =
+      typeof token.access_token === "string" ? token.access_token : "";
     if (!accessToken || token.error) {
-      throw new OAuthError("oauth_exchange_failed", "GitHub sign-in could not be completed.", 502);
+      throw new OAuthError(
+        "oauth_exchange_failed",
+        "GitHub sign-in could not be completed.",
+        502,
+      );
     }
     const userResponse = await this.fetchImpl("https://api.github.com/user", {
       headers: {
@@ -431,37 +547,60 @@ export class OAuthService {
       },
       signal: AbortSignal.timeout(10_000),
     });
-    if (!userResponse.ok) throw new OAuthError("oauth_identity_failed", "GitHub identity could not be verified.", 502);
-    const user = await userResponse.json() as Record<string, unknown>;
-    if (!(typeof user.id === "number" || (typeof user.id === "string" && /^\d+$/.test(user.id))) ||
-        !Number.isSafeInteger(Number(user.id))) {
-      throw new OAuthError("oauth_identity_failed", "GitHub identity could not be verified.", 502);
+    if (!userResponse.ok)
+      throw new OAuthError(
+        "oauth_identity_failed",
+        "GitHub identity could not be verified.",
+        502,
+      );
+    const user = (await userResponse.json()) as Record<string, unknown>;
+    if (
+      !(
+        typeof user.id === "number" ||
+        (typeof user.id === "string" && /^\d+$/.test(user.id))
+      ) ||
+      !Number.isSafeInteger(Number(user.id))
+    ) {
+      throw new OAuthError(
+        "oauth_identity_failed",
+        "GitHub identity could not be verified.",
+        502,
+      );
     }
     let email: string | undefined;
     try {
-      const emailResponse = await this.fetchImpl("https://api.github.com/user/emails", {
-        headers: {
-          authorization: "Bearer " + accessToken,
-          accept: "application/vnd.github+json",
-          "user-agent": "Kuro-chan",
+      const emailResponse = await this.fetchImpl(
+        "https://api.github.com/user/emails",
+        {
+          headers: {
+            authorization: "Bearer " + accessToken,
+            accept: "application/vnd.github+json",
+            "user-agent": "Kuro-chan",
+          },
+          signal: AbortSignal.timeout(10_000),
         },
-        signal: AbortSignal.timeout(10_000),
-      });
+      );
       if (emailResponse.ok) {
-        const list = await emailResponse.json() as unknown;
+        const list = (await emailResponse.json()) as unknown;
         if (Array.isArray(list)) {
-          const primary = list.find((item) => item && typeof item === "object" &&
-            (item as Record<string, unknown>).primary === true &&
-            (item as Record<string, unknown>).verified === true &&
-            typeof (item as Record<string, unknown>).email === "string") as Record<string, unknown> | undefined;
+          const primary = list.find(
+            (item) =>
+              item &&
+              typeof item === "object" &&
+              (item as Record<string, unknown>).primary === true &&
+              (item as Record<string, unknown>).verified === true &&
+              typeof (item as Record<string, unknown>).email === "string",
+          ) as Record<string, unknown> | undefined;
           if (primary) email = (primary.email as string).slice(0, 320);
         }
       }
     } catch {
       // A verified GitHub ID is sufficient when no email is disclosed.
     }
-    const displayName = (typeof user.name === "string" && user.name.trim()) ||
-      (typeof user.login === "string" && user.login.trim()) || "GitHub user";
+    const displayName =
+      (typeof user.name === "string" && user.name.trim()) ||
+      (typeof user.login === "string" && user.login.trim()) ||
+      "GitHub user";
     return {
       userId: "github:" + String(user.id),
       provider: "github",
@@ -470,35 +609,83 @@ export class OAuthService {
     };
   }
 
-  private async googleIdentity(code: string): Promise<Omit<AuthPrincipal, "expiresAt">> {
+  private async googleIdentity(
+    code: string,
+  ): Promise<Omit<AuthPrincipal, "expiresAt">> {
     const provider = this.providers.get("google");
-    if (!provider) throw new OAuthError("oauth_provider_unavailable", "Google sign-in is unavailable.", 503);
+    if (!provider)
+      throw new OAuthError(
+        "oauth_provider_unavailable",
+        "Google sign-in is unavailable.",
+        503,
+      );
     const form = new URLSearchParams({
-      client_id: provider.clientId, client_secret: provider.clientSecret, code,
-      redirect_uri: this.callbackUrl("google"), grant_type: "authorization_code",
+      client_id: provider.clientId,
+      client_secret: provider.clientSecret,
+      code,
+      redirect_uri: this.callbackUrl("google"),
+      grant_type: "authorization_code",
     });
-    const response = await this.fetchImpl("https://oauth2.googleapis.com/token", {
-      method: "POST",
-      headers: { accept: "application/json", "content-type": "application/x-www-form-urlencoded" },
-      body: form.toString(),
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!response.ok) throw new OAuthError("oauth_exchange_failed", "Google sign-in could not be completed.", 502);
-    const token = await response.json() as Record<string, unknown>;
-    const accessToken = typeof token.access_token === "string" ? token.access_token : "";
-    if (!accessToken) throw new OAuthError("oauth_exchange_failed", "Google sign-in could not be completed.", 502);
-    const userResponse = await this.fetchImpl("https://openidconnect.googleapis.com/v1/userinfo", {
-      headers: { authorization: "Bearer " + accessToken, accept: "application/json" },
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!userResponse.ok) throw new OAuthError("oauth_identity_failed", "Google identity could not be verified.", 502);
-    const user = await userResponse.json() as Record<string, unknown>;
-    if (typeof user.sub !== "string" || !/^[A-Za-z0-9_-]{1,200}$/.test(user.sub) ||
-        user.email_verified !== true || typeof user.email !== "string" ||
-        !user.email.trim() || user.email.length > 320) {
-      throw new OAuthError("email_not_verified", "Google must return a verified email address to sign in.", 403);
+    const response = await this.fetchImpl(
+      "https://oauth2.googleapis.com/token",
+      {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: form.toString(),
+        signal: AbortSignal.timeout(10_000),
+      },
+    );
+    if (!response.ok)
+      throw new OAuthError(
+        "oauth_exchange_failed",
+        "Google sign-in could not be completed.",
+        502,
+      );
+    const token = (await response.json()) as Record<string, unknown>;
+    const accessToken =
+      typeof token.access_token === "string" ? token.access_token : "";
+    if (!accessToken)
+      throw new OAuthError(
+        "oauth_exchange_failed",
+        "Google sign-in could not be completed.",
+        502,
+      );
+    const userResponse = await this.fetchImpl(
+      "https://openidconnect.googleapis.com/v1/userinfo",
+      {
+        headers: {
+          authorization: "Bearer " + accessToken,
+          accept: "application/json",
+        },
+        signal: AbortSignal.timeout(10_000),
+      },
+    );
+    if (!userResponse.ok)
+      throw new OAuthError(
+        "oauth_identity_failed",
+        "Google identity could not be verified.",
+        502,
+      );
+    const user = (await userResponse.json()) as Record<string, unknown>;
+    if (
+      typeof user.sub !== "string" ||
+      !/^[A-Za-z0-9_-]{1,200}$/.test(user.sub) ||
+      user.email_verified !== true ||
+      typeof user.email !== "string" ||
+      !user.email.trim() ||
+      user.email.length > 320
+    ) {
+      throw new OAuthError(
+        "email_not_verified",
+        "Google must return a verified email address to sign in.",
+        403,
+      );
     }
-    const displayName = (typeof user.name === "string" && user.name.trim()) || user.email;
+    const displayName =
+      (typeof user.name === "string" && user.name.trim()) || user.email;
     return {
       userId: "google:" + user.sub,
       provider: "google",

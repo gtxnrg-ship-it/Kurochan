@@ -69,9 +69,9 @@ describe("OAuthService", () => {
     expect(first.cookie).toContain("HttpOnly");
     expect(first.cookie).toContain("SameSite=Lax");
     expect(first.cookie).toContain("Secure");
-    expect(
-      readOAuthStateCookie(first.cookie, "github"),
-    ).toBe(firstUrl.searchParams.get("state"));
+    expect(readOAuthStateCookie(first.cookie, "github")).toBe(
+      firstUrl.searchParams.get("state"),
+    );
     expect(service.publicStatus()).toMatchObject({
       enabled: true,
       providers: [
@@ -89,12 +89,20 @@ describe("OAuthService", () => {
           return jsonResponse({ access_token: "short-lived-provider-token" });
         }
         if (url === "https://api.github.com/user") {
-          return jsonResponse({ id: 123456, login: "kuro-user", name: "Kuro User" });
+          return jsonResponse({
+            id: 123456,
+            login: "kuro-user",
+            name: "Kuro User",
+          });
         }
         if (url === "https://api.github.com/user/emails") {
           return jsonResponse([
             { email: "kuro-user@example.test", primary: true, verified: true },
-            { email: "unverified@example.test", primary: false, verified: false },
+            {
+              email: "unverified@example.test",
+              primary: false,
+              verified: false,
+            },
           ]);
         }
         return jsonResponse({ error: "unexpected endpoint" }, 404);
@@ -109,10 +117,19 @@ describe("OAuthService", () => {
     const start = service.start("github");
     const state = new URL(start.url).searchParams.get("state")!;
     const cookieState = readOAuthStateCookie(start.cookie, "github");
-    const callback = await service.callback("github", "authorization-code", state, cookieState);
-    const oneTimeCode = new URL(callback.redirectUrl).hash.split("auth_code=")[1];
+    const callback = await service.callback(
+      "github",
+      "authorization-code",
+      state,
+      cookieState,
+    );
+    const oneTimeCode = new URL(callback.redirectUrl).hash.split(
+      "auth_code=",
+    )[1];
     expect(oneTimeCode).toBeTruthy();
-    expect(callback.redirectUrl).toContain("https://app.example.test/#auth_code=");
+    expect(callback.redirectUrl).toContain(
+      "https://app.example.test/#auth_code=",
+    );
     expect(callback.clearCookie).toContain("Max-Age=0");
 
     const session = service.exchangeCode(decodeURIComponent(oneTimeCode!));
@@ -130,19 +147,17 @@ describe("OAuthService", () => {
     });
     expect(session.token).not.toContain("short-lived-provider-token");
     expect(fetchImpl).toHaveBeenCalledTimes(3);
-    expect(() => service.exchangeCode(decodeURIComponent(oneTimeCode!))).toThrow(
-      expect.objectContaining({ code: "oauth_code_expired" }),
-    );
+    expect(() =>
+      service.exchangeCode(decodeURIComponent(oneTimeCode!)),
+    ).toThrow(expect.objectContaining({ code: "oauth_code_expired" }));
 
     now += 8 * 60 * 60 * 1000 + 1;
     expect(service.verifySessionToken(session.token)).toBeUndefined();
   });
 
   it("rejects state mismatches and consumes the state after a callback attempt", async () => {
-    const service = new OAuthService(
-      configuredEnvironment,
-      (async () => jsonResponse({})) as typeof fetch,
-    );
+    const service = new OAuthService(configuredEnvironment, (async () =>
+      jsonResponse({})) as typeof fetch);
     const start = service.start("google");
     const state = new URL(start.url).searchParams.get("state")!;
     await expect(
@@ -194,21 +209,24 @@ describe("OAuthService", () => {
 
   it("rejects modified bearer sessions and does not disclose OAuth configuration secrets", () => {
     const service = new OAuthService(configuredEnvironment);
-    const fakeToken = Buffer.from(
-      JSON.stringify({
-        iss: "kurochan",
-        sub: "github:1",
-        provider: "github",
-        name: "A user",
-        iat: 1_800_000_000,
-        exp: 1_800_028_800,
-      }),
-    ).toString("base64url") + ".not-a-valid-signature";
+    const fakeToken =
+      Buffer.from(
+        JSON.stringify({
+          iss: "kurochan",
+          sub: "github:1",
+          provider: "github",
+          name: "A user",
+          iat: 1_800_000_000,
+          exp: 1_800_028_800,
+        }),
+      ).toString("base64url") + ".not-a-valid-signature";
     expect(service.verifySessionToken(fakeToken)).toBeUndefined();
     const publicStatus = JSON.stringify(service.publicStatus());
     expect(publicStatus).not.toContain("github-client-secret");
     expect(publicStatus).not.toContain("google-client-secret");
-    expect(publicStatus).not.toContain(configuredEnvironment.KUROCHAN_SESSION_SECRET);
+    expect(publicStatus).not.toContain(
+      configuredEnvironment.KUROCHAN_SESSION_SECRET,
+    );
   });
 
   it("keeps unavailable providers unavailable instead of silently accepting them", () => {

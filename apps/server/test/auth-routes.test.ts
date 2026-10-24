@@ -1,14 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { RunStore } from "@kurochan/storage";
-import {
-  OAuthService,
-  readOAuthStateCookie,
-} from "../src/auth.js";
-import {
-  buildServer,
-  validateServerConfiguration,
-} from "../src/server.js";
+import { OAuthService, readOAuthStateCookie } from "../src/auth.js";
+import { buildServer, validateServerConfiguration } from "../src/server.js";
 
 const authEnvironment = {
   HOST: "127.0.0.1",
@@ -34,11 +28,14 @@ function makeOAuth() {
     async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       const url = String(input);
       if (url === "https://github.com/login/oauth/access_token") {
-        const body = JSON.parse(String(init?.body ?? "{}")) as { code?: string };
+        const body = JSON.parse(String(init?.body ?? "{}")) as {
+          code?: string;
+        };
         return response({ access_token: "access-" + (body.code ?? "unknown") });
       }
       if (url === "https://api.github.com/user") {
-        const authorization = new Headers(init?.headers).get("authorization") ?? "";
+        const authorization =
+          new Headers(init?.headers).get("authorization") ?? "";
         const alice = authorization.includes("access-alice-code");
         return response({
           id: alice ? 101 : 202,
@@ -47,7 +44,8 @@ function makeOAuth() {
         });
       }
       if (url === "https://api.github.com/user/emails") {
-        const authorization = new Headers(init?.headers).get("authorization") ?? "";
+        const authorization =
+          new Headers(init?.headers).get("authorization") ?? "";
         return response([
           {
             email: authorization.includes("access-alice-code")
@@ -72,10 +70,7 @@ function makeOAuth() {
       return response({ message: "unexpected test endpoint" }, 404);
     },
   );
-  const service = new OAuthService(
-    authEnvironment,
-    fetchImpl as typeof fetch,
-  );
+  const service = new OAuthService(authEnvironment, fetchImpl as typeof fetch);
   return { service, fetchImpl };
 }
 
@@ -129,7 +124,9 @@ describe("Kuro-chan OAuth API", () => {
       url: "/auth/google/start",
     });
     expect(start.statusCode).toBe(302);
-    expect(start.headers.location).toContain("accounts.google.com/o/oauth2/v2/auth");
+    expect(start.headers.location).toContain(
+      "accounts.google.com/o/oauth2/v2/auth",
+    );
     expect(start.headers["set-cookie"]).toContain("HttpOnly");
     expect(start.headers["set-cookie"]).toContain("SameSite=Lax");
     expect(start.headers["set-cookie"]).toContain("Secure");
@@ -199,9 +196,9 @@ describe("Kuro-chan OAuth API", () => {
       headers: { authorization: "Bearer " + aliceToken },
     });
     expect(aliceConversations.statusCode).toBe(200);
-    expect(aliceConversations.json().data.map((item: { id: string }) => item.id)).toEqual([
-      "conversation-alice",
-    ]);
+    expect(
+      aliceConversations.json().data.map((item: { id: string }) => item.id),
+    ).toEqual(["conversation-alice"]);
 
     const crossedConversation = await app.inject({
       method: "GET",
@@ -251,13 +248,15 @@ describe("Kuro-chan OAuth API", () => {
       headers: { authorization: "Bearer " + bobToken },
     });
     expect(bobRuns.statusCode).toBe(200);
-    expect(bobRuns.json().data.map((run: { id: string }) => run.id)).not.toContain("run-alice");
+    expect(
+      bobRuns.json().data.map((run: { id: string }) => run.id),
+    ).not.toContain("run-alice");
   });
 
   it("permits a remote bind only when a token or valid OAuth configuration is present", () => {
-    expect(() =>
-      validateServerConfiguration({ HOST: "0.0.0.0" }),
-    ).toThrow(/KUROCHAN_API_TOKEN/);
+    expect(() => validateServerConfiguration({ HOST: "0.0.0.0" })).toThrow(
+      /KUROCHAN_API_TOKEN/,
+    );
 
     expect(
       validateServerConfiguration({
