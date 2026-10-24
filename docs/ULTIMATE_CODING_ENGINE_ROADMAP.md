@@ -131,9 +131,11 @@ Every task must have: (1) a narrowly scoped acceptance criterion, (2) implementa
 - Default branch: `main`, HEAD `9a86bbcaa4859aa677a3966407ac604ab59e41ca`.
 - Repository is a public Apache-2.0 TypeScript/pnpm monorepo with API, worker, mobile-first PWA, contracts, storage, model gateway, OmniRouter, orchestrator, tests, and existing architecture/setup docs.
 - Existing design docs already cover backend architecture, user isolation/quotas, MCP, integrations, cloud worker/extension, and provider setup. This plan extends those decisions; it does not replace them.
-- Open PRs at checkpoint: #4, #5, #6, #10, #11, #12, #13. PR #13 currently targets PR #12's branch, so review and dependency order matter. Inspect live PR status before acting.
+- Open PRs at checkpoint: #4, #5, #6, #10, #11, #12, #13, plus **#14 for this roadmap**. PR #13 currently targets PR #12's branch, so review and dependency order matter.
 - A previous attempt to clone from this environment failed at DNS resolution. The current inspection uses GitHub's repository APIs; **no local clone, install, tests, or build has been run in this session**.
-- Immediate next action: inspect the open PR diffs and CI checks; then establish a green base and start P1/P2 implementation in small, testable PRs. Do not begin a competing implementation of functionality already being built in #10–#13.
+- Live PR inspection: #12 and #13 both report successful GitHub Actions `verify` checks and clean mergeability at inspection time. #11 and #10 are also cleanly mergeable; #4–#6 currently report conflicts. Passing hosted CI is useful evidence, but it is not a substitute for local verification or a full feature audit.
+- Immediate next action: review PR #12's transactional migration first, then land/rebase dependent PR #13's FTS5 search, and review #11/#10. Do not begin a competing implementation of functionality already being built in #10–#13. Confirm current status again before merging.
+- **This session's change:** added the roadmap in PR #14, branch `project/ultimate-coding-engine-roadmap-2026-10-24`, commit `a099aed80b988f28dffd7a2e0ccc2b9d22c126c5`. It is documentation-only and has not been merged.
 
 ## Session handoff template
 
