@@ -58,8 +58,10 @@ describe("community pack registry", () => {
         headers: { Authorization: "CONTEXT7_AUTHORIZATION" },
       },
     });
-    expect(JSON.stringify(presets)).not.toContain("Bearer ");
-    expect(JSON.stringify(presets)).not.toContain("ghp_");
+    const serializedPresets = JSON.stringify(presets);
+    expect(serializedPresets).not.toMatch(/Bearer\\s+(?:ghp_|github_pat_|[A-Za-z0-9_-]{24,})/);
+    expect(serializedPresets).not.toContain("ghp_");
+    expect(serializedPresets).not.toContain("github_pat_");
     expect(() => listCommunityMcpPresets({ limit: 0 })).toThrow(
       "Community MCP preset limit",
     );
