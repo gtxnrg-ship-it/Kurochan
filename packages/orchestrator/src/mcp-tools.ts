@@ -1,4 +1,9 @@
 import { isAbsolute, resolve } from "node:path";
+import Ajv from "ajv";
+import Ajv2019 from "ajv/dist/2019.js";
+import Ajv2020 from "ajv/dist/2020.js";
+import addFormats from "ajv-formats";
+import type { ValidateFunction } from "ajv";
 import { z } from "zod";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -342,465 +347,90 @@ export type McpToolArgumentValidation =
       readonly message: string;
     };
 
-type SchemaIssue = {
-  readonly kind: "schema" | "value";
-  readonly message: string;
-};
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function jsonValuesEqual(left: unknown, right: unknown): boolean {
-  if (Object.is(left, right)) return true;
-  if (typeof left !== typeof right || left === null || right === null) {
-    return false;
-  }
-  if (Array.isArray(left) || Array.isArray(right)) {
-    return (
-      Array.isArray(left) &&
-      Array.isArray(right) &&
-      left.length === right.length &&
-      left.every((item, index) => jsonValuesEqual(item, right[index]))
-    );
-  }
-  if (isRecord(left) && isRecord(right)) {
-    const leftKeys = Object.keys(left).sort();
-    const rightKeys = Object.keys(right).sort();
-    return (
-      leftKeys.length === rightKeys.length &&
-      leftKeys.every(
-        (key, index) =>
-          key === rightKeys[index] && jsonValuesEqual(left[key], right[key]),
-      )
-    );
-  }
-  return false;
+type SchemaDialect = "draft-07" | "draft-2019-09" | "draft-2020-12";
+
+const MAX_CACHED_MCP_SCHEMAS = 512;
+const mcpSchemaValidatorCache = new Map<string, ValidateFunction>();
+const validatorOptions = {
+  allErrors: false,
+  strict: false,
+  validateSchema: true,
+  coerceTypes: false,
+  useDefaults: false,
+  removeAdditional: false,
+  addUsedSchema: false,
+  allowUnionTypes: true,
+} as const;
+
+// MCP tool schemas arrive from external servers. Use a standards-compliant
+// validator instead of maintaining a partial home-grown JSON Schema engine.
+// New schemas default to MCP's 2020-12 dialect; explicit older dialects remain
+// supported when a server declares them. Unknown dialects fail closed.
+const draft07Ajv = new Ajv(validatorOptions);
+const draft2019Ajv = new Ajv2019(validatorOptions);
+const draft2020Ajv = new Ajv2020(validatorOptions);
+for (const engine of [draft07Ajv, draft2019Ajv, draft2020Ajv]) {
+  addFormats(engine, { mode: "fast" });
 }
 
-function matchesJsonType(value: unknown, type: string): boolean {
-  switch (type) {
-    case "null":
-      return value === null;
-    case "object":
-      return isRecord(value);
-    case "array":
-      return Array.isArray(value);
-    case "string":
-      return typeof value === "string";
-    case "boolean":
-      return typeof value === "boolean";
-    case "integer":
-      return typeof value === "number" && Number.isSafeInteger(value);
-    case "number":
-      return typeof value === "number" && Number.isFinite(value);
-    default:
-      return false;
+function schemaDialect(schema: Record<string, unknown>): SchemaDialect {
+  const declared = schema.$schema;
+  if (declared === undefined) return "draft-2020-12";
+  if (typeof declared !== "string") {
+    throw new Error("The $schema keyword must be a string.");
   }
+  if (/draft-07|draft-06|draft-04/i.test(declared)) {
+    if (/draft-06|draft-04/i.test(declared)) {
+      throw new Error("Draft 06/04 JSON Schema dialects are not supported.");
+    }
+    return "draft-07";
+  }
+  if (/2019-09/i.test(declared)) return "draft-2019-09";
+  if (/2020-12/i.test(declared)) return "draft-2020-12";
+  throw new Error("The JSON Schema dialect is not supported.");
 }
 
-function checkJsonSchema(
-  value: unknown,
-  schemaValue: unknown,
-  path: string,
-  depth = 0,
-): SchemaIssue | undefined {
-  if (depth > 24) {
-    return {
-      kind: "schema",
-      message:
-        "Tool input schema or arguments exceed the validation depth limit.",
-    };
-  }
-  if (typeof schemaValue === "boolean") {
-    return schemaValue
-      ? undefined
-      : {
-          kind: "value",
-          message: "Arguments at " + path + " are not permitted.",
-        };
-  }
-  if (!isRecord(schemaValue)) {
-    return {
-      kind: "schema",
-      message: "Tool input schema at " + path + " is not a JSON Schema object.",
-    };
-  }
-  if ("$ref" in schemaValue) {
-    return {
-      kind: "schema",
-      message: "Tool input schema at " + path + " uses unsupported references.",
-    };
+function schemaEngine(dialect: SchemaDialect): Ajv | Ajv2019 | Ajv2020 {
+  if (dialect === "draft-07") return draft07Ajv;
+  if (dialect === "draft-2019-09") return draft2019Ajv;
+  return draft2020Ajv;
+}
+
+function getMcpSchemaValidator(inputSchema: unknown): ValidateFunction {
+  if (
+    !isRecord(inputSchema) ||
+    (inputSchema.type !== undefined && inputSchema.type !== "object")
+  ) {
+    throw new Error("MCP tool input schema must describe an object.");
   }
 
-  const typeValue = schemaValue.type;
-  if (typeof typeValue === "string") {
-    if (!matchesJsonType(value, typeValue)) {
-      return {
-        kind: "value",
-        message: "Arguments at " + path + " must be of type " + typeValue + ".",
-      };
-    }
-  } else if (Array.isArray(typeValue)) {
-    if (
-      typeValue.length === 0 ||
-      !typeValue.every((item) => typeof item === "string")
-    ) {
-      return {
-        kind: "schema",
-        message: "Tool input schema at " + path + " has an invalid type field.",
-      };
-    }
-    if (!typeValue.some((item) => matchesJsonType(value, item as string))) {
-      return {
-        kind: "value",
-        message:
-          "Arguments at " + path + " do not match the tool input schema type.",
-      };
-    }
-  } else if (typeValue !== undefined) {
-    return {
-      kind: "schema",
-      message: "Tool input schema at " + path + " has an invalid type field.",
-    };
+  const safeSchema = validateSchemaSize(inputSchema);
+  if (!isRecord(safeSchema)) {
+    throw new Error("MCP tool input schema must be a JSON Schema object.");
   }
 
-  if ("const" in schemaValue && !jsonValuesEqual(value, schemaValue.const)) {
-    return {
-      kind: "value",
-      message:
-        "Arguments at " + path + " do not match the required constant value.",
-    };
-  }
-  if (schemaValue.enum !== undefined) {
-    if (!Array.isArray(schemaValue.enum)) {
-      return {
-        kind: "schema",
-        message:
-          "Tool input schema at " + path + " has an invalid enum constraint.",
-      };
-    }
-    if (
-      !schemaValue.enum.some((candidate) => jsonValuesEqual(value, candidate))
-    ) {
-      return {
-        kind: "value",
-        message: "Arguments at " + path + " are not one of the allowed values.",
-      };
-    }
+  const dialect = schemaDialect(safeSchema);
+  const cacheKey = dialect + ":" + JSON.stringify(safeSchema);
+  const cached = mcpSchemaValidatorCache.get(cacheKey);
+  if (cached) {
+    // Refresh insertion order so the bounded cache behaves as an LRU.
+    mcpSchemaValidatorCache.delete(cacheKey);
+    mcpSchemaValidatorCache.set(cacheKey, cached);
+    return cached;
   }
 
-  for (const keyword of ["allOf", "anyOf", "oneOf"] as const) {
-    const group = schemaValue[keyword];
-    if (group === undefined) continue;
-    if (!Array.isArray(group) || group.length === 0) {
-      return {
-        kind: "schema",
-        message:
-          "Tool input schema at " +
-          path +
-          " has an invalid " +
-          keyword +
-          " constraint.",
-      };
-    }
-    const results = group.map((subschema) =>
-      checkJsonSchema(value, subschema, path, depth + 1),
-    );
-    const malformed = results.find((result) => result?.kind === "schema");
-    if (malformed) return malformed;
-    const matches = results.filter((result) => result === undefined).length;
-    if (
-      (keyword === "allOf" && matches !== results.length) ||
-      (keyword === "anyOf" && matches === 0) ||
-      (keyword === "oneOf" && matches !== 1)
-    ) {
-      return {
-        kind: "value",
-        message:
-          "Arguments at " + path + " do not satisfy the tool input schema.",
-      };
-    }
+  const validator = schemaEngine(dialect).compile(safeSchema);
+  mcpSchemaValidatorCache.set(cacheKey, validator);
+  while (mcpSchemaValidatorCache.size > MAX_CACHED_MCP_SCHEMAS) {
+    const oldest = mcpSchemaValidatorCache.keys().next().value;
+    if (oldest === undefined) break;
+    mcpSchemaValidatorCache.delete(oldest);
   }
-  if ("not" in schemaValue) {
-    const negated = checkJsonSchema(value, schemaValue.not, path, depth + 1);
-    if (negated?.kind === "schema") return negated;
-    if (!negated) {
-      return {
-        kind: "value",
-        message: "Arguments at " + path + " match a disallowed shape.",
-      };
-    }
-  }
-
-  const objectKeywords = [
-    "properties",
-    "required",
-    "additionalProperties",
-    "minProperties",
-    "maxProperties",
-  ];
-  if (objectKeywords.some((key) => key in schemaValue) && isRecord(value)) {
-    const properties = schemaValue.properties;
-    if (properties !== undefined && !isRecord(properties)) {
-      return {
-        kind: "schema",
-        message: "Tool input schema at " + path + " has invalid properties.",
-      };
-    }
-    const required = schemaValue.required;
-    if (
-      required !== undefined &&
-      (!Array.isArray(required) ||
-        !required.every((item) => typeof item === "string"))
-    ) {
-      return {
-        kind: "schema",
-        message:
-          "Tool input schema at " + path + " has invalid required fields.",
-      };
-    }
-    for (const key of (required as string[] | undefined) ?? []) {
-      if (!Object.prototype.hasOwnProperty.call(value, key)) {
-        return {
-          kind: "value",
-          message:
-            "Arguments at " +
-            path +
-            ' are missing required field "' +
-            key.slice(0, 100) +
-            '".',
-        };
-      }
-    }
-    for (const key of ["minProperties", "maxProperties"] as const) {
-      const constraint = schemaValue[key];
-      if (
-        constraint !== undefined &&
-        (!Number.isInteger(constraint) || (constraint as number) < 0)
-      ) {
-        return {
-          kind: "schema",
-          message:
-            "Tool input schema at " +
-            path +
-            " has an invalid " +
-            key +
-            " constraint.",
-        };
-      }
-    }
-    if (
-      schemaValue.minProperties !== undefined &&
-      Object.keys(value).length < (schemaValue.minProperties as number)
-    ) {
-      return {
-        kind: "value",
-        message: "Arguments at " + path + " contain too few fields.",
-      };
-    }
-    if (
-      schemaValue.maxProperties !== undefined &&
-      Object.keys(value).length > (schemaValue.maxProperties as number)
-    ) {
-      return {
-        kind: "value",
-        message: "Arguments at " + path + " contain too many fields.",
-      };
-    }
-
-    const additionalProperties = schemaValue.additionalProperties;
-    for (const [key, child] of Object.entries(value)) {
-      if (properties && Object.prototype.hasOwnProperty.call(properties, key)) {
-        const issue = checkJsonSchema(
-          child,
-          properties[key],
-          (path + "." + key).slice(0, 240),
-          depth + 1,
-        );
-        if (issue) return issue;
-      } else if (additionalProperties === false) {
-        return {
-          kind: "value",
-          message:
-            "Arguments at " +
-            path +
-            ' include an unexpected field "' +
-            key.slice(0, 100) +
-            '".',
-        };
-      } else if (
-        isRecord(additionalProperties) ||
-        typeof additionalProperties === "boolean"
-      ) {
-        const issue = checkJsonSchema(
-          child,
-          additionalProperties,
-          (path + "." + key).slice(0, 240),
-          depth + 1,
-        );
-        if (issue) return issue;
-      } else if (additionalProperties !== undefined) {
-        return {
-          kind: "schema",
-          message:
-            "Tool input schema at " +
-            path +
-            " has an invalid additionalProperties constraint.",
-        };
-      }
-    }
-  }
-
-  if (Array.isArray(value)) {
-    const itemsSchema = schemaValue.items;
-    if (itemsSchema !== undefined) {
-      if (!isRecord(itemsSchema) && typeof itemsSchema !== "boolean") {
-        return {
-          kind: "schema",
-          message:
-            "Tool input schema at " +
-            path +
-            " has an invalid items constraint.",
-        };
-      }
-      for (let index = 0; index < value.length; index += 1) {
-        const issue = checkJsonSchema(
-          value[index],
-          itemsSchema,
-          (path + "[" + index + "]").slice(0, 240),
-          depth + 1,
-        );
-        if (issue) return issue;
-      }
-    }
-    for (const key of ["minItems", "maxItems"] as const) {
-      const constraint = schemaValue[key];
-      if (
-        constraint !== undefined &&
-        (!Number.isInteger(constraint) || (constraint as number) < 0)
-      ) {
-        return {
-          kind: "schema",
-          message:
-            "Tool input schema at " +
-            path +
-            " has an invalid " +
-            key +
-            " constraint.",
-        };
-      }
-    }
-    if (
-      schemaValue.minItems !== undefined &&
-      value.length < (schemaValue.minItems as number)
-    ) {
-      return {
-        kind: "value",
-        message: "Arguments at " + path + " contain too few items.",
-      };
-    }
-    if (
-      schemaValue.maxItems !== undefined &&
-      value.length > (schemaValue.maxItems as number)
-    ) {
-      return {
-        kind: "value",
-        message: "Arguments at " + path + " contain too many items.",
-      };
-    }
-    if (schemaValue.uniqueItems === true) {
-      for (let index = 0; index < value.length; index += 1) {
-        if (
-          value
-            .slice(index + 1)
-            .some((item) => jsonValuesEqual(item, value[index]))
-        ) {
-          return {
-            kind: "value",
-            message: "Arguments at " + path + " contain duplicate items.",
-          };
-        }
-      }
-    }
-  }
-
-  if (typeof value === "string") {
-    for (const key of ["minLength", "maxLength"] as const) {
-      const constraint = schemaValue[key];
-      if (
-        constraint !== undefined &&
-        (!Number.isInteger(constraint) || (constraint as number) < 0)
-      ) {
-        return {
-          kind: "schema",
-          message:
-            "Tool input schema at " +
-            path +
-            " has an invalid " +
-            key +
-            " constraint.",
-        };
-      }
-    }
-    if (
-      schemaValue.minLength !== undefined &&
-      value.length < (schemaValue.minLength as number)
-    ) {
-      return {
-        kind: "value",
-        message: "Arguments at " + path + " are shorter than permitted.",
-      };
-    }
-    if (
-      schemaValue.maxLength !== undefined &&
-      value.length > (schemaValue.maxLength as number)
-    ) {
-      return {
-        kind: "value",
-        message: "Arguments at " + path + " are longer than permitted.",
-      };
-    }
-  }
-
-  if (typeof value === "number" && Number.isFinite(value)) {
-    for (const key of [
-      "minimum",
-      "maximum",
-      "exclusiveMinimum",
-      "exclusiveMaximum",
-    ] as const) {
-      const constraint = schemaValue[key];
-      if (constraint !== undefined && typeof constraint !== "number") {
-        return {
-          kind: "schema",
-          message:
-            "Tool input schema at " +
-            path +
-            " has an invalid " +
-            key +
-            " constraint.",
-        };
-      }
-      if (
-        typeof constraint === "number" &&
-        ((key === "minimum" && value < constraint) ||
-          (key === "maximum" && value > constraint) ||
-          (key === "exclusiveMinimum" && value <= constraint) ||
-          (key === "exclusiveMaximum" && value >= constraint))
-      ) {
-        return {
-          kind: "value",
-          message:
-            "Arguments at " +
-            path +
-            " are outside the permitted numeric range.",
-        };
-      }
-    }
-  }
-
-  return undefined;
+  return validator;
 }
 
 export function validateMcpToolArguments(
@@ -814,25 +444,46 @@ export function validateMcpToolArguments(
       message: "MCP tool arguments must be a JSON object.",
     };
   }
-  if (
-    !isRecord(inputSchema) ||
-    (inputSchema.type !== undefined && inputSchema.type !== "object")
-  ) {
+
+  let safeArguments: unknown;
+  try {
+    safeArguments = safeJson(argumentsValue, 200_000);
+  } catch {
+    return {
+      valid: false,
+      code: "invalid_tool_arguments",
+      message: "MCP tool arguments must be bounded, valid JSON data.",
+    };
+  }
+  if (!isRecord(safeArguments)) {
+    return {
+      valid: false,
+      code: "invalid_tool_arguments",
+      message: "MCP tool arguments must be a JSON object.",
+    };
+  }
+
+  let validator: ValidateFunction;
+  try {
+    validator = getMcpSchemaValidator(inputSchema);
+  } catch {
+    // Do not forward exception text: it may include schema-controlled data.
     return {
       valid: false,
       code: "invalid_tool_schema",
-      message: "MCP tool input schema must describe an object.",
+      message:
+        "MCP tool input schema is invalid, unsupported, or exceeds the schema limit.",
     };
   }
-  const issue = checkJsonSchema(argumentsValue, inputSchema, "$");
-  if (!issue) return { valid: true };
+
+  if (validator(safeArguments)) return { valid: true };
+  const issue = validator.errors?.[0];
+  const path = issue?.instancePath || "$";
+  const reason = issue?.message || "does not satisfy the declared schema";
   return {
     valid: false,
-    code:
-      issue.kind === "schema"
-        ? "invalid_tool_schema"
-        : "invalid_tool_arguments",
-    message: issue.message.slice(0, 500),
+    code: "invalid_tool_arguments",
+    message: ("Arguments at " + path + " " + reason).slice(0, 500),
   };
 }
 
