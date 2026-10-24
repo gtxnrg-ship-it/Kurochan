@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { AgentCatalog } from "@kurochan/agent-catalog";
 import type { RouteProfile } from "@kurochan/contracts";
 import { OmniRouter } from "@kurochan/omnirouter";
@@ -168,6 +168,28 @@ export function jsonCharacterLimit(value: unknown, limit = 60_000): string {
 }
 
 type ApprovalType = "task-level" | "external-write";
+
+function canonicalJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalJson);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, child]) => [key, canonicalJson(child)]),
+    );
+  }
+  return value;
+}
+
+export function fingerprintMcpArguments(
+  arguments_: Record<string, unknown>,
+): string {
+  const serialized = JSON.stringify(canonicalJson(arguments_));
+  if (typeof serialized !== "string") {
+    throw new Error("MCP arguments must be JSON-serializable.");
+  }
+  return createHash("sha256").update(serialized).digest("hex");
+}
 
 export function approvalGranted(
   store: RunStore,
@@ -1220,6 +1242,7 @@ export class TaskWorker {
                     !approvalGranted(this.options.store, task, "external-write", {
                       mcpServerId: descriptor.serverId,
                       mcpToolName: descriptor.name,
+                      argumentsHash: fingerprintMcpArguments(mcpArguments),
                     })
                   ) {
                   let preview: string;
@@ -1244,6 +1267,7 @@ export class TaskWorker {
                       approvalType: "external-write",
                       mcpServerId: descriptor.serverId,
                       mcpToolName: descriptor.name,
+                      argumentsHash: fingerprintMcpArguments(mcpArguments),
                       argumentsPreview: preview,
                       warning:
                         "This MCP tool is not explicitly marked read-only. Review the configured server, tool, and arguments before approving its possible external side effects.",
