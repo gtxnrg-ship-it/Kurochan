@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#f4f1e9" />
+    <meta name="description" content="Kuro-chan turns rough ideas into clear answers, coordinated work, and verified outcomes." />
+    <meta name="color-scheme" content="light" />
+    <link rel="icon" href="/icons/kurochan.svg" type="image/svg+xml" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="stylesheet" href="/app.css" />
+    <title>Kuro-chan · Your AI workbench</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#workspace">Skip to workspace</a>
+    <div class="app-shell">
+      <aside class="sidebar" id="sidebar" aria-label="Main navigation">
+        <div class="brand-row">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 44 44" role="img">
+              <rect x="2" y="2" width="40" height="40" rx="14" fill="currentColor" />
+              <path d="M13 12v20m0-9 11-10m-8 8 12 11" fill="none" stroke="#f4f1e9" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" />
+              <circle cx="32" cy="12" r="3" fill="#d87952" />
+            </svg>
+          </span>
+          <div class="brand-copy">
+            <span class="brand-name">kuro-chan</span>
+            <span class="brand-subtitle">your workbench</span>
+          </div>
+          <button class="icon-button sidebar-close" id="close-sidebar" type="button" aria-label="Close navigation">×</button>
+        </div>
+
+        <button class="new-chat-button" id="new-chat" type="button">
+          <span class="plus-symbol" aria-hidden="true">＋</span>
+          <span>New conversation</span>
+          <kbd>⌘ K</kbd>
+        </button>
+
+        <nav class="primary-nav" aria-label="Workspace views">
+          <button class="nav-item is-active" type="button" data-view="chat" aria-current="page">
+            <span class="nav-symbol" aria-hidden="true">◌</span><span>Chat</span>
+          </button>
+          <button class="nav-item" type="button" data-view="runs">
+            <span class="nav-symbol" aria-hidden="true">↗</span><span>Task runs</span><span class="nav-count" id="active-run-count">0</span>
+          </button>
+          <button class="nav-item" type="button" data-view="agents">
+            <span class="nav-symbol" aria-hidden="true">⌘</span><span>Specialists</span>
+          </button>
+          <button class="nav-item" type="button" data-view="system">
+            <span class="nav-symbol" aria-hidden="true">◈</span><span>System health</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-section-head">
+          <span>RECENT CONVERSATIONS</span>
+          <button class="text-icon-button" id="refresh-conversations" type="button" aria-label="Refresh conversations" title="Refresh conversations">↻</button>
+        </div>
+        <div class="conversation-list" id="conversation-list" role="list" aria-label="Recent conversations">
+          <div class="sidebar-empty">Your conversations will appear here.</div>
+        </div>
+
+        <div class="sidebar-footer">
+          <div class="connection-mini">
+            <span class="status-dot is-unknown" id="sidebar-status-dot"></span>
+            <div><strong id="sidebar-status-label">Not connected</strong><span id="sidebar-status-detail">Connect your API</span></div>
+          </div>
+          <button class="settings-shortcut" id="open-settings" type="button" aria-haspopup="dialog">
+            <span aria-hidden="true">⚙</span><span>Connection settings</span><span class="shortcut-arrow">↗</span>
+          </button>
+        </div>
+      </aside>
+
+      <button class="sidebar-scrim" id="sidebar-scrim" type="button" aria-label="Close navigation"></button>
+
+      <main class="main-column">
+        <header class="topbar">
+          <div class="topbar-leading">
+            <button class="icon-button menu-button" id="open-sidebar" type="button" aria-label="Open navigation">☰</button>
+            <div>
+              <div class="eyebrow" id="view-eyebrow">YOUR SPACE</div>
+              <h1 id="view-title">A thought is enough to begin.</h1>
+            </div>
+          </div>
+          <div class="topbar-actions">
+            <label class="model-select-wrap">
+              <span class="sr-only">Response model profile</span>
+              <select id="model-profile" aria-label="Response model profile">
+                <option value="fast">Fast</option>
+                <option value="balanced" selected>Balanced</option>
+                <option value="quality">Deep work</option>
+              </select>
+            </label>
+            <span class="connection-pill" id="connection-pill"><span class="status-dot is-unknown"></span><span>Offline</span></span>
+          </div>
+        </header>
+
+        <section class="workspace" id="workspace" tabindex="-1" aria-live="off"></section>
+      </main>
+
+      <aside class="inspector" aria-label="Session overview">
+        <div class="inspector-heading">
+          <span class="inspector-spark">✳</span>
+          <div><div class="eyebrow">WORKSPACE PULSE</div><h2>At a glance</h2></div>
+        </div>
+        <div class="pulse-card">
+          <span class="pulse-label">MODEL ROUTING</span>
+          <strong id="pulse-routing">Checking…</strong>
+          <span class="pulse-copy" id="pulse-routing-detail">Provider status will appear here.</span>
+        </div>
+        <div class="pulse-card">
+          <span class="pulse-label">TASK WORKERS</span>
+          <strong id="pulse-workers">—</strong>
+          <span class="pulse-copy" id="pulse-workers-detail">Waiting for API connection.</span>
+        </div>
+        <div class="pulse-card">
+          <span class="pulse-label">VOICE</span>
+          <strong id="pulse-voice">Not checked</strong>
+          <span class="pulse-copy" id="pulse-voice-detail">Voice stays optional until configured.</span>
+        </div>
+        <div class="inspector-note">
+          <span class="note-icon" aria-hidden="true">✦</span>
+          <p>Kuro-chan should make the complicated parts feel simple. You bring the idea; the workbench helps find the shape.</p>
+        </div>
+        <button class="inspector-settings" id="open-settings-secondary" type="button">Configure this workspace <span>↗</span></button>
+        <div class="inspector-version">LOCAL-FIRST · API v1</div>
+      </aside>
+    </div>
+
+    <div class="dialog-backdrop" id="settings-backdrop" hidden>
+      <section class="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title" aria-describedby="settings-description">
+        <div class="dialog-top">
+          <div><div class="eyebrow">CONNECTION</div><h2 id="settings-title">Connect your workbench</h2></div>
+          <button class="icon-button" id="close-settings" type="button" aria-label="Close settings">×</button>
+        </div>
+        <p id="settings-description" class="dialog-intro">Kuro-chan connects to your own API. Provider keys stay on the server; this screen never asks for OpenRouter or voice-provider keys.</p>
+        <form id="settings-form">
+          <label class="field-label" for="api-base-url">API address</label>
+          <input id="api-base-url" name="apiBaseUrl" type="url" autocomplete="url" spellcheck="false" placeholder="http://127.0.0.1:8787" required />
+          <p class="field-hint">On the same device, the default usually works. On a phone, use the computer's LAN address or your deployed HTTPS API address.</p>
+          <label class="field-label" for="api-token">API access token <span class="optional-tag">optional for local mode</span></label>
+          <input id="api-token" name="apiToken" type="password" autocomplete="off" spellcheck="false" placeholder="Only if your API requires it" />
+          <p class="field-hint">The address is saved in this browser. The token is held in session storage and cleared when this tab's session ends.</p>
+          <div class="settings-error" id="settings-error" role="alert" hidden></div>
+          <div class="settings-status" id="settings-status" role="status">Not tested yet.</div>
+          <div class="dialog-actions">
+            <button class="button button-subtle" id="test-connection" type="button">Test connection</button>
+            <button class="button button-primary" type="submit">Save and connect <span aria-hidden="true">→</span></button>
+          </div>
+        </form>
+        <div class="settings-security"><span aria-hidden="true">⌑</span><span>Use HTTPS for remote deployments. Never paste provider API keys into this app.</span></div>
+      </section>
+    </div>
+
+    <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
+    <noscript><div class="noscript-message">Kuro-chan needs JavaScript enabled to connect to your local API.</div></noscript>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
