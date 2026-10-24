@@ -31,10 +31,16 @@ function integerEnv(
 function redactSensitiveText(value: string): string {
   return value
     .replace(/\bBearer\s+[A-Za-z0-9._~+/-]{12,}=?/gi, "Bearer [REDACTED]")
-    .replace(/\b(?:gh[pousr]|github_pat)_[A-Za-z0-9_]{12,}\b/g, "[REDACTED_TOKEN]")
+    .replace(
+      /\b(?:gh[pousr]|github_pat)_[A-Za-z0-9_]{12,}\b/g,
+      "[REDACTED_TOKEN]",
+    )
     .replace(/\bsk-(?:proj-|ant-)?[A-Za-z0-9_-]{16,}\b/g, "[REDACTED_TOKEN]")
     .replace(/\bAIza[0-9A-Za-z_-]{35}\b/g, "[REDACTED_TOKEN]")
-    .replace(/\b(?:api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|client[-_ ]?secret|password|passwd|secret|token)\s*[:=]\s*["']?[A-Za-z0-9._~+/-]{8,}["']?/gi, "[REDACTED_SECRET]")
+    .replace(
+      /\b(?:api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|client[-_ ]?secret|password|passwd|secret|token)\s*[:=]\s*["']?[A-Za-z0-9._~+/-]{8,}["']?/gi,
+      "[REDACTED_SECRET]",
+    )
     .slice(0, 2000);
 }
 
