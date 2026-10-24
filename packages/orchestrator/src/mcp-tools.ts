@@ -1052,6 +1052,21 @@ export class McpToolRuntime {
         },
       };
     }
+    const argumentValidation = validateMcpToolArguments(
+      descriptor.inputSchema,
+      parsed.data.arguments,
+    );
+    if (!argumentValidation.valid) {
+      return {
+        name: "mcp.call",
+        ok: false,
+        tool: descriptor,
+        error: {
+          code: argumentValidation.code,
+          message: argumentValidation.message,
+        },
+      };
+    }
     const config = this.configurations.find(
       (server) => server.id === descriptor.serverId,
     );
