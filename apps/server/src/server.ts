@@ -626,12 +626,16 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           const discovered = provider.listModels
             ? await provider.listModels()
             : [];
-          const models =
-            discovered.length > 0
-              ? discovered
-              : defaultModel
-                ? [{ id: defaultModel, name: defaultModel }]
-                : [];
+          const models = [...discovered];
+          if (defaultModel && !models.some((model) => model.id === defaultModel)) {
+            const name =
+              status.id === "openrouter" && defaultModel === "openrouter/free"
+                ? "Free Models Router"
+                : status.id === "freellmapi" && defaultModel === "auto"
+                  ? "FreeLLMAPI Auto Router"
+                  : defaultModel;
+            models.unshift({ id: defaultModel, name });
+          }
           return {
             providerId: status.id,
             name: status.name,
@@ -652,11 +656,17 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         } catch {
           // Do not send raw provider errors to the browser, as they can contain
           // account, endpoint, or credential-adjacent diagnostic details.
+          const defaultModelName =
+            status.id === "openrouter" && defaultModel === "openrouter/free"
+              ? "Free Models Router"
+              : status.id === "freellmapi" && defaultModel === "auto"
+                ? "FreeLLMAPI Auto Router"
+                : defaultModel;
           const models = defaultModel
             ? [
                 {
                   id: defaultModel,
-                  name: defaultModel,
+                  name: defaultModelName,
                   value: status.id + "/" + defaultModel,
                   isDefault: true,
                 },
