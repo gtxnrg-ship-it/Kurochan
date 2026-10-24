@@ -691,6 +691,9 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     );
 
     const value = {
+      // Keep both the workbench catalog and the OpenAI-compatible model-list
+      // shape on this single route. External clients rely on { object, data }.
+      object: "list",
       name: "OmniRoute",
       profiles: [
         { id: "auto", label: "Auto · OmniRoute" },
@@ -699,6 +702,20 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         { id: "quality", label: "Quality" },
       ],
       providers,
+      data: [
+        { id: "auto", object: "model", owned_by: "kurochan" },
+        { id: "omni/auto", object: "model", owned_by: "kurochan" },
+        { id: "omni/fast", object: "model", owned_by: "kurochan" },
+        { id: "omni/balanced", object: "model", owned_by: "kurochan" },
+        { id: "omni/quality", object: "model", owned_by: "kurochan" },
+        ...providers.flatMap((provider) =>
+          provider.models.map((model) => ({
+            id: model.value,
+            object: "model",
+            owned_by: provider.providerId,
+          })),
+        ),
+      ],
       fetchedAt: new Date(now).toISOString(),
       cacheTtlMs: 300_000,
     };
@@ -3547,22 +3564,6 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       });
     }
   });
-
-  app.get("/v1/models", async () => ({
-    object: "list",
-    data: [
-      { id: "omni/fast", object: "model", owned_by: "kurochan" },
-      { id: "omni/balanced", object: "model", owned_by: "kurochan" },
-      { id: "omni/quality", object: "model", owned_by: "kurochan" },
-      ...[...registry.providers.values()]
-        .filter((provider) => Boolean(provider.defaultModel))
-        .map((provider) => ({
-          id: provider.id + "/" + provider.defaultModel,
-          object: "model",
-          owned_by: provider.id,
-        })),
-    ],
-  }));
 
   app.post("/v1/chat/completions", async (request, reply) => {
     const parsed = ChatCompletionRequestSchema.safeParse(request.body);
