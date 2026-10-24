@@ -5,7 +5,7 @@ const API_ROOT = "https://api.search.brave.com/res/v1/llm/context";
 const MAX_QUERY_LENGTH = 600;
 const MAX_RESULTS = 12;
 const DEFAULT_RESULTS = 8;
-const MAX_CONTEXT_CHARACTERS = 42_000;
+const MAX_CONTEXT_CHARACTERS = 28_000;
 const MAX_SNIPPETS_PER_URL = 4;
 const MAX_SNIPPET_CHARACTERS = 1_400;
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -108,6 +108,12 @@ class WebResearchError extends Error {
 }
 
 function trustedSourceUrl(value: string): string {
+  if (value.length > 1_000) {
+    throw new WebResearchError(
+      "invalid_source_url",
+      "Search provider returned an overly long source URL.",
+    );
+  }
   let url: URL;
   try {
     url = new URL(value);
@@ -139,7 +145,7 @@ function hostname(value: string): string {
 }
 
 function sourceEvidence(url: string, title: string, snippet: string): Evidence {
-  const description = snippet.trim().replace(/\s+/g, " ").slice(0, 1600);
+  const description = snippet.trim().replace(/\s+/g, " ").slice(0, 500);
   return {
     kind: "web_source",
     summary:
@@ -320,7 +326,7 @@ export class WebResearchRuntime implements WebResearchExecutor {
           } catch {
             return [];
           }
-          const title = (item.title?.trim() || hostname(url)).slice(0, 500);
+          const title = (item.title?.trim() || hostname(url)).slice(0, 300);
           const snippets = (item.snippets ?? [])
             .map((snippet) =>
               snippet.trim().slice(0, MAX_SNIPPET_CHARACTERS),
