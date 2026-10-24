@@ -408,6 +408,41 @@ describe("TaskWorker", () => {
       expect(JSON.stringify(store.getRun(runId)?.output)).toContain(
         "executionTestsRun",
       );
+      const progress = store
+        .listEvents(runId)
+        .filter((event) => event.type === "task.progress")
+        .map(
+          (event) =>
+            event.payload as { stage?: string; toolName?: string; sources?: unknown[] },
+        );
+      expect(progress.map((event) => event.stage)).toEqual(
+        expect.arrayContaining([
+          "started",
+          "thinking",
+          "tool_started",
+          "tool_completed",
+          "handoff",
+        ]),
+      );
+      expect(progress).toContainEqual(
+        expect.objectContaining({
+          stage: "tool_completed",
+          toolName: "workspace.write_file",
+        }),
+      );
+      expect(
+        progress.some(
+          (event) =>
+            event.stage === "handoff" &&
+            event.sources?.some(
+              (source) =>
+                source &&
+                typeof source === "object" &&
+                "uri" in source &&
+                source.uri === "workspace://" + runId + "/src/index.ts",
+            ),
+        ),
+      ).toBe(true);
     } finally {
       store.close();
     }
