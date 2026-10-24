@@ -2723,9 +2723,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         error: {
           code: "invalid_run_plan",
           message: redactSensitiveText(
-            error instanceof Error
-              ? error.message
-              : "Run plan was rejected.",
+            error instanceof Error ? error.message : "Run plan was rejected.",
           ),
           retryable: false,
           requestId: request.id,
@@ -3084,31 +3082,28 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
                 { code: "event_stream_read_failed", requestId: request.id },
                 "Run event stream could not read persisted events",
               );
-              yield (
-                "event: stream.error\ndata: " +
+              yield "event: stream.error\ndata: " +
                 JSON.stringify({
                   code: "event_stream_read_failed",
                   message: "Run events could not be read.",
                   requestId: request.id,
                 }) +
-                "\n\n"
-              );
+                "\n\n";
               return;
             }
 
             for (const event of events) {
               if (abort.signal.aborted) return;
               cursor = event.id;
-              const eventName = event.type.replace(/[^A-Za-z0-9._-]/g, "") || "message";
-              yield (
-                "id: " +
+              const eventName =
+                event.type.replace(/[^A-Za-z0-9._-]/g, "") || "message";
+              yield "id: " +
                 event.id +
                 "\nevent: " +
                 eventName +
                 "\ndata: " +
                 JSON.stringify(event) +
-                "\n\n"
-              );
+                "\n\n";
             }
 
             if (events.length < 200) {
@@ -3117,15 +3112,13 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
                 latestRun &&
                 ["completed", "failed", "cancelled"].includes(latestRun.status)
               ) {
-                yield (
-                  "event: stream.end\ndata: " +
+                yield "event: stream.end\ndata: " +
                   JSON.stringify({
                     runId,
                     status: latestRun.status,
                     lastEventId: cursor,
                   }) +
-                  "\n\n"
-                );
+                  "\n\n";
                 return;
               }
             }
@@ -3512,9 +3505,7 @@ function requestWarning(
   code: string,
 ): void {
   const message =
-    error instanceof Error
-      ? redactSensitiveText(error.message)
-      : String(error);
+    error instanceof Error ? redactSensitiveText(error.message) : String(error);
   app.log.warn(
     { error: redactSensitiveText(message), code },
     "Backend request could not be completed",
