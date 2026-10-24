@@ -1136,6 +1136,28 @@ describe("Kuro-chan API", () => {
     expect(() => validateServerConfiguration({ PORT: "90000" })).toThrow(
       /PORT/,
     );
+    expect(() => validateServerConfiguration({ PORT: "8787oops" })).toThrow(
+      /PORT/,
+    );
+    expect(
+      () =>
+        validateServerConfiguration({
+          API_RATE_LIMIT_PER_MINUTE: "60junk",
+        }),
+    ).toThrow(/API_RATE_LIMIT_PER_MINUTE/);
+    expect(
+      () =>
+        validateServerConfiguration({
+          OMNIROUTER_MAX_CONCURRENT: "24requests",
+        }),
+    ).toThrow(/OMNIROUTER_MAX_CONCURRENT/);
+    expect(() =>
+      buildServer({
+        env: { OMNIROUTER_MAX_ATTEMPTS: "2attempts" },
+        logger: false,
+        store: new RunStore(":memory:"),
+      }),
+    ).toThrow(/integer between/);
   });
 
   it("reports live and stale worker heartbeats without leaking worker metadata", async () => {
