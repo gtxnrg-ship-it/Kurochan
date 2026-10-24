@@ -29,7 +29,10 @@ describe("safe Markdown parser", () => {
       ),
     ).toEqual([
       { type: "heading", level: 1, value: "A heading" },
-      { type: "paragraph", value: "A short paragraph\ncontinued on a second line." },
+      {
+        type: "paragraph",
+        value: "A short paragraph\ncontinued on a second line.",
+      },
       { type: "list", ordered: false, items: ["First", "Second"] },
       { type: "quote", value: "A quoted thought" },
       { type: "code-block", language: "ts", value: "const answer = 42;" },
@@ -38,7 +41,11 @@ describe("safe Markdown parser", () => {
   });
 
   it("supports inline code, bold, emphasis and safe links", () => {
-    expect(parseInlineMarkdown("Use `code`, **bold**, *clear* and [docs](https://example.test/guide).")).toEqual([
+    expect(
+      parseInlineMarkdown(
+        "Use `code`, **bold**, *clear* and [docs](https://example.test/guide).",
+      ),
+    ).toEqual([
       { type: "text", value: "Use " },
       { type: "code", value: "code" },
       { type: "text", value: ", " },
@@ -55,8 +62,14 @@ describe("safe Markdown parser", () => {
     expect(safeMarkdownHref("javascript:alert(1)")).toBeNull();
     expect(safeMarkdownHref("data:text/html,hello")).toBeNull();
     expect(safeMarkdownHref("https://user:password@example.test")).toBeNull();
-    expect(safeMarkdownHref("https://example.test/good")).toBe("https://example.test/good");
-    expect(parseInlineMarkdown("[click](javascript:alert(1))").some((token) => token.type === "link")).toBe(false);
+    expect(safeMarkdownHref("https://example.test/good")).toBe(
+      "https://example.test/good",
+    );
+    expect(
+      parseInlineMarkdown("[click](javascript:alert(1))").some(
+        (token) => token.type === "link",
+      ),
+    ).toBe(false);
   });
 
   it("keeps HTML-like content as plain text tokens instead of executable markup", () => {
