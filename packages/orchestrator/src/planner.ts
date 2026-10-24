@@ -348,6 +348,15 @@ export class PlanService {
     if (request.signal?.aborted)
       throw new PlanError("cancelled", "Planning was cancelled.");
 
+    const recentUserContext = (request.conversationContext ?? [])
+      .filter((message) => message.role === "user")
+      .slice(-4)
+      .map((message) => message.content.slice(0, 1_500));
+    const catalogIntent = [
+      goal,
+      ...recentUserContext,
+    ].join("\n");
+
     const configuredMaxCandidates = this.options.maxCandidates ?? 96;
     if (
       !Number.isInteger(configuredMaxCandidates) ||
@@ -360,7 +369,7 @@ export class PlanService {
       );
     }
     const effectiveMaxCandidates = plannerCandidateBudget(
-      goal,
+      catalogIntent,
       configuredMaxCandidates,
     );
 
@@ -371,8 +380,9 @@ export class PlanService {
     try {
       const searchResults = await Promise.all([
         this.options.catalog.list({ limit: 1000 }),
-        this.options.catalog.search(goal, { limit: 100 }),
-        this.options.catalog.search("research planning requirements " + goal, {
+        this.options.catalog.search(catalogIntent, { limit: 100 }),
+        this.options.catalog.search(
+          "research planning requirements " + catalogIntent,
           limit: 100,
         }),
         this.options.catalog.listRunbooks(),
@@ -387,7 +397,7 @@ export class PlanService {
       })[];
       const runbooks = searchResults[3] as readonly AgentRunbook[];
       nexusStrategy = searchResults[4] as string;
-      relevantRunbooks = selectRelevantRunbooks(goal, runbooks);
+      relevantRunbooks = selectRelevantRunbooks(catalogIntent, runbooks);
       const runbookAgentIds = new Set(
         relevantRunbooks.flatMap((runbook) =>
           runbook.roster.flatMap((group) => group.agents),
@@ -416,7 +426,7 @@ export class PlanService {
         );
       }
       candidates = rankCatalogAgents(
-        goal,
+        catalogIntent,
         allProfiles,
         [goalMatches, researchMatches],
         runbookAgentIds,
