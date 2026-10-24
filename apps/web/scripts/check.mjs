@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
-import { extname, join, relative, resolve } from "node:path";
+import { extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const appRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -27,7 +27,15 @@ for (const file of checkable) {
   }
 }
 const html = await readFile(join(publicRoot, "index.html"), "utf8");
-for (const asset of ["app.css", "app.js", "api.mjs", "markdown.mjs", "manifest.webmanifest"]) {
-  if (!html.includes(asset)) throw new Error("index.html does not reference " + asset);
+for (const asset of ["app.css", "app.js", "manifest.webmanifest"]) {
+  if (!html.includes(asset)) {
+    throw new Error("index.html does not reference " + asset);
+  }
+}
+const publicFiles = new Set(await readdir(publicRoot));
+for (const module of ["api.mjs", "markdown.mjs"]) {
+  if (!publicFiles.has(module)) {
+    throw new Error("Required browser module is missing: " + module);
+  }
 }
 process.stdout.write("Web JavaScript syntax and shell asset checks passed.\n");
