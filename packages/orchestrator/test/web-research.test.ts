@@ -27,7 +27,7 @@ function contextResponse() {
       [url]: {
         title: "Official Guide",
         hostname: "docs.example.dev",
-        age: ["2026-10-20", "2026-10-20", "3 days ago"],
+        age: ["2026-10-20", "2026-10-20", "3 days ago", "x".repeat(500)],
       },
     },
   };
@@ -76,6 +76,11 @@ describe("WebResearchRuntime", () => {
       kind: "web_source",
       uri: "https://docs.example.dev/guide",
     });
+
+    const resultBody = result.result as { items: { age?: string[] }[] };
+    expect(
+      resultBody.items[0]?.age?.every((age) => age.length <= 100),
+    ).toBe(true);
   });
 
   it("returns deeper bounded source context for research-heavy queries", async () => {
