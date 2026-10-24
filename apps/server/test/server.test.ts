@@ -1129,7 +1129,9 @@ describe("Kuro-chan API", () => {
         return await new Promise<ChatCompletionOutput>((_resolve, reject) => {
           const onAbort = () => {
             signalAborted();
-            reject(Object.assign(new Error("cancelled"), { code: "cancelled" }));
+            reject(
+              Object.assign(new Error("cancelled"), { code: "cancelled" }),
+            );
           };
           if (input.signal?.aborted) onAbort();
           else input.signal?.addEventListener("abort", onAbort, { once: true });
