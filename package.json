@@ -16,9 +16,10 @@
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm build && vitest run",
     "lint": "prettier --check \"apps/**/*.{ts,tsx,js,json,css,html}\" \"packages/**/*.{ts,js,json}\" \"scripts/**/*.mjs\" \"*.{json,yaml,yml}\"",
-    "check": "pnpm check:agency && pnpm typecheck && pnpm test && pnpm lint",
+    "check": "pnpm check:agency && pnpm check:community && pnpm typecheck && pnpm test && pnpm lint",
     "format": "prettier --write \"apps/**/*.{ts,tsx,js,json,css,html}\" \"packages/**/*.{ts,js,json}\" \"scripts/**/*.mjs\" \"*.{json,yaml,yml}\"",
     "check:agency": "node scripts/check-agency-submodule.mjs",
+    "check:community": "node scripts/check-community-packs.mjs",
     "dev:worker": "pnpm --filter @kurochan/worker dev",
     "start:api": "pnpm --filter @kurochan/server start",
     "start:worker": "pnpm --filter @kurochan/worker start"
