@@ -414,7 +414,8 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         ? rawStatusCode
         : 500;
     if (status >= 500) {
-      const message = error instanceof Error ? redactSensitiveText(error.message) : String(error);
+      const message =
+    error instanceof Error ? redactSensitiveText(error.message) : String(error);
       request.log.error(
         {
           err: {
@@ -1972,9 +1973,10 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         return reply.code(status).send({
           error: {
             code,
-            message:
+            message: redactSensitiveText(
               typed.message ??
-              "The assistant could not complete this reply. Your message is saved, so you can retry with the same clientMessageId.",
+                "The assistant could not complete this reply. Your message is saved, so you can retry with the same clientMessageId.",
+            ),
             retryable: typed.retryable ?? status >= 500,
             requestId: request.id,
           },
@@ -2718,8 +2720,11 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       return reply.code(400).send({
         error: {
           code: "invalid_run_plan",
-          message:
-            error instanceof Error ? redactSensitiveText(error.message) : "Run plan was rejected.",
+          message: redactSensitiveText(
+            error instanceof Error
+              ? error.message
+              : "Run plan was rejected.",
+          ),
           retryable: false,
           requestId: request.id,
         },
@@ -3282,9 +3287,10 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       return reply.code(status).send({
         error: {
           code: err.code ?? "routing_error",
-          message:
+          message: redactSensitiveText(
             err.message ??
-            "OmniRouter could not complete the inference request.",
+              "OmniRouter could not complete the inference request.",
+          ),
           retryable: err.retryable ?? status >= 500,
           requestId: request.id,
         },
@@ -3322,6 +3328,10 @@ function redactSensitiveText(value: string): string {
       "[REDACTED_TOKEN]",
     )
     .replace(/\bsk-(?:proj-|ant-)?[A-Za-z0-9_-]{16,}\b/g, "[REDACTED_TOKEN]")
+    .replace(
+      /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g,
+      "[REDACTED_TOKEN]",
+    )
     .replace(/\bAIza[0-9A-Za-z_-]{35}\b/g, "[REDACTED_TOKEN]")
     .replace(
       /\b(?:api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|client[-_ ]?secret|password|passwd|secret|token)\s*[:=]\s*["']?[A-Za-z0-9._~+/-]{8,}["']?/gi,
@@ -3335,7 +3345,8 @@ function requestWarning(
   error: unknown,
   code: string,
 ): void {
-  const message = error instanceof Error ? redactSensitiveText(error.message) : String(error);
+  const message =
+    error instanceof Error ? redactSensitiveText(error.message) : String(error);
   app.log.warn(
     { error: redactSensitiveText(message), code },
     "Backend request could not be completed",
