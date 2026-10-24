@@ -27,7 +27,7 @@ for (const file of checkable) {
   }
 }
 const html = await readFile(join(publicRoot, "index.html"), "utf8");
-for (const asset of ["app.css", "app.js", "manifest.webmanifest"]) {
+for (const asset of ["app.css", "app.js", "api.mjs", "markdown.mjs", "manifest.webmanifest"]) {
   if (!html.includes(asset)) throw new Error("index.html does not reference " + asset);
 }
 process.stdout.write("Web JavaScript syntax and shell asset checks passed.\n");
