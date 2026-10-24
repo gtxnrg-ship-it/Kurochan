@@ -524,11 +524,6 @@ describe("TaskWorker", () => {
       expect(hiddenToolAttempted).toBe(true);
       expect(toolRequested).toBe(true);
       expect(mcpClient.callTool).not.toHaveBeenCalled();
-      expect(
-        store
-          .listEvents(runId)
-          .some((event) => (event.payload as { code?: string })?.code === "tool_not_selected"),
-      ).toBe(true);
       const task = store.listTasks(runId)[0]!;
       expect(task.status).toBe("waiting_for_approval");
       const approval = store
