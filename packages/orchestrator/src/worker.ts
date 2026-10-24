@@ -117,15 +117,39 @@ function parsePayload(content: string): unknown {
   }
 }
 
-function jsonCharacterLimit(value: unknown, limit = 60_000): string {
+export function jsonCharacterLimit(value: unknown, limit = 60_000): string {
+  if (!Number.isInteger(limit) || limit < 128 || limit > 200_000) {
+    throw new Error("JSON context character limit must be between 128 and 200000.");
+  }
+
   let result: string;
   try {
-    result = JSON.stringify(value);
+    const serialized: unknown = JSON.stringify(value);
+    result =
+      typeof serialized === "string"
+        ? serialized
+        : JSON.stringify({ error: "Context value was not JSON-serializable." });
   } catch {
     result = JSON.stringify({ error: "Context was not serializable." });
   }
   if (result.length <= limit) return result;
-  return result.slice(0, limit) + "\n[Context truncated by Kuro-chan.]";
+
+  const base = {
+    contextTruncated: true,
+    notice:
+      "Context exceeded the worker limit. The preview is an incomplete prefix, not complete evidence.",
+    originalCharacters: result.length,
+    preview: "",
+  };
+  let previewLength = Math.max(0, limit - JSON.stringify(base).length - 8);
+  let encoded = JSON.stringify({ ...base, preview: result.slice(0, previewLength) });
+  while (encoded.length > limit && previewLength > 0) {
+    previewLength = Math.floor(previewLength / 2);
+    encoded = JSON.stringify({ ...base, preview: result.slice(0, previewLength) });
+  }
+  return encoded.length <= limit
+    ? encoded
+    : JSON.stringify({ contextTruncated: true });
 }
 
 type ApprovalType = "task-level" | "external-write";
