@@ -163,6 +163,16 @@ export class ApiClient {
     return response;
   }
 
+  authProviders(options) { return this.request("/auth/providers", options); }
+
+  exchangeOAuthCode(code, options = {}) {
+    return this.request("/auth/session/exchange", {
+      ...options,
+      method: "POST",
+      body: { code: String(code ?? "").trim() },
+    });
+  }
+
   health(options) { return this.request("/healthz", options); }
   readiness(options) { return this.request("/readyz", options); }
   config(options) { return this.request("/v1/config", options); }
