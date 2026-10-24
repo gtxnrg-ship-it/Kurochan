@@ -628,7 +628,11 @@ describe("TaskWorker", () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), "kuro-workspaces-"));
     created.push(workspaceRoot);
     const store = new RunStore(":memory:");
-    const usage: Array<{ operation: string; profile: RouteProfile; runId?: string }> = [];
+    const usage: Array<{
+      operation: string;
+      profile: RouteProfile;
+      runId?: string;
+    }> = [];
     let worker: TaskWorker | undefined;
     try {
       store.createRun(
