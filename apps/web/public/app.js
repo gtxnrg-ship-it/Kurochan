@@ -45,7 +45,7 @@ const state = {
   integrationTab: "connectors",
   integrationSearch: "",
   integrationCategory: "All",
-  integrationKind: "All",
+  integrationKind: "Built in",
   integrationSelectedId: "github-project",
   integrationSnapshot: {},
   integrationPresets: [],
@@ -455,7 +455,7 @@ function renderChatView(workspace) {
   const runButton = makeElement("button", "button button-run");
   runButton.type = "button";
   runButton.id = "start-run";
-  runButton.disabled = state.sending || state.recording || (!state.authenticated && !FRONTEND_PREVIEW);
+  runButton.disabled = state.sending || state.recording || !state.authenticated;
   runButton.append(
     makeElement("span", "button-icon", "✳"),
     makeElement("span", "", "Build with agents"),
@@ -1722,6 +1722,7 @@ function renderIntegrationsView(workspace) {
   const summary = makeElement("div", "integration-summary");
   summary.id = "integration-summary";
   const filters = makeElement("div", "integration-filters");
+  filters.id = "integration-filters";
   const searchWrap = makeElement("label", "integration-search-wrap");
   const searchLabel = makeElement("span", "sr-only", "Search integrations");
   const search = makeElement("input", "integration-search");
@@ -2787,9 +2788,11 @@ function init() {
   ) {
     navigator.serviceWorker.register(new URL("./sw.js", import.meta.url)).catch(() => {});
   }
-  window.setInterval(() => {
-    if (document.visibilityState === "visible") void refreshConnection();
-  }, 45_000);
+  if (!FRONTEND_PREVIEW) {
+    window.setInterval(() => {
+      if (document.visibilityState === "visible") void refreshConnection();
+    }, 45_000);
+  }
 }
 
 async function boot() {
