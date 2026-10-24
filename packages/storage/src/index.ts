@@ -1285,21 +1285,57 @@ export class RunStore {
     );
   }
 
-  listRuns(limit = 50, before?: number): readonly RunRecord[] {
+  listRuns(
+    limit = 50,
+    before?: number,
+    createdBy?: string,
+  ): readonly RunRecord[] {
     if (!Number.isInteger(limit) || limit < 1 || limit > 200)
       throw new Error("limit must be between 1 and 200.");
-    const rows =
-      before === undefined
-        ? this.db
-            .prepare(
-              "SELECT * FROM runs ORDER BY created_at DESC, id DESC LIMIT ?",
-            )
-            .all(limit)
-        : this.db
-            .prepare(
-              "SELECT * FROM runs WHERE created_at < ? ORDER BY created_at DESC, id DESC LIMIT ?",
-            )
-            .all(before, limit);
+    if (createdBy !== undefined) assertText(createdBy, "createdBy", 200);
+
+    let rows: unknown;
+    if (createdBy === undefined) {
+      rows =
+        before === undefined
+          ? this.db
+              .prepare(
+                "SELECT * FROM runs ORDER BY created_at DESC, id DESC LIMIT ?",
+              )
+              .all(limit)
+          : this.db
+              .prepare(
+                "SELECT * FROM runs WHERE created_at < ? ORDER BY created_at DESC, id DESC LIMIT ?",
+              )
+              .all(before, limit);
+    } else if (createdBy === "local") {
+      // Include historical local runs without an owner, but never a different account.
+      rows =
+        before === undefined
+          ? this.db
+              .prepare(
+                "SELECT * FROM runs WHERE created_by=? OR created_by IS NULL ORDER BY created_at DESC, id DESC LIMIT ?",
+              )
+              .all(createdBy, limit)
+          : this.db
+              .prepare(
+                "SELECT * FROM runs WHERE (created_by=? OR created_by IS NULL) AND created_at < ? ORDER BY created_at DESC, id DESC LIMIT ?",
+              )
+              .all(createdBy, before, limit);
+    } else {
+      rows =
+        before === undefined
+          ? this.db
+              .prepare(
+                "SELECT * FROM runs WHERE created_by=? ORDER BY created_at DESC, id DESC LIMIT ?",
+              )
+              .all(createdBy, limit)
+          : this.db
+              .prepare(
+                "SELECT * FROM runs WHERE created_by=? AND created_at < ? ORDER BY created_at DESC, id DESC LIMIT ?",
+              )
+              .all(createdBy, before, limit);
+    }
     return (rows as RunRow[]).map((row) => asRun(row)!);
   }
 
