@@ -50,7 +50,7 @@ describe("RunStore", () => {
           name: string;
         }[];
         expect(columns.some((column) => column.name === "model")).toBe(true);
-        expect(migrated.pragma("user_version", { simple: true })).toBe(5);
+        expect(migrated.pragma("user_version", { simple: true })).toBe(6);
         const row = migrated
           .prepare(
             "SELECT id, goal, created_by, created_at, updated_at, model FROM runs WHERE id=?",

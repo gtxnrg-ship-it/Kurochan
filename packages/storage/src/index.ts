@@ -828,7 +828,7 @@ export class RunStore {
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
       throw new Error("Workspace search result limit must be between 1 and 100.");
     }
-    const tokens = [...query.matchAll(/[\\p{L}\\p{N}_$]+/gu)]
+    const tokens = [...query.matchAll(/[\p{L}\p{N}_$]+/gu)]
       .map((match) => match[0].slice(0, 80))
       .filter(Boolean)
       .slice(0, 12);
