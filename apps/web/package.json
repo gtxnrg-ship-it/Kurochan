@@ -1,0 +1,12 @@
+{
+  "name": "@kurochan/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node src/dev-server.mjs",
+    "build": "node scripts/build.mjs",
+    "start": "node src/dev-server.mjs --production",
+    "typecheck": "node scripts/check.mjs"
+  }
+}
