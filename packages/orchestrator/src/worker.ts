@@ -1568,7 +1568,10 @@ export class TaskWorker {
 
         const previous = this.finalizationRetries.get(run.id);
         const attempts = (previous?.attempts ?? 0) + 1;
-        const delayMs = Math.min(300_000, 1_000 * 2 ** Math.min(attempts - 1, 8));
+        const delayMs = Math.min(
+          300_000,
+          1_000 * 2 ** Math.min(attempts - 1, 8),
+        );
         this.finalizationRetries.set(run.id, {
           attempts,
           retryAt: Date.now() + delayMs,
