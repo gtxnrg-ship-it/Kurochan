@@ -80,6 +80,29 @@ describe("RunStore", () => {
     }
   });
 
+  it("persists the user's selected inference model across run reloads", () => {
+    const store = makeStore();
+    try {
+      const created = store.createRun({
+        goal: "Run agents with a selected model",
+        profile: "balanced",
+        model: "openrouter/openrouter/free",
+        tasks: [
+          {
+            key: "task",
+            agentId: "engineering/implementer",
+            objective: "Complete the selected-model task.",
+          },
+        ],
+      });
+
+      expect(created.model).toBe("openrouter/openrouter/free");
+      expect(store.getRun(created.id)?.model).toBe("openrouter/openrouter/free");
+    } finally {
+      store.close();
+    }
+  });
+
   it("persists plan metadata and lease-fenced progress with safe source URLs", () => {
     const store = makeStore();
     try {
