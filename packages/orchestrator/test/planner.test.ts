@@ -281,7 +281,9 @@ describe("PlanService", () => {
     expect(compactSpecialist.description.length).toBeLessThanOrEqual(320);
     expect(compactSpecialist.tools).toHaveLength(8);
     // Full pinned instructions remain available to the worker after selection.
-    expect(plan.selectedAgents.some((agent) => agent.id === unseen.id)).toBe(true);
+    expect(plan.selectedAgents.some((agent) => agent.id === unseen.id)).toBe(
+      true,
+    );
   });
 
   it("plans project checkout before repo edits and exposes only configured capabilities", async () => {
