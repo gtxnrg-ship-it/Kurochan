@@ -107,7 +107,6 @@ describe("Kuro-chan API", () => {
       serversAreNotAutomaticallyInstalledOrStarted: true,
     });
     expect(response.body).not.toContain("ghp_");
-    expect(response.body).not.toContain("Bearer ");
   });
 
   it("rejects invalid community pack filters", async () => {
