@@ -14,6 +14,7 @@ import { RunStore } from "@kurochan/storage";
 import {
   approvalGranted,
   jsonCharacterLimit,
+  selectMcpToolsForContext,
   selectMcpToolsForTask,
   TaskWorker,
 } from "../src/worker.js";
@@ -88,6 +89,35 @@ describe("Bounded worker context", () => {
 });
 
 describe("MCP tool relevance routing", () => {
+  it("only exposes bounded schemas in the task-specific tool context", () => {
+    const tools = Array.from({ length: 8 }, (_, index) => ({
+      serverId: "tool-server",
+      serverName: "Tool server",
+      name: "tool_" + index,
+      description: "A test utility tool",
+      inputSchema:
+        index === 0
+          ? {
+              type: "object",
+              properties: {
+                oversized: { type: "string", description: "x".repeat(2_000) },
+              },
+            }
+          : { type: "object", properties: { query: { type: "string" } } },
+      readOnly: true,
+    }));
+    const selected = selectMcpToolsForContext(tools);
+
+    expect(selected.tools).toHaveLength(6);
+    expect(selected.omittedCount).toBe(2);
+    expect(
+      selected.tools.every(
+        (tool) => JSON.stringify(tool.inputSchema).length <= 1_600,
+      ),
+    ).toBe(true);
+    expect(selected.tools.some((tool) => tool.name === "tool_0")).toBe(false);
+  });
+
   it("prefers task-relevant MCP tools over unrelated tools", () => {
     const tools = [
       {
