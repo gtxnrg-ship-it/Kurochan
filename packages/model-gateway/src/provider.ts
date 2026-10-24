@@ -55,6 +55,7 @@ export type ProviderErrorCode =
   | "timeout"
   | "cancelled"
   | "rate_limited"
+  | "quota_exhausted"
   | "upstream_unavailable"
   | "upstream_rejected"
   | "invalid_response";
