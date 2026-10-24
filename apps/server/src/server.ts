@@ -2722,7 +2722,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           planningAttempts: plan.attempts,
         },
         tasks: store.listTasks(run.id),
-        events: store.listEvents(run.id),
+        events: safeRunEvents(store, run.id),
       });
     } catch (error) {
       if (error instanceof PlanError) {
@@ -2828,7 +2828,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       return reply.code(201).send({
         run,
         tasks: store.listTasks(run.id),
-        events: store.listEvents(run.id),
+        events: safeRunEvents(store, run.id),
       });
     } catch (error) {
       requestWarning(app, error, "invalid_run_plan");
@@ -2939,7 +2939,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           planningAttempts: plan.attempts,
         },
         tasks: store.listTasks(run.id),
-        events: store.listEvents(run.id),
+        events: safeRunEvents(store, run.id),
       });
     } catch (error) {
       if (error instanceof PlanError) {
@@ -3034,7 +3034,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     return {
       run,
       tasks: store.listTasks(runId),
-      events: store.listEvents(runId, 0, 100),
+      events: safeRunEvents(store, runId, 0, 100),
     };
   });
 
@@ -3136,13 +3136,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         },
       });
     }
-    const events = store.listEvents(runId, afterId, limit);
-    return {
-      data: events.map((event) => ({
-        ...event,
-        payload: redactMcpSensitiveValues(event.payload),
-      })),
-    };
+    return { data: safeRunEvents(store, runId, afterId, limit) };
   });
 
   // Keep a per-server cap so a large number of idle SSE clients cannot exhaust
@@ -3654,6 +3648,18 @@ function parseBoundedInteger(
   if (!Number.isInteger(parsed) || parsed < min || parsed > max)
     throw new Error(`Value must be an integer between ${min} and ${max}.`);
   return parsed;
+}
+
+function safeRunEvents(
+  store: RunStore,
+  runId: string,
+  afterId = 0,
+  limit = 200,
+) {
+  return store.listEvents(runId, afterId, limit).map((event) => ({
+    ...event,
+    payload: redactMcpSensitiveValues(event.payload),
+  }));
 }
 
 function redactSensitiveText(value: string): string {
