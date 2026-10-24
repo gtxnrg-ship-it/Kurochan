@@ -1202,6 +1202,63 @@ describe("Kuro-chan API", () => {
     expect(signal?.aborted).toBe(true);
   });
 
+  it("keeps the configured free router selectable when the upstream model catalog omits it", async () => {
+    const provider: ChatProvider = {
+      id: "openrouter",
+      displayName: "OpenRouter",
+      defaultModel: "openrouter/free",
+      isConfigured: true,
+      complete: async (): Promise<ChatCompletionOutput> => ({
+        providerId: "openrouter",
+        model: "openrouter/free",
+        content: "ok",
+        latencyMs: 1,
+      }),
+      listModels: async () => [
+        {
+          id: "vendor/other-model",
+          name: "Other model",
+        },
+      ],
+    };
+    app = buildServer({
+      env: {},
+      providers: {
+        providers: new Map<ProviderId, ChatProvider>([["openrouter", provider]]),
+        statuses: [
+          {
+            id: "openrouter",
+            name: "OpenRouter",
+            configured: true,
+            defaultModel: "openrouter/free",
+            capabilityNotes: [],
+          },
+        ],
+      },
+      logger: false,
+      store: new RunStore(":memory:"),
+    });
+
+    const response = await app.inject({ method: "GET", url: "/v1/models" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().providers[0].models).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "openrouter/free",
+          name: "Free Models Router",
+          value: "openrouter/openrouter/free",
+          isDefault: true,
+        }),
+        expect.objectContaining({
+          id: "vendor/other-model",
+          value: "openrouter/vendor/other-model",
+          isDefault: false,
+        }),
+      ]),
+    );
+  });
+
   it("requires an API token when one is configured", async () => {
     app = buildServer({
       env: { KUROCHAN_API_TOKEN: "test-token" },
