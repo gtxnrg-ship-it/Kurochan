@@ -51,6 +51,7 @@ The `headers` map works the same way as the stdio `env` map: each value names an
 
 1. Kuro-chan connects to the configured servers and discovers their advertised tool schemas.
 2. For each specialist task, Kuro-chan ranks available tool descriptions against the goal, task objective and specialist profile. It provides a bounded set of the most relevant tools with their server IDs, names and input schemas.
+   The worker exposes at most six MCP tools per task and only includes schemas that fit a bounded context budget. Calls to tools omitted from that task's allow-list are rejected even if the server has them. Core argument types, required fields, enums, and bounded object/array/string/number constraints are checked before approval or execution.
 3. A model can request `mcp.call` using only the discovered `serverId` and tool name. The server, transport and credentials are fixed by operator configuration and cannot be changed by a model call.
 4. A tool is treated as read-only **only** when its MCP server explicitly advertises `annotations.readOnlyHint: true`. Calls without that explicit annotation require per-tool approval. Tool results are bounded and recorded as execution evidence.
 5. Inspect `GET /v1/mcp/status?probe=true` to attempt connections and list discovered tools. `GET /v1/worker/status` shows configured MCP server status without initiating the probe.
