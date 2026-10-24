@@ -1452,6 +1452,13 @@ describe("Kuro-chan API", () => {
     });
     expect(created.statusCode).toBe(201);
     const runId = created.json().run.id as string;
+    const createdEvent = created
+      .json()
+      .events.find((event: { type: string }) => event.type === "run.created") as {
+      payload: { goal: string };
+    };
+    expect(createdEvent.payload.goal).toContain("[REDACTED_SECRET]");
+    expect(createdEvent.payload.goal).not.toContain("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
     expect(created.json().tasks).toHaveLength(2);
     expect(
       created
@@ -1469,6 +1476,20 @@ describe("Kuro-chan API", () => {
     expect(
       events.json().data.map((event: { type: string }) => event.type),
     ).toContain("run.plan_created");
+    const details = await app.inject({
+      method: "GET",
+      url: `/v1/runs/${runId}`,
+    });
+    expect(details.statusCode).toBe(200);
+    const detailCreatedEvent = details
+      .json()
+      .events.find((event: { type: string }) => event.type === "run.created") as {
+      payload: { goal: string };
+    };
+    expect(detailCreatedEvent.payload.goal).toContain("[REDACTED_SECRET]");
+    expect(detailCreatedEvent.payload.goal).not.toContain(
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    );
     const planEvent = events
       .json()
       .data.find(
