@@ -57,7 +57,9 @@ describe("Kuro-chan integration directory", () => {
       command: "npx",
       args: ["-y", "firebase-tools@latest", "mcp"],
     });
-    expect(buildMcpConfig(INTEGRATION_CATALOG.find((item) => item.id === "figma"))).toBeNull();
+    expect(
+      buildMcpConfig(INTEGRATION_CATALOG.find((item) => item.id === "figma")),
+    ).toBeNull();
   });
 
   it("distinguishes configured, unprobed and OAuth-blocked MCP services", () => {
@@ -97,14 +99,22 @@ describe("Kuro-chan integration directory", () => {
   });
 
   it("reports GitHub write access as needing setup until the native connector is configured", () => {
-    const github = INTEGRATION_CATALOG.find((item) => item.id === "github-project");
-    expect(resolveIntegrationStatus(github, { research: { githubProject: {} } })).toMatchObject({
+    const github = INTEGRATION_CATALOG.find(
+      (item) => item.id === "github-project",
+    );
+    expect(
+      resolveIntegrationStatus(github, { research: { githubProject: {} } }),
+    ).toMatchObject({
       label: "Needs setup",
       tone: "neutral",
     });
-    expect(resolveIntegrationStatus(github, {
-      research: { githubProject: { configured: true, publishingEnabled: false } },
-    })).toMatchObject({
+    expect(
+      resolveIntegrationStatus(github, {
+        research: {
+          githubProject: { configured: true, publishingEnabled: false },
+        },
+      }),
+    ).toMatchObject({
       label: "Configured",
       detail: expect.stringContaining("publishing remains disabled"),
     });
