@@ -347,6 +347,53 @@ describe("WorkspaceRuntime", () => {
     );
   });
 
+  it("bounds file reads and supports one-based line ranges", async () => {
+    const root = await mkdtemp(join(tmpdir(), "kuro-workspaces-"));
+    created.push(root);
+    const runtime = new WorkspaceRuntime({ root: resolve(root) });
+    const runId = "e6e2a7ab-c1e6-4cb5-a451-04a2c0d33029";
+    const lines = Array.from(
+      { length: 120 },
+      (_, i) => "line-" + (i + 1) + "-" + "x".repeat(20),
+    );
+    await runtime.writeFile(runId, "src/large.ts", lines.join("\n"));
+
+    const range = await runtime.execute(runId, {
+      name: "workspace.read_file",
+      arguments: { path: "src/large.ts", startLine: 4, endLine: 6 },
+    });
+    expect(range).toMatchObject({
+      ok: true,
+      result: {
+        startLine: 4,
+        endLine: 6,
+        totalLines: 120,
+        truncated: false,
+        content: lines.slice(3, 6).join("\n"),
+      },
+    });
+
+    const bounded = await runtime.execute(runId, {
+      name: "workspace.read_file",
+      arguments: {
+        path: "src/large.ts",
+        maxCharacters: 1_000,
+      },
+    });
+    expect(bounded).toMatchObject({
+      ok: true,
+      result: {
+        startLine: 1,
+        totalLines: 120,
+        truncated: true,
+      },
+    });
+    expect((bounded as { result: { content: string } }).result.content).toHaveLength(1000);
+    expect(
+      (bounded as { result: { notice: string } }).result.notice,
+    ).toContain("truncated");
+  });
+
   it("replaces exact text only when the expected match count is met", async () => {
     const root = await mkdtemp(join(tmpdir(), "kuro-workspaces-"));
     created.push(root);
