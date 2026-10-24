@@ -372,6 +372,12 @@ export class OpenAICompatibleChatProvider implements ChatProvider {
       );
     }
     if (!response.ok) {
+      if (response.status === 402)
+        throw new ProviderError(
+          "quota_exhausted",
+          `${this.displayName} has exhausted its available credits or quota.`,
+          { retryable: true, statusCode: 402 },
+        );
       if (response.status === 429)
         throw new ProviderError(
           "rate_limited",
@@ -583,6 +589,12 @@ export class OpenAICompatibleChatProvider implements ChatProvider {
 
     const body = await readBoundedBody(response, this.maxResponseBytes);
     if (!response.ok) {
+      if (response.status === 402)
+        throw new ProviderError(
+          "quota_exhausted",
+          `${this.displayName} has exhausted its available credits or quota.`,
+          { retryable: true, statusCode: 402 },
+        );
       if (response.status === 429)
         throw new ProviderError(
           "rate_limited",
