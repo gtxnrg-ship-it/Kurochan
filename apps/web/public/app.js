@@ -234,6 +234,9 @@ function renderChatView(workspace) {
   scroll.id = "chat-scroll";
   const list = makeElement("div", "message-list");
   list.id = "message-list";
+  list.setAttribute("role", "log");
+  list.setAttribute("aria-live", "polite");
+  list.setAttribute("aria-relevant", "additions text");
   if (!state.messages.length) {
     const welcome = makeElement("div", "welcome-block");
     const badge = makeElement("div", "welcome-mark");
