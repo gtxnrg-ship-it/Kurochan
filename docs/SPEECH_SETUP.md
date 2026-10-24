@@ -10,7 +10,7 @@ The API and whichever worker handles the interaction should be configured from s
 KUROCHAN_STT_BASE_URL=
 KUROCHAN_STT_API_KEY=
 KUROCHAN_STT_MODEL=
-KUROCHAN_STT_LANGUAGE=en
+KUROCHAN_STT_LANGUAGE= # Optional; omit to allow provider language detection
 
 KUROCHAN_TTS_BASE_URL=
 KUROCHAN_TTS_API_KEY=
@@ -18,14 +18,14 @@ KUROCHAN_TTS_MODEL=
 # Leave voice/style blank until a compatible provider/model is selected.
 KUROCHAN_TTS_VOICE=
 KUROCHAN_TTS_FORMAT=mp3
-KUROCHAN_TTS_INSTRUCTIONS=.
+KUROCHAN_TTS_INSTRUCTIONS=
 
 KUROCHAN_SPEECH_MAX_AUDIO_BYTES=26214400
 KUROCHAN_SPEECH_MAX_TEXT_CHARACTERS=20000
 KUROCHAN_SPEECH_MAX_RESPONSE_BYTES=20971520
 ```
 
-The blank URL/model values disable that operation. API keys are optional only when the configured local service itself does not require authentication. Kuro-chan does not choose a voice ID or speaking style for you: leave those values blank until the TTS provider/model is selected and evaluated. If the provider requires a voice ID, configure one it explicitly supports. Accent, naturalness, latency, and voice characteristics depend on the model and must be tested rather than promised by a prompt.
+The blank URL/model values disable that operation. If `KUROCHAN_STT_LANGUAGE` is blank, Kuro-chan omits the language hint so a compatible transcription provider can auto-detect it. API keys are optional only when the configured local service itself does not require authentication. Kuro-chan does not choose a voice ID or speaking style for you: leave those values blank until the TTS provider/model is selected and evaluated. If the provider requires a voice ID, configure one it explicitly supports. Accent, naturalness, latency, and voice characteristics depend on the model and must be tested rather than promised by a prompt.
 
 For a local service, loopback HTTP is permitted for development. Remote speech endpoints must use HTTPS. Credentials cannot be embedded in base URLs; Kuro-chan never returns secret values from status routes.
 
