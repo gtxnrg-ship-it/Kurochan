@@ -1,0 +1,30 @@
+name: Temporary main formatting diff
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  format-diff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: pnpm install --frozen-lockfile
+      - name: Show formatter changes
+        run: |
+          pnpm exec prettier apps/web/public/app.css > /tmp/app.css
+          diff -u apps/web/public/app.css /tmp/app.css || true
+          pnpm exec prettier apps/web/test/markdown.test.ts > /tmp/markdown.test.ts
+          diff -u apps/web/test/markdown.test.ts /tmp/markdown.test.ts || true
