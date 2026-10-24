@@ -1118,8 +1118,32 @@ export class TaskWorker {
           ) {
             if (
               call.name === "github.create_pull_request" &&
-              !approvalGranted(this.options.store, task, "external-write")
+              !this.options.githubProject?.canPublish
             ) {
+              outcome = {
+                name: "github.create_pull_request" as const,
+                ok: false,
+                error: {
+                  code: "github_project_write_disabled",
+                  message:
+                    "GitHub pull-request publishing is disabled or not configured for this deployment.",
+                },
+              };
+            } else if (
+              call.name === "github.create_pull_request" &&
+              !this.options.store.consumeExternalActionApproval(
+                task.runId,
+                task.id,
+                this.workerId,
+                {
+                  actionName: "github.create_pull_request",
+                  argumentsHash: fingerprintMcpArguments(call.arguments),
+                },
+              )
+            ) {
+              const preview = JSON.stringify(
+                redactMcpSensitiveValues(call.arguments),
+              ).slice(0, 2_000);
               this.options.store.requestTaskApproval(
                 task.runId,
                 task.id,
@@ -1129,8 +1153,11 @@ export class TaskWorker {
                     "Publish this run's workspace changes to GitHub by creating a pull request.",
                   taskId: task.id,
                   approvalType: "external-write",
+                  actionName: "github.create_pull_request",
+                  argumentsHash: fingerprintMcpArguments(call.arguments),
+                  argumentsPreview: preview,
                   warning:
-                    "This operation creates a branch and a pull request in the allowlisted GitHub repository. Review the proposed changes before approving.",
+                    "This operation creates a branch and a pull request in the allowlisted GitHub repository. Review the exact repository, title, body, and proposed changes before approving.",
                 },
               );
               throw Object.assign(
@@ -1142,8 +1169,8 @@ export class TaskWorker {
                   retryable: false,
                 },
               );
-            }
-            outcome = this.options.githubProject
+            } else {
+              outcome = this.options.githubProject
               ? await this.withWorkspaceLock(task.runId, () =>
                   this.options.githubProject!.execute(
                     task.runId,
@@ -1151,15 +1178,16 @@ export class TaskWorker {
                     signal,
                   ),
                 )
-              : {
-                  name: call.name as GitHubProjectToolCall["name"],
-                  ok: false,
-                  error: {
-                    code: "github_project_not_configured",
-                    message:
-                      "Configure KUROCHAN_GITHUB_TOKEN and KUROCHAN_GITHUB_ALLOWED_REPOSITORIES to enable project checkout and pull requests.",
-                  },
-                };
+                : {
+                    name: call.name as GitHubProjectToolCall["name"],
+                    ok: false,
+                    error: {
+                      code: "github_project_not_configured",
+                      message:
+                        "Configure KUROCHAN_GITHUB_TOKEN and KUROCHAN_GITHUB_ALLOWED_REPOSITORIES to enable project checkout and pull requests.",
+                    },
+                  };
+            }
           } else if (call.name === "mcp.call") {
             if (!this.options.mcpTools?.isConfigured) {
               outcome = {
@@ -1239,7 +1267,7 @@ export class TaskWorker {
                     };
                   } else if (
                     !descriptor.readOnly &&
-                    !this.options.store.consumeExternalWriteApproval(
+                    !this.options.store.consumeExternalActionApproval(
                       task.runId,
                       task.id,
                       this.workerId,
