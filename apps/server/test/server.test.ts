@@ -1380,6 +1380,37 @@ describe("Kuro-chan API", () => {
     });
     expect(cancelled.statusCode).toBe(200);
     expect(cancelled.json().run.status).toBe("cancelled");
+
+    const invalidCursor = await app.inject({
+      method: "GET",
+      url: `/v1/runs/${runId}/events/stream?afterId=-1`,
+    });
+    expect(invalidCursor.statusCode).toBe(400);
+    expect(invalidCursor.json()).toMatchObject({
+      error: { code: "invalid_event_cursor" },
+    });
+
+    const stream = await app.inject({
+      method: "GET",
+      url: `/v1/runs/${runId}/events/stream`,
+    });
+    expect(stream.statusCode).toBe(200);
+    expect(stream.headers["content-type"]).toContain("text/event-stream");
+    expect(stream.body).toContain("event: run.plan_created");
+    expect(stream.body).toContain("event: run.cancelled");
+    expect(stream.body).toContain("event: stream.end");
+
+    const priorEvents = events.json().data as Array<{ id: number }>;
+    const cursor = Math.max(...priorEvents.map((event) => event.id));
+    const resumed = await app.inject({
+      method: "GET",
+      url: `/v1/runs/${runId}/events/stream`,
+      headers: { "last-event-id": String(cursor) },
+    });
+    expect(resumed.statusCode).toBe(200);
+    expect(resumed.body).not.toContain("event: run.plan_created");
+    expect(resumed.body).toContain("event: run.cancelled");
+    expect(resumed.body).toContain("event: stream.end");
   });
 
   it("exposes catalog metadata and searches agents without exposing full prompts", async () => {
