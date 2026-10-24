@@ -356,14 +356,11 @@ function renderChatView(workspace) {
       "A CLEARER WAY TO GET THERE",
     );
     const title = makeElement("h2", "welcome-title");
-    title.append(
-      "Start with the idea. ",
-      makeElement("span", "", "We'll find the shape."),
-    );
+    title.append("OmniRoute");
     const copy = makeElement(
       "p",
       "welcome-copy",
-      "You don't need the perfect prompt. Say what you're trying to do, what you already know, or where you're stuck.",
+      "Choose a routing profile below. OmniRoute uses configured providers and can fall back when a provider cannot serve the request.",
     );
     const suggestions = makeElement("div", "suggestion-grid");
     [
@@ -460,6 +457,21 @@ function renderChatView(workspace) {
     makeElement("span", "button-icon", "✳"),
     makeElement("span", "", "Build with agents"),
   );
+  const integrationsButton = makeElement("button", "button button-integrations");
+  integrationsButton.type = "button";
+  integrationsButton.id = "open-integrations-from-composer";
+  integrationsButton.title = "Browse integrations";
+  integrationsButton.setAttribute("aria-label", "Browse integrations");
+  integrationsButton.append(
+    makeElement("span", "button-icon", "⌘"),
+    makeElement("span", "", "Integrations"),
+  );
+  integrationsButton.addEventListener("click", () => {
+    setView("integrations");
+    if (!state.integrationsLoaded && !state.integrationsLoading)
+      void loadIntegrations();
+  });
+
   const voiceButton = makeElement("button", "button button-voice");
   voiceButton.type = "button";
   voiceButton.id = "voice-turn";
@@ -494,7 +506,7 @@ function renderChatView(workspace) {
     makeElement("span", "", state.sending ? "Sending…" : "Send"),
     makeElement("span", "send-arrow", "↗"),
   );
-  actions.append(runButton, voiceButton, sendButton);
+  actions.append(runButton, integrationsButton, voiceButton, sendButton);
   toolbar.append(hint, actions);
   composeBox.append(textarea, toolbar);
   compose.append(
@@ -511,7 +523,16 @@ function renderChatView(workspace) {
   );
   shell.append(modelRow, compose);
   workspace.append(shell);
-  textarea.addEventListener("input", resizeTextarea);
+  const updateComposerAction = () => {
+    const hasText = Boolean(textarea.value.trim());
+    voiceButton.hidden = hasText;
+    sendButton.hidden = !hasText;
+  };
+  textarea.addEventListener("input", () => {
+    resizeTextarea();
+    updateComposerAction();
+  });
+  updateComposerAction();
   compose.addEventListener("submit", (event) => {
     event.preventDefault();
     void sendMessage();
