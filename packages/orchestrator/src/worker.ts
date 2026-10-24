@@ -729,17 +729,17 @@ export class TaskWorker {
       Math.min(5_000, Math.floor(this.leaseMs / 3)),
     );
     const heartbeat = setInterval(() => {
-      const currentRun = this.options.store.getRun(task.runId);
-      if (!currentRun || currentRun.status === "cancelled") {
-        leaseFailure = Object.assign(new Error("Run was cancelled."), {
-          code: "run_cancelled",
-          retryable: false,
-        });
-        controller.abort(leaseFailure);
-        clearInterval(heartbeat);
-        return;
-      }
       try {
+        const currentRun = this.options.store.getRun(task.runId);
+        if (!currentRun || currentRun.status === "cancelled") {
+          leaseFailure = Object.assign(new Error("Run was cancelled."), {
+            code: "run_cancelled",
+            retryable: false,
+          });
+          controller.abort(leaseFailure);
+          clearInterval(heartbeat);
+          return;
+        }
         this.options.store.renewTaskLease(
           task.runId,
           task.id,
@@ -747,9 +747,22 @@ export class TaskWorker {
           this.leaseMs,
         );
       } catch (error) {
-        leaseFailure = error;
-        controller.abort(error);
+        // A transient storage error must not escape an interval callback and
+        // crash the worker process. Fence the output and let the task retry.
+        const detail = String(
+          redactMcpSensitiveValues(
+            error instanceof Error ? error.message : "Task heartbeat failed.",
+          ),
+        ).slice(0, 500);
+        leaseFailure = Object.assign(
+          new Error("Task lease heartbeat failed; output will be discarded."),
+          { code: "lease_lost", retryable: true },
+        );
+        controller.abort(leaseFailure);
         clearInterval(heartbeat);
+        this.options.onError?.(
+          new Error("Task lease heartbeat failed: " + detail),
+        );
         return;
       }
       this.writeHeartbeat("busy", task.id, {
@@ -862,9 +875,12 @@ export class TaskWorker {
           taskId: task.id,
           workerId: this.workerId,
           code: (error as { code?: string }).code ?? "task_execution_failed",
-          message: (error instanceof Error
-            ? error.message
-            : "Task execution failed."
+          message: String(
+            redactMcpSensitiveValues(
+              error instanceof Error
+                ? error.message
+                : "Task execution failed.",
+            ),
           ).slice(0, 2000),
           retryable: isRetryable(error),
         });
