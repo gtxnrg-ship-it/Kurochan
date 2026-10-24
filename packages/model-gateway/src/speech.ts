@@ -461,7 +461,9 @@ export class OpenAICompatibleSpeechRuntime implements SpeechRuntime {
           ? {}
           : { instructions: env.KUROCHAN_TTS_INSTRUCTIONS }),
       },
-      defaultLanguage: env.KUROCHAN_STT_LANGUAGE?.trim() || undefined,
+      ...(env.KUROCHAN_STT_LANGUAGE?.trim()
+        ? { defaultLanguage: env.KUROCHAN_STT_LANGUAGE.trim() }
+        : {}),
       ...overrides,
     });
   }
