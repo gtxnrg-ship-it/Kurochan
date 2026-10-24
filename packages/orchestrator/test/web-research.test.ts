@@ -144,8 +144,8 @@ describe("WebResearchRuntime", () => {
     const totalSnippetCharacters = body.items
       .flatMap((item) => item.snippets)
       .reduce((total, snippet) => total + snippet.length, 0);
-    expect(totalSnippetCharacters).toBeLessThanOrEqual(42_000);
-    expect(totalSnippetCharacters).toBeGreaterThan(30_000);
+    expect(totalSnippetCharacters).toBeLessThanOrEqual(28_000);
+    expect(totalSnippetCharacters).toBeGreaterThan(25_000);
   });
 
   it("does not invent API credentials or make a request when unconfigured", async () => {
@@ -216,6 +216,11 @@ describe("WebResearchRuntime", () => {
               url: "javascript:alert(1)",
               title: "Injected",
               snippets: ["Do not trust this result."],
+            },
+            {
+              url: "https://long.example/" + "x".repeat(1_100),
+              title: "Oversized",
+              snippets: ["Do not retain an oversized URL."],
             },
             {
               url: "https://valid.example/docs",
