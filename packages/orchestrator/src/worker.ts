@@ -268,8 +268,8 @@ export function selectMcpToolsForTask(
         agent.tools.join(" ")
       )
         .toLowerCase()
-        .replace(/[^\\p{L}\\p{N}\\s-]/gu, " ")
-        .split(/\\s+/)
+        .replace(/[^\p{L}\p{N}\s-]/gu, " ")
+        .split(/\s+/)
         .filter((term) => term.length > 2),
     ),
   ];
