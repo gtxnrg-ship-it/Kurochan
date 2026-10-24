@@ -328,9 +328,7 @@ export class WebResearchRuntime implements WebResearchExecutor {
           }
           const title = (item.title?.trim() || hostname(url)).slice(0, 300);
           const snippets = (item.snippets ?? [])
-            .map((snippet) =>
-              snippet.trim().slice(0, MAX_SNIPPET_CHARACTERS),
-            )
+            .map((snippet) => snippet.trim().slice(0, MAX_SNIPPET_CHARACTERS))
             .filter(Boolean)
             .slice(0, MAX_SNIPPETS_PER_URL)
             .map((snippet) => {
