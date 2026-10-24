@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { WorkspaceRuntime } from "../src/workspace.js";
+import { RunStore } from "@kurochan/storage";
 
 const roots: string[] = [];
 
@@ -22,6 +23,87 @@ async function createWorkspace() {
 }
 
 describe("workspace editing tools", () => {
+  it("indexes code incrementally, ranks relevant files, and skips generated dependency trees", async () => {
+    const root = await mkdtemp(join(tmpdir(), "kuro-workspace-index-"));
+    roots.push(root);
+    const store = new RunStore(":memory:");
+    try {
+      const run = store.createRun({
+        goal: "Test indexed workspace retrieval",
+        profile: "balanced",
+        tasks: [
+          {
+            key: "search",
+            agentId: "builder",
+            objective: "Search the codebase",
+          },
+        ],
+      });
+      const runtime = new WorkspaceRuntime({
+        root: resolve(root),
+        searchIndex: store,
+      });
+      await runtime.writeFile(
+        run.id,
+        "src/router.ts",
+        'export function getProviderFallback() { return "provider fallback"; }\n',
+      );
+      await runtime.writeFile(
+        run.id,
+        "README.md",
+        "Project overview and installation notes.\n",
+      );
+      await runtime.writeFile(
+        run.id,
+        "node_modules/fake-package/index.js",
+        "export function getProviderFallback() {}\n",
+      );
+      await runtime.writeFile(
+        run.id,
+        "dist/generated.js",
+        "export function getProviderFallback() {}\n",
+      );
+
+      const fileList = await runtime.listFiles(run.id);
+      expect(fileList.map((file) => file.path)).not.toContain(
+        "node_modules/fake-package/index.js",
+      );
+      expect(fileList.map((file) => file.path)).not.toContain(
+        "dist/generated.js",
+      );
+
+      const matches = await runtime.searchText(
+        run.id,
+        "getProviderFallback",
+        10,
+      );
+      expect(matches[0]).toMatchObject({
+        path: "src/router.ts",
+        line: 1,
+      });
+      expect(matches[0]?.text).toContain("provider fallback");
+      const indexedBefore = store.getWorkspaceIndexState(run.id);
+      expect(indexedBefore.map((file) => file.path)).toEqual([
+        "README.md",
+        "src/router.ts",
+      ]);
+
+      await runtime.writeFile(
+        run.id,
+        "src/router.ts",
+        'export function selectModel() { return "chosen"; }\n',
+      );
+      expect(
+        await runtime.searchText(run.id, "getProviderFallback", 10),
+      ).toHaveLength(0);
+      expect(
+        (await runtime.searchText(run.id, "selectModel", 10))[0]?.path,
+      ).toBe("src/router.ts");
+    } finally {
+      store.close();
+    }
+  });
+
   it("reads a bounded, line-numbered file range", async () => {
     const { runtime, runId } = await createWorkspace();
     await runtime.writeFile(

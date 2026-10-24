@@ -933,7 +933,10 @@ export class TaskWorker {
 
   constructor(private readonly options: TaskWorkerOptions) {
     this.workerId = options.workerId ?? "worker-" + randomUUID();
-    this.tools = new WorkspaceRuntime({ root: options.workspaceRoot });
+    this.tools = new WorkspaceRuntime({
+      root: options.workspaceRoot,
+      searchIndex: options.store,
+    });
     this.researchTools = new GitHubResearchRuntime();
     this.webResearch = options.webResearch ?? new WebResearchRuntime();
     this.communitySkills =
