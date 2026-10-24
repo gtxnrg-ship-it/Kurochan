@@ -413,11 +413,19 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       rawStatusCode < 500
         ? rawStatusCode
         : 500;
-    if (status >= 500)
+    if (status >= 500) {
+      const message = error instanceof Error ? error.message : String(error);
       request.log.error(
-        { err: error, requestId: request.id },
+        {
+          err: {
+            name: error instanceof Error ? error.name : "UnknownError",
+            message: redactSensitiveText(message),
+          },
+          requestId: request.id,
+        },
         "Unhandled API error",
       );
+    }
     const tooLarge = status === 413;
     const badJson = status === 400;
     void reply.code(status).send({
@@ -3306,13 +3314,24 @@ function parseBoundedInteger(
   return parsed;
 }
 
+function redactSensitiveText(value: string): string {
+  return value
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/-]{12,}=?/gi, "Bearer [REDACTED]")
+    .replace(/\b(?:gh[pousr]|github_pat)_[A-Za-z0-9_]{12,}\b/g, "[REDACTED_TOKEN]")
+    .replace(/\bsk-(?:proj-|ant-)?[A-Za-z0-9_-]{16,}\b/g, "[REDACTED_TOKEN]")
+    .replace(/\bAIza[0-9A-Za-z_-]{35}\b/g, "[REDACTED_TOKEN]")
+    .replace(/\b(?:api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|client[-_ ]?secret|password|passwd|secret|token)\s*[:=]\s*["']?[A-Za-z0-9._~+/-]{8,}["']?/gi, "[REDACTED_SECRET]")
+    .slice(0, 2000);
+}
+
 function requestWarning(
   app: FastifyInstance,
   error: unknown,
   code: string,
 ): void {
+  const message = error instanceof Error ? error.message : String(error);
   app.log.warn(
-    { error: error instanceof Error ? error.message : String(error), code },
+    { error: redactSensitiveText(message), code },
     "Backend request could not be completed",
   );
 }
