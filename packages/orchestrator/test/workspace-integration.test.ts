@@ -8,9 +8,7 @@ const roots: string[] = [];
 
 afterEach(async () => {
   await Promise.all(
-    roots
-      .splice(0)
-      .map((root) => rm(root, { recursive: true, force: true })),
+    roots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
   );
 });
 
@@ -53,48 +51,41 @@ describe("workspace editing tools", () => {
     });
   });
 
-  it(
-    "only replaces text when the expected exact-match count agrees",
-    async () => {
-      const { runtime, runId } = await createWorkspace();
-      await runtime.writeFile(
-        runId,
-        "src/app.css",
-        ".button { color: red; }\n",
-      );
-      const mismatch = await runtime.execute(runId, {
-        name: "workspace.replace_text",
-        arguments: {
-          path: "src/app.css",
-          search: "color: red;",
-          replace: "color: blue;",
-          expectedMatches: 2,
-        },
-      });
-      expect(mismatch).toMatchObject({
-        ok: false,
-        error: { code: "replacement_count_mismatch" },
-      });
-      expect(
-        (await runtime.readFile(runId, "src/app.css")).content,
-      ).toContain("color: red;");
+  it("only replaces text when the expected exact-match count agrees", async () => {
+    const { runtime, runId } = await createWorkspace();
+    await runtime.writeFile(runId, "src/app.css", ".button { color: red; }\n");
+    const mismatch = await runtime.execute(runId, {
+      name: "workspace.replace_text",
+      arguments: {
+        path: "src/app.css",
+        search: "color: red;",
+        replace: "color: blue;",
+        expectedMatches: 2,
+      },
+    });
+    expect(mismatch).toMatchObject({
+      ok: false,
+      error: { code: "replacement_count_mismatch" },
+    });
+    expect((await runtime.readFile(runId, "src/app.css")).content).toContain(
+      "color: red;",
+    );
 
-      const replaced = await runtime.execute(runId, {
-        name: "workspace.replace_text",
-        arguments: {
-          path: "src/app.css",
-          search: "color: red;",
-          replace: "color: blue;",
-          expectedMatches: 1,
-        },
-      });
-      expect(replaced).toMatchObject({
-        ok: true,
-        result: { matchesReplaced: 1, overwritten: true },
-      });
-      expect(
-        (await runtime.readFile(runId, "src/app.css")).content,
-      ).toContain("color: blue;");
-    },
-  );
+    const replaced = await runtime.execute(runId, {
+      name: "workspace.replace_text",
+      arguments: {
+        path: "src/app.css",
+        search: "color: red;",
+        replace: "color: blue;",
+        expectedMatches: 1,
+      },
+    });
+    expect(replaced).toMatchObject({
+      ok: true,
+      result: { matchesReplaced: 1, overwritten: true },
+    });
+    expect((await runtime.readFile(runId, "src/app.css")).content).toContain(
+      "color: blue;",
+    );
+  });
 });

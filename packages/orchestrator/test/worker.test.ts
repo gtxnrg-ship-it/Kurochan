@@ -1564,74 +1564,71 @@ describe("TaskWorker", () => {
 });
 
 describe("Worker context compaction", () => {
-  it(
-    "preserves task instructions and recent tool output while summarizing older exchanges",
-    () => {
-      const messages = [
-        {
-          role: "user" as const,
-          content: JSON.stringify({
-            kind: "task_context",
-            goal: "Build and verify the service",
-          }),
-        },
-        {
-          role: "assistant" as const,
-          content: JSON.stringify({
-            status: "tool_calls",
-            summary: "Inspect the project files",
-            toolCalls: [{ name: "workspace.list_files", arguments: {} }],
-          }),
-        },
-        {
-          role: "user" as const,
-          content: JSON.stringify({
-            kind: "tool_results",
-            results: [
-              {
-                name: "workspace.read_file",
-                ok: true,
-                result: { content: "old source ".repeat(500) },
-              },
-            ],
-          }),
-        },
-        {
-          role: "assistant" as const,
-          content: JSON.stringify({
-            status: "tool_calls",
-            summary: "Run the verification step",
-            toolCalls: [
-              {
-                name: "sandbox.run",
-                arguments: { command: "pnpm test" },
-              },
-            ],
-          }),
-        },
-        {
-          role: "user" as const,
-          content: JSON.stringify({
-            kind: "tool_results",
-            results: [
-              {
-                name: "sandbox.run",
-                ok: true,
-                result: { exitCode: 0 },
-              },
-            ],
-          }),
-        },
-      ];
+  it("preserves task instructions and recent tool output while summarizing older exchanges", () => {
+    const messages = [
+      {
+        role: "user" as const,
+        content: JSON.stringify({
+          kind: "task_context",
+          goal: "Build and verify the service",
+        }),
+      },
+      {
+        role: "assistant" as const,
+        content: JSON.stringify({
+          status: "tool_calls",
+          summary: "Inspect the project files",
+          toolCalls: [{ name: "workspace.list_files", arguments: {} }],
+        }),
+      },
+      {
+        role: "user" as const,
+        content: JSON.stringify({
+          kind: "tool_results",
+          results: [
+            {
+              name: "workspace.read_file",
+              ok: true,
+              result: { content: "old source ".repeat(500) },
+            },
+          ],
+        }),
+      },
+      {
+        role: "assistant" as const,
+        content: JSON.stringify({
+          status: "tool_calls",
+          summary: "Run the verification step",
+          toolCalls: [
+            {
+              name: "sandbox.run",
+              arguments: { command: "pnpm test" },
+            },
+          ],
+        }),
+      },
+      {
+        role: "user" as const,
+        content: JSON.stringify({
+          kind: "tool_results",
+          results: [
+            {
+              name: "sandbox.run",
+              ok: true,
+              result: { exitCode: 0 },
+            },
+          ],
+        }),
+      },
+    ];
 
-      const compacted = compactWorkerMessages(messages);
+    const compacted = compactWorkerMessages(messages);
 
-      expect(compacted).toHaveLength(4);
-      expect(compacted[0]?.content).toContain("Build and verify the service");
-      expect(compacted[1]?.content).toContain("compacted_action_history");
-      expect(compacted[1]?.content).not.toContain("old source ".repeat(50));
-      expect(compacted[2]?.content).toBe(messages[3]?.content);
-      expect(compacted[3]?.content).toBe(messages[4]?.content);
-    },
-  );
+    expect(compacted).toHaveLength(4);
+    expect(compacted[0]?.content).toContain("Build and verify the service");
+    expect(compacted[1]?.content).toContain("compacted_action_history");
+    expect(compacted[1]?.content).not.toContain("old source ".repeat(50));
+    expect(compacted[2]?.content).toBe(messages[3]?.content);
+    expect(compacted[3]?.content).toBe(messages[4]?.content);
+  });
 });

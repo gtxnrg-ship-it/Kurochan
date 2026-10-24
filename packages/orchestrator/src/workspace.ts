@@ -221,9 +221,7 @@ export class WorkspaceRuntime {
             ...(args.startLine === undefined
               ? {}
               : { startLine: args.startLine }),
-            ...(args.endLine === undefined
-              ? {}
-              : { endLine: args.endLine }),
+            ...(args.endLine === undefined ? {} : { endLine: args.endLine }),
             maxCharacters: args.maxCharacters,
           });
           break;

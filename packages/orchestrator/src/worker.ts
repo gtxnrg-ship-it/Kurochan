@@ -359,9 +359,11 @@ export function compactWorkerMessages(
     messages[0]!,
     MAX_TASK_CONTEXT_CHARACTERS,
   );
-  const recentMessages = messages.slice(-2).map((message) =>
-    boundWorkerMessage(message, MAX_RECENT_WORKER_MESSAGE_CHARACTERS),
-  );
+  const recentMessages = messages
+    .slice(-2)
+    .map((message) =>
+      boundWorkerMessage(message, MAX_RECENT_WORKER_MESSAGE_CHARACTERS),
+    );
   const olderMessages = messages.slice(1, -2);
   const historyEntries = olderMessages.map(summarizePriorWorkerMessage);
   const historyText = jsonCharacterLimit(
