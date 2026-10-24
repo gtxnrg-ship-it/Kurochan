@@ -1337,7 +1337,7 @@ describe("Kuro-chan API", () => {
       method: "POST",
       url: "/v1/runs",
       payload: {
-        goal: "Build a verified project",
+        goal: "Build a verified project with Bearer ABCDEFGHIJKLMNOPQRSTUVWXYZ",
         profile: "balanced",
         tasks: [
           {
@@ -1373,6 +1373,8 @@ describe("Kuro-chan API", () => {
     expect(
       events.json().data.map((event: { type: string }) => event.type),
     ).toContain("run.plan_created");
+    expect(events.body).toContain("Bearer [REDACTED]");
+    expect(events.body).not.toContain("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
     const cancelled = await app.inject({
       method: "POST",
       url: `/v1/runs/${runId}/cancel`,
@@ -1399,6 +1401,8 @@ describe("Kuro-chan API", () => {
     expect(stream.body).toContain("event: run.plan_created");
     expect(stream.body).toContain("event: run.cancelled");
     expect(stream.body).toContain("event: stream.end");
+    expect(stream.body).toContain("Bearer [REDACTED]");
+    expect(stream.body).not.toContain("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
 
     const priorEvents = events.json().data as Array<{ id: number }>;
     const cursor = Math.max(...priorEvents.map((event) => event.id));
