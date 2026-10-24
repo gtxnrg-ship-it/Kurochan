@@ -44,6 +44,60 @@ describe("OpenAICompatibleChatProvider", () => {
     ).toBe("Bearer secret-test-key");
   });
 
+  it("lists models using the server-side credential and normalizes provider metadata", async () => {
+    const fetchImpl = vi.fn(
+      async (_input: string | URL | Request, init?: RequestInit) =>
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                id: "vendor/model",
+                name: "Vendor Model",
+                description: "Text-capable model",
+                context_length: 128000,
+                pricing: { prompt: "0.000001", completion: "0.000002" },
+                architecture: { input_modalities: ["text", "image"] },
+                supported_parameters: ["tools", "temperature"],
+              },
+              { name: "Invalid entry without an id" },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    );
+    const provider = new OpenAICompatibleChatProvider({
+      id: "openrouter",
+      displayName: "OpenRouter",
+      baseUrl: "https://example.test/v1",
+      apiKey: "secret-test-key",
+      defaultModel: "vendor/model",
+      fetchImpl,
+    });
+
+    await expect(provider.listModels()).resolves.toEqual([
+      {
+        id: "vendor/model",
+        name: "Vendor Model",
+        description: "Text-capable model",
+        contextLength: 128000,
+        inputPricePerToken: 0.000001,
+        outputPricePerToken: 0.000002,
+        modalities: ["text", "image"],
+        supportedParameters: ["tools", "temperature"],
+      },
+    ]);
+    expect(String(fetchImpl.mock.calls[0]?.[0])).toBe(
+      "https://example.test/v1/models",
+    );
+    expect(fetchImpl.mock.calls[0]?.[1]?.method).toBe("GET");
+    expect(
+      String(
+        (fetchImpl.mock.calls[0]?.[1]?.headers as Record<string, string>)
+          .authorization,
+      ),
+    ).toBe("Bearer secret-test-key");
+  });
+
   it("classifies exhausted credits as retryable so OmniRouter can fail over", async () => {
     const fetchImpl = vi.fn(
       async () => new Response("account has insufficient credits", { status: 402 }),
