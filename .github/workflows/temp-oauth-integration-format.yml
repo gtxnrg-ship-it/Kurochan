@@ -38,7 +38,6 @@ jobs:
           apps/web/public/index.html
           apps/web/public/app.css
           apps/web/test/api.test.ts
-          .env.example
       - name: Run the complete repository checks
         run: pnpm check
       - name: Commit formatter output when needed
