@@ -27,6 +27,7 @@ import type {
 import {
   McpToolRuntime,
   redactMcpSensitiveValues,
+  validateMcpToolArguments,
   type McpToolDescriptor,
 } from "./mcp-tools.js";
 import { CommunitySkillCatalog } from "./community-packs.js";
@@ -1075,13 +1076,28 @@ export class TaskWorker {
                         "The server/tool pair is not in the live MCP tool catalog.",
                     },
                   };
-                } else if (
-                  !descriptor.readOnly &&
-                  !approvalGranted(this.options.store, task, "external-write", {
-                    mcpServerId: descriptor.serverId,
-                    mcpToolName: descriptor.name,
-                  })
-                ) {
+                } else {
+                  const argumentValidation = validateMcpToolArguments(
+                    descriptor.inputSchema,
+                    mcpArguments,
+                  );
+                  if (!argumentValidation.valid) {
+                    outcome = {
+                      name: "mcp.call" as const,
+                      ok: false,
+                      tool: descriptor,
+                      error: {
+                        code: argumentValidation.code,
+                        message: argumentValidation.message,
+                      },
+                    };
+                  } else if (
+                    !descriptor.readOnly &&
+                    !approvalGranted(this.options.store, task, "external-write", {
+                      mcpServerId: descriptor.serverId,
+                      mcpToolName: descriptor.name,
+                    })
+                  ) {
                   let preview: string;
                   try {
                     preview = JSON.stringify(
@@ -1118,11 +1134,12 @@ export class TaskWorker {
                       retryable: false,
                     },
                   );
-                } else {
-                  outcome = await this.options.mcpTools.execute(
-                    call.arguments,
-                    signal,
-                  );
+                  } else {
+                    outcome = await this.options.mcpTools.execute(
+                      call.arguments,
+                      signal,
+                    );
+                  }
                 }
               }
             }
