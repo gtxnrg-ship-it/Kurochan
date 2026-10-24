@@ -112,7 +112,7 @@ describe("MCP tool relevance routing", () => {
     expect(selected.omittedCount).toBe(2);
     expect(
       selected.tools.every(
-        (tool) => JSON.stringify(tool.inputSchema).length <= 1_600,
+        (tool) => JSON.stringify(tool.inputSchema).length <= 1_400,
       ),
     ).toBe(true);
     expect(selected.tools.some((tool) => tool.name === "tool_0")).toBe(false);
