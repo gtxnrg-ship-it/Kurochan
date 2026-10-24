@@ -6,6 +6,50 @@ function makeStore(): RunStore {
 }
 
 describe("RunStore", () => {
+  it("lists runs only for the requested owner while preserving legacy local runs", () => {
+    const store = makeStore();
+    try {
+      const task = {
+        key: "work",
+        agentId: "engineering/test-agent",
+        objective: "Perform the work.",
+      };
+      store.createRun({
+        id: "run-owner-github",
+        goal: "GitHub owner's work",
+        profile: "balanced",
+        createdBy: "github:123",
+        tasks: [task],
+      });
+      store.createRun({
+        id: "run-owner-google",
+        goal: "Google owner's work",
+        profile: "balanced",
+        createdBy: "google:abc",
+        tasks: [task],
+      });
+      store.createRun({
+        id: "run-legacy-local",
+        goal: "Legacy local work",
+        profile: "balanced",
+        tasks: [task],
+      });
+
+      expect(store.listRuns(50, undefined, "github:123").map((run) => run.id)).toEqual([
+        "run-owner-github",
+      ]);
+      expect(store.listRuns(50, undefined, "google:abc").map((run) => run.id)).toEqual([
+        "run-owner-google",
+      ]);
+      const localIds = store.listRuns(50, undefined, "local").map((run) => run.id);
+      expect(localIds).toContain("run-legacy-local");
+      expect(localIds).not.toContain("run-owner-github");
+      expect(localIds).not.toContain("run-owner-google");
+    } finally {
+      store.close();
+    }
+  });
+
   it("persists task dependencies and requires a verification gate before completion", () => {
     const store = makeStore();
     try {
