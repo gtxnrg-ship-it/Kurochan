@@ -192,6 +192,13 @@ describe("Kuro-chan OAuth API", () => {
         },
       ],
     });
+    store.recordWorkerHeartbeat(
+      "worker-private",
+      "busy",
+      "task-private",
+      { activeRunIds: ["run-alice"], secretInternalMetadata: "private" },
+      Date.now(),
+    );
     app = buildServer({
       env: authEnvironment,
       oauth: service,
@@ -274,6 +281,28 @@ describe("Kuro-chan OAuth API", () => {
     expect(
       bobRuns.json().data.map((run: { id: string }) => run.id),
     ).not.toContain("run-alice");
+
+    const workerList = await app.inject({
+      method: "GET",
+      url: "/v1/workers",
+      headers: { authorization: "Bearer " + bobToken },
+    });
+    expect(workerList.statusCode).toBe(200);
+    expect(workerList.body).not.toContain("task-private");
+    expect(workerList.body).not.toContain("run-alice");
+    expect(workerList.body).not.toContain("secretInternalMetadata");
+    expect(workerList.json().data[0]).not.toHaveProperty("metadata");
+    expect(workerList.json().data[0]).not.toHaveProperty("currentTaskId");
+
+    const workerStatus = await app.inject({
+      method: "GET",
+      url: "/v1/worker/status",
+      headers: { authorization: "Bearer " + bobToken },
+    });
+    expect(workerStatus.statusCode).toBe(200);
+    expect(workerStatus.body).not.toContain("task-private");
+    expect(workerStatus.body).not.toContain("run-alice");
+    expect(workerStatus.body).not.toContain("secretInternalMetadata");
   });
 
   it("revokes an account session on sign-out and rejects the same token afterward", async () => {

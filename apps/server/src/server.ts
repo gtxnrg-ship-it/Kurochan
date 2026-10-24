@@ -120,6 +120,20 @@ function ownsRun(
   return Boolean(run) && (run?.createdBy ?? "local") === userId;
 }
 
+function visibleWorkerHeartbeat(
+  request: FastifyRequest,
+  worker: ReturnType<RunStore["listWorkerHeartbeats"]>[number],
+) {
+  if (principalId(request) === "local") return worker;
+  return {
+    workerId: worker.workerId,
+    state: worker.state,
+    startedAt: worker.startedAt,
+    lastSeenAt: worker.lastSeenAt,
+    stale: worker.stale,
+  };
+}
+
 function safeEqual(a: string, b: string): boolean {
   const left = Buffer.from(a);
   const right = Buffer.from(b);
@@ -944,7 +958,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     }
     const workers = store.listWorkerHeartbeats(Date.now(), staleAfterMs);
     return {
-      data: workers,
+      data: workers.map((worker) => visibleWorkerHeartbeat(request, worker)),
       summary: {
         total: workers.length,
         active: workers.filter(
@@ -998,7 +1012,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     };
   });
 
-  app.get("/v1/worker/status", async () => ({
+  app.get("/v1/worker/status", async (request) => ({
     enabled: workerEnabled,
     running: worker.isRunning,
     workerId: worker.workerId,
@@ -1025,7 +1039,9 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       enabled: mcpTools.isConfigured,
       servers: mcpTools.status(),
     },
-    workers: store.listWorkerHeartbeats(),
+    workers: store
+      .listWorkerHeartbeats()
+      .map((worker) => visibleWorkerHeartbeat(request, worker)),
     workspaceTools: [
       "workspace.list_files",
       "workspace.read_file",
