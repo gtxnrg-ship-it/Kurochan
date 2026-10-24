@@ -1469,9 +1469,11 @@ describe("Kuro-chan API", () => {
     expect(
       events.json().data.map((event: { type: string }) => event.type),
     ).toContain("run.plan_created");
-    const planEvent = events.json().data.find(
-      (event: { type: string }) => event.type === "run.plan_created",
-    ) as { payload: { taskGraph?: Array<Record<string, unknown>> } };
+    const planEvent = events
+      .json()
+      .data.find(
+        (event: { type: string }) => event.type === "run.plan_created",
+      ) as { payload: { taskGraph?: Array<Record<string, unknown>> } };
     expect(planEvent.payload.taskGraph).toEqual([
       {
         key: "research",
