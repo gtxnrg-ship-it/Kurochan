@@ -24,7 +24,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Print formatter diffs only
         run: |
-          pnpm exec prettier apps/server/src/server.ts > /tmp/server.ts
-          diff -u apps/server/src/server.ts /tmp/server.ts || true
-          pnpm exec prettier apps/server/test/server.test.ts > /tmp/server.test.ts
-          diff -u apps/server/test/server.test.ts /tmp/server.test.ts || true
+          for file in apps/server/src/server.ts apps/server/test/server.test.ts packages/model-gateway/src/speech.ts packages/orchestrator/src/planner.ts packages/orchestrator/src/worker.ts packages/orchestrator/test/planner.test.ts; do
+            output="/tmp/$(basename "$file")"
+            pnpm exec prettier "$file" > "$output"
+            diff -u "$file" "$output" || true
+          done
