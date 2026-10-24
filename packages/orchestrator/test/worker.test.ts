@@ -13,6 +13,7 @@ import { OmniRouter } from "@kurochan/omnirouter";
 import { RunStore } from "@kurochan/storage";
 import {
   approvalGranted,
+  compactWorkerMessages,
   fingerprintMcpArguments,
   jsonCharacterLimit,
   selectMcpToolsForContext,
@@ -86,6 +87,62 @@ describe("Bounded worker context", () => {
     expect(() => jsonCharacterLimit({}, 10)).toThrow(
       "JSON context character limit must be between 128 and 200000.",
     );
+  });
+
+  it("compacts older tool rounds while preserving the task context and latest result", () => {
+    const messages: Array<{ role: "user" | "assistant"; content: string }> = [
+      {
+        role: "user",
+        content: JSON.stringify({
+          kind: "task_context",
+          goal: "Build the requested feature and verify it.",
+          specialistInstructions: "instruction ".repeat(5_000),
+        }),
+      },
+    ];
+    for (let round = 1; round <= 5; round += 1) {
+      messages.push({
+        role: "assistant",
+        content: JSON.stringify({
+          status: "tool_calls",
+          summary: "Inspect source for round " + round,
+          toolCalls: [
+            {
+              name: "workspace.read_file",
+              arguments: { path: "src/file-" + round + ".ts" },
+            },
+          ],
+        }),
+      });
+      messages.push({
+        role: "user",
+        content: JSON.stringify({
+          kind: "tool_results",
+          results: [
+            {
+              name: "workspace.read_file",
+              ok: true,
+              result: {
+                path: "src/file-" + round + ".ts",
+                content:
+                  "raw-payload-" + round + "-" + "x".repeat(5_000),
+              },
+              evidence: [],
+            },
+          ],
+        }),
+      });
+    }
+
+    const compacted = compactWorkerMessages(messages);
+    const serialized = compacted.map((message) => message.content).join("\n");
+
+    expect(compacted).toHaveLength(4);
+    expect(compacted[0]?.content).toContain("Build the requested feature");
+    expect(compacted[1]?.content).toContain("compacted_action_history");
+    expect(compacted.at(-1)?.content).toContain("raw-payload-5");
+    expect(serialized).not.toContain("x".repeat(500));
+    expect(serialized.length).toBeLessThanOrEqual(85_000);
   });
 });
 
