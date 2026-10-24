@@ -361,6 +361,7 @@ export class WebResearchRuntime implements WebResearchExecutor {
               ? (metadataValue as { age: unknown[] }).age
                   .filter((value): value is string => typeof value === "string")
                   .slice(0, 4)
+                  .map((value) => value.slice(0, 100))
               : [];
           return [
             {
