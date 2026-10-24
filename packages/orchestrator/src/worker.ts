@@ -234,6 +234,75 @@ export function approvalGranted(
   return decision?.type === "approval.granted";
 }
 
+export interface DependencyHandoffCandidate {
+  readonly taskId: string;
+  readonly planKey: string;
+  readonly agentId: string;
+  readonly objective: string;
+  readonly output: unknown;
+  readonly evidence: readonly Evidence[];
+}
+
+const HANDOFF_STOP_WORDS = new Set([
+  "and", "are", "for", "from", "has", "have", "into", "its", "not", "that",
+  "the", "their", "then", "this", "with", "you", "your",
+]);
+
+function handoffTerms(value: string): string[] {
+  return [
+    ...new Set(
+      (value.toLowerCase().match(/[\\p{L}\\p{N}]{3,}/gu) ?? []).filter(
+        (term) => !HANDOFF_STOP_WORDS.has(term),
+      ),
+    ),
+  ];
+}
+
+/**
+ * Keep the most relevant completed results when a task has more prerequisites
+ * than fit in its prompt. Ties preserve plan order for deterministic behavior.
+ */
+export function selectRelevantDependencyHandoffs(
+  runGoal: string,
+  taskObjective: string,
+  dependencies: readonly DependencyHandoffCandidate[],
+  maxDependencies = 5,
+): readonly DependencyHandoffCandidate[] {
+  if (!Number.isInteger(maxDependencies) || maxDependencies < 1) {
+    throw new Error("maxDependencies must be a positive integer.");
+  }
+  if (dependencies.length <= maxDependencies) return dependencies;
+
+  const terms = handoffTerms(runGoal + " " + taskObjective);
+  const ranked = dependencies.map((dependency, index) => {
+    let outputText = "";
+    try {
+      outputText = JSON.stringify(dependency.output) ?? "";
+    } catch {
+      outputText = "";
+    }
+    const objectiveTerms = new Set(handoffTerms(dependency.objective));
+    const otherText = [
+      dependency.planKey,
+      dependency.agentId,
+      outputText.slice(0, 1_500),
+      ...dependency.evidence.map((item) => item.kind + " " + item.summary),
+    ].join(" ");
+    const otherTerms = new Set(handoffTerms(otherText));
+    let score = 0;
+    for (const term of terms) {
+      if (objectiveTerms.has(term)) score += 3;
+      else if (otherTerms.has(term)) score += 1;
+    }
+    return { dependency, index, score };
+  });
+
+  return ranked
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .slice(0, maxDependencies)
+    .map(({ dependency }) => dependency);
+}
+
 function profileText(instructions: string, max = 28_000): string {
   return instructions.length > max
     ? instructions.slice(0, max) + "\n[Profile excerpt truncated by Kuro-chan.]"
@@ -1082,6 +1151,12 @@ export class TaskWorker {
     } catch (error) {
       this.options.onError?.(error);
     }
+    const selectedDependencyResults = selectRelevantDependencyHandoffs(
+      run.goal,
+      task.objective,
+      dependencyResults,
+      5,
+    );
     const messages: Array<{ role: "user" | "assistant"; content: string }> = [
       {
         role: "user",
@@ -1107,17 +1182,20 @@ export class TaskWorker {
               division: agent.division,
               instructions: profileText(agent.instructions, 16_000),
             },
-            completedDependencies: dependencyResults
-              .slice(0, 5)
-              .map((dependency) => ({
+            completedDependencies: selectedDependencyResults.map(
+              (dependency) => ({
                 taskId: dependency.taskId,
                 planKey: dependency.planKey,
                 agentId: dependency.agentId,
                 objective: boundedText(dependency.objective, 600),
                 output: boundedJsonValue(dependency.output, 1_000),
                 evidence: boundedEvidence(dependency.evidence),
-              })),
-            omittedDependencyCount: Math.max(0, dependencyResults.length - 5),
+              }),
+            ),
+            omittedDependencyCount: Math.max(
+              0,
+              dependencyResults.length - selectedDependencyResults.length,
+            ),
             communitySkills: supplementalSkills.map(
               ({
                 id,
