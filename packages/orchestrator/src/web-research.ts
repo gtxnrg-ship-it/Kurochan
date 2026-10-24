@@ -220,7 +220,9 @@ export class WebResearchRuntime implements WebResearchExecutor {
         search_lang: args.searchLang ?? this.searchLang,
         count: String(args.limit),
         maximum_number_of_urls: String(args.limit),
-        maximum_number_of_tokens: String(Math.min(16_384, Math.max(4_096, args.limit * 1_024))),
+        maximum_number_of_tokens: String(
+          Math.min(16_384, Math.max(4_096, args.limit * 1_024)),
+        ),
         maximum_number_of_tokens_per_url: "2048",
         maximum_number_of_snippets: String(Math.min(96, args.limit * 6)),
         maximum_number_of_snippets_per_url: "6",
@@ -320,7 +322,9 @@ export class WebResearchRuntime implements WebResearchExecutor {
           }
           const title = (item.title?.trim() || hostname(url)).slice(0, 500);
           const snippets = (item.snippets ?? [])
-            .map((snippet) => snippet.trim().slice(0, MAX_SNIPPET_CHARACTERS))
+            .map((snippet) =>
+              snippet.trim().slice(0, MAX_SNIPPET_CHARACTERS),
+            )
             .filter(Boolean)
             .slice(0, MAX_SNIPPETS_PER_URL)
             .map((snippet) => {
