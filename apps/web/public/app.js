@@ -1386,7 +1386,11 @@ function renderIntegrationsView(workspace) {
   page.append(intro, actions, message, summary, filters, grid, detail);
   workspace.append(page);
   renderIntegrationCards();
-  if (!state.integrationsLoaded && !state.integrationsLoading) {
+  if (
+    !state.integrationsLoaded &&
+    !state.integrationsLoading &&
+    !state.integrationError
+  ) {
     grid.replaceChildren(
       makeElement("div", "loading-card", "Loading integration and connection status…"),
     );
@@ -1506,17 +1510,22 @@ function renderIntegrationCards() {
       integration.description,
     );
     const meta = makeElement("div", "integration-card-meta");
+    const isReviewedPreset = state.integrationPresets.some(
+      (preset) =>
+        preset.id === integration.id ||
+        preset.id === integration.mcpServerId,
+    );
     meta.append(
-      integrationBadge(
-        status.label,
-        status.tone,
-      ),
+      integrationBadge(status.label, status.tone),
       makeElement(
         "span",
         "integration-kind",
         integration.kind === "native" ? "Built in" : "MCP adapter",
       ),
     );
+    if (isReviewedPreset) {
+      meta.append(integrationBadge("Reviewed template", "neutral"));
+    }
     const foot = makeElement("div", "integration-card-foot");
     foot.append(
       makeElement("span", "integration-permissions", integration.permissions),
@@ -1813,6 +1822,7 @@ function nativeEnvironmentHints(item) {
   const values = {
     workspace:
       "KUROCHAN_WORKER_ENABLED=true\nKUROCHAN_WORKER_CONCURRENCY=4",
+    githubResearch: "",
     githubProject:
       "KUROCHAN_GITHUB_TOKEN=<secret in server environment>\nKUROCHAN_GITHUB_ALLOWED_REPOSITORIES=owner/repository\nKUROCHAN_GITHUB_WRITE_ENABLED=false",
     githubResearch:
@@ -1844,7 +1854,12 @@ async function copyIntegrationText(value) {
   temporary.readOnly = true;
   document.body.append(temporary);
   temporary.select();
-  const copied = document.execCommand("copy");
+  let copied = false;
+  try {
+    copied = document.execCommand("copy");
+  } catch {
+    copied = false;
+  }
   temporary.remove();
   showToast(
     copied
