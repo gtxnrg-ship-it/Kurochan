@@ -72,6 +72,44 @@ describe("Kuro-chan API", () => {
     });
   });
 
+  it("returns prebuilt MCP configuration templates without secrets or auto-installation", async () => {
+    app = buildServer({
+      env: {},
+      logger: false,
+      store: new RunStore(":memory:"),
+    });
+    const response = await app.inject({
+      method: "GET",
+      url: "/v1/community-mcp-presets",
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().count).toBe(3);
+    expect(response.json().data).toContainEqual(
+      expect.objectContaining({
+        id: "playwright-mcp",
+        configuration: expect.objectContaining({
+          command: "npx",
+          args: ["--yes", "@playwright/mcp@0.0.83"],
+        }),
+      }),
+    );
+    expect(response.json().data).toContainEqual(
+      expect.objectContaining({
+        id: "context7",
+        requiredEnvironment: [
+          expect.objectContaining({ name: "CONTEXT7_AUTHORIZATION" }),
+        ],
+      }),
+    );
+    expect(response.json().security).toMatchObject({
+      secretsReturned: false,
+      configurationIsTemplate: true,
+      serversAreNotAutomaticallyInstalledOrStarted: true,
+    });
+    expect(response.body).not.toContain("ghp_");
+    expect(response.body).not.toContain("Bearer ");
+  });
+
   it("rejects invalid community pack filters", async () => {
     app = buildServer({
       env: {},
