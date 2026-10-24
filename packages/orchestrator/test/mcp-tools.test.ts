@@ -421,7 +421,10 @@ describe("McpToolRuntime", () => {
           type: "object",
           properties: {
             email: { type: "string", format: "email" },
-            slug: { type: "string", pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+            slug: {
+              type: "string",
+              pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            },
             kind: { type: "string", enum: ["general", "repository"] },
             repository: { type: "string", minLength: 1 },
             labels: {
@@ -494,16 +497,18 @@ describe("McpToolRuntime", () => {
       {
         name: "unknown_dialect",
         inputSchema: {
-          "$schema": "https://example.invalid/draft/9999/schema",
+          $schema: "https://example.invalid/draft/9999/schema",
           type: "object",
         },
       },
       {
         name: "external_reference",
         inputSchema: {
-          "$schema": "http://json-schema.org/draft-07/schema#",
+          $schema: "http://json-schema.org/draft-07/schema#",
           type: "object",
-          properties: { value: { "$ref": "https://example.invalid/schema.json" } },
+          properties: {
+            value: { $ref: "https://example.invalid/schema.json" },
+          },
         },
       },
     ]);
