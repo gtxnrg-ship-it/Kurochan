@@ -14,6 +14,13 @@ const state = {
   currentConversationId: null,
   currentConversation: null,
   messages: [],
+  mediaRecorder: null,
+  recordingStream: null,
+  recordingChunks: [],
+  recording: false,
+  recordingError: "",
+  voiceAudioUrls: new Map(),
+  voiceAudioLoading: new Set(),
   runs: [],
   runDetails: new Map(),
   runStreams: new Map(),
@@ -388,7 +395,7 @@ function renderChatView(workspace) {
     : "Tell Kuro-chan what you have in mind…";
   textarea.setAttribute("aria-label", "Message Kuro-chan");
   textarea.required = true;
-  textarea.disabled = state.sending || !state.authenticated;
+  textarea.disabled = state.sending || state.recording || !state.authenticated;
   const toolbar = makeElement("div", "composer-toolbar");
   const hint = makeElement(
     "span",
@@ -399,20 +406,38 @@ function renderChatView(workspace) {
   const runButton = makeElement("button", "button button-run");
   runButton.type = "button";
   runButton.id = "start-run";
-  runButton.disabled = state.sending || !state.authenticated;
+  runButton.disabled = state.sending || state.recording || !state.authenticated;
   runButton.append(
     makeElement("span", "button-icon", "✳"),
     makeElement("span", "", "Build with agents"),
   );
+  const voiceButton = makeElement("button", "button button-voice");
+  voiceButton.type = "button";
+  voiceButton.id = "voice-turn";
+  const recordingSupported =
+    typeof MediaRecorder !== "undefined" &&
+    Boolean(navigator.mediaDevices?.getUserMedia);
+  voiceButton.disabled =
+    !state.authenticated || state.sending || (!state.recording && !recordingSupported);
+  voiceButton.title = !recordingSupported
+    ? "Microphone recording requires a supported browser and secure context."
+    : !state.speech?.voiceTurn?.enabled && !state.recording
+      ? "Configure speech-to-text and text-to-speech on the API server."
+      : "Record a voice turn and receive an audio reply.";
+  voiceButton.setAttribute("aria-label", state.recording ? "Stop recording and send voice turn" : "Record a voice turn");
+  voiceButton.append(
+    makeElement("span", "button-icon", state.recording ? "■" : "♫"),
+    makeElement("span", "", state.recording ? "Stop & send" : "Voice turn"),
+  );
   const sendButton = makeElement("button", "button button-send");
   sendButton.type = "submit";
   sendButton.id = "send-message";
-  sendButton.disabled = state.sending || !state.authenticated;
+  sendButton.disabled = state.sending || state.recording || !state.authenticated;
   sendButton.append(
     makeElement("span", "", state.sending ? "Sending…" : "Send"),
     makeElement("span", "send-arrow", "↗"),
   );
-  actions.append(runButton, sendButton);
+  actions.append(runButton, voiceButton, sendButton);
   toolbar.append(hint, actions);
   composeBox.append(textarea, toolbar);
   compose.append(
@@ -433,6 +458,10 @@ function renderChatView(workspace) {
     void sendMessage();
   });
   runButton.addEventListener("click", () => void startCoordinatedRun());
+  voiceButton.addEventListener("click", () => {
+    if (state.recording) stopVoiceRecording();
+    else void startVoiceRecording();
+  });
   textarea.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
@@ -449,6 +478,7 @@ function renderMessage(message) {
   const role = message.role === "user" ? "user" : "assistant";
   const row = makeElement("article", "message-row message-" + role);
   row.dataset.sequence = String(message.sequence ?? "");
+  row.dataset.messageId = String(message.id ?? "");
   const avatar = makeElement(
     "div",
     "message-avatar",
@@ -477,6 +507,35 @@ function renderMessage(message) {
   if (message.metadata?.kind === "run_clarification") {
     const badge = makeElement("span", "message-note", "Clarification");
     contentWrap.append(badge);
+  }
+  if (role === "assistant" && kind === "voice_response" && message.id) {
+    const key = voiceAudioKey(state.currentConversationId, message.id);
+    const audioActions = makeElement("div", "voice-audio-actions");
+    const playButton = makeElement(
+      "button",
+      "voice-audio-button",
+      state.voiceAudioLoading.has(key)
+        ? "Loading audio…"
+        : state.voiceAudioUrls.has(key)
+          ? "Reload audio"
+          : "Load audio reply",
+    );
+    playButton.type = "button";
+    playButton.disabled = state.voiceAudioLoading.has(key);
+    playButton.addEventListener("click", () =>
+      void loadVoiceAudio(state.currentConversationId, message.id),
+    );
+    audioActions.append(playButton);
+    const audioUrl = state.voiceAudioUrls.get(key);
+    if (audioUrl) {
+      const audio = makeElement("audio", "voice-audio");
+      audio.controls = true;
+      audio.preload = "metadata";
+      audio.src = audioUrl;
+      audio.setAttribute("aria-label", "Audio reply from Kuro-chan");
+      audioActions.append(audio);
+    }
+    contentWrap.append(audioActions);
   }
   row.append(avatar, contentWrap);
   return row;
@@ -567,6 +626,226 @@ async function sendMessage() {
 function makeId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
   return "message-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+}
+
+function voiceAudioKey(conversationId, messageId) {
+  return String(conversationId) + ":" + String(messageId);
+}
+
+function stopRecordingTracks() {
+  for (const track of state.recordingStream?.getTracks?.() ?? []) {
+    track.stop();
+  }
+  state.recordingStream = null;
+}
+
+function chooseRecordingType() {
+  const candidates = [
+    { mimeType: "audio/webm;codecs=opus", contentType: "audio/webm", extension: "webm" },
+    { mimeType: "audio/webm", contentType: "audio/webm", extension: "webm" },
+    { mimeType: "audio/ogg;codecs=opus", contentType: "audio/ogg", extension: "ogg" },
+    { mimeType: "audio/mp4", contentType: "audio/mp4", extension: "m4a" },
+  ];
+  const candidate = candidates.find(
+    (entry) =>
+      typeof MediaRecorder.isTypeSupported !== "function" ||
+      MediaRecorder.isTypeSupported(entry.mimeType),
+  );
+  return candidate ?? null;
+}
+
+async function startVoiceRecording() {
+  if (!state.authenticated || state.sending || state.recording) return;
+  if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+    showToast("This browser cannot record audio. Open Kuro-chan over HTTPS on your phone, or use a supported browser.", "error");
+    return;
+  }
+  if (!state.speech?.voiceTurn?.enabled) {
+    showToast("Voice turns need both speech-to-text and text-to-speech configured on the API server.", "error");
+    setView("system");
+    return;
+  }
+
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+    });
+    const preferred = chooseRecordingType();
+    const recorder = preferred
+      ? new MediaRecorder(stream, { mimeType: preferred.mimeType })
+      : new MediaRecorder(stream);
+    const actualType = (recorder.mimeType || preferred?.mimeType || "").split(";")[0].toLowerCase();
+    const details = {
+      "audio/webm": { extension: "webm", contentType: "audio/webm" },
+      "audio/ogg": { extension: "ogg", contentType: "audio/ogg" },
+      "audio/mp4": { extension: "m4a", contentType: "audio/mp4" },
+      "audio/m4a": { extension: "m4a", contentType: "audio/mp4" },
+    }[actualType];
+    if (!details) {
+      stream.getTracks().forEach((track) => track.stop());
+      showToast("This browser's recording format is not supported by the configured speech adapter.", "error");
+      return;
+    }
+    state.recordingStream = stream;
+    state.recordingChunks = [];
+    state.recordingError = "";
+    state.mediaRecorder = recorder;
+    state.recording = true;
+    recorder.addEventListener("dataavailable", (event) => {
+      if (event.data?.size) state.recordingChunks.push(event.data);
+    });
+    recorder.addEventListener("error", () => {
+      state.recordingError = "The microphone recording failed. Check browser microphone permission and try again.";
+      if (recorder.state !== "inactive") recorder.stop();
+    });
+    recorder.addEventListener("stop", () => {
+      const recorded = state.recordingChunks.slice();
+      state.recordingChunks = [];
+      state.mediaRecorder = null;
+      state.recording = false;
+      stopRecordingTracks();
+      if (state.recordingError) {
+        const error = state.recordingError;
+        state.recordingError = "";
+        showToast(error, "error");
+        renderView();
+        return;
+      }
+      const blob = new Blob(recorded, { type: details.contentType });
+      if (!blob.size) {
+        showToast("No audio was captured. Try again and speak after recording starts.", "error");
+        renderView();
+        return;
+      }
+      if (blob.size > 24 * 1024 * 1024) {
+        showToast("That recording is too large. Please record a shorter voice message.", "error");
+        renderView();
+        return;
+      }
+      void submitVoiceTurn(blob, details);
+    });
+    recorder.start(500);
+    renderView();
+    showToast("Listening. Tap Stop & send when you finish.", "success");
+  } catch (error) {
+    if (stream) stream.getTracks().forEach((track) => track.stop());
+    state.recording = false;
+    state.mediaRecorder = null;
+    state.recordingStream = null;
+    renderView();
+    const name = error?.name;
+    showToast(
+      name === "NotAllowedError" || name === "PermissionDeniedError"
+        ? "Microphone access was denied. Allow microphone permission for this site and try again."
+        : name === "NotFoundError"
+          ? "No microphone was found on this device."
+          : "Could not start recording. Use HTTPS on a phone and check microphone permissions.",
+      "error",
+    );
+  }
+}
+
+function stopVoiceRecording() {
+  const recorder = state.mediaRecorder;
+  if (!recorder || recorder.state === "inactive") return;
+  try {
+    recorder.stop();
+  } catch {
+    state.recording = false;
+    state.mediaRecorder = null;
+    stopRecordingTracks();
+    renderView();
+    showToast("The recording could not be stopped cleanly. Please try again.", "error");
+  }
+}
+
+async function submitVoiceTurn(blob, details) {
+  state.sending = true;
+  state.transientMessage = "";
+  renderView();
+  let conversationId;
+  try {
+    conversationId = await ensureConversation("Voice conversation");
+    const form = new FormData();
+    form.append("file", blob, "kurochan-recording." + details.extension);
+    form.append("clientMessageId", makeId());
+    form.append("model", "omni/" + state.selectedModel);
+    const language = state.speech?.transcription?.defaultLanguage;
+    if (typeof language === "string" && language.trim()) {
+      form.append("language", language.trim());
+    }
+    const result = await api.voiceTurn(conversationId, form);
+    await loadConversation(conversationId);
+    if (result.audio?.messageId) {
+      await loadVoiceAudio(conversationId, result.audio.messageId, { autoplay: true });
+    }
+    const heardText = result.transcript?.text || result.userMessage?.content;
+    if (heardText) {
+      showToast("Heard: " + heardText.slice(0, 150), "success");
+    } else {
+      showToast("Voice reply is ready.", "success");
+    }
+  } catch (error) {
+    state.transientMessage = errorMessage(error);
+    showToast(state.transientMessage, "error");
+    if (conversationId) {
+      try {
+        await loadConversation(conversationId);
+      } catch {
+        /* keep the visible error */
+      }
+    }
+  } finally {
+    state.sending = false;
+    renderView();
+    void refreshConversations({ preserveSelection: true });
+  }
+}
+
+async function loadVoiceAudio(conversationId, messageId, { autoplay = false } = {}) {
+  if (!conversationId || !messageId) return;
+  const key = voiceAudioKey(conversationId, messageId);
+  const currentUrl = state.voiceAudioUrls.get(key);
+  if (currentUrl) {
+    const row = $(".message-row").find((element) => element.dataset.messageId === String(messageId));
+    const audio = row?.querySelector("audio");
+    if (autoplay && audio) {
+      try {
+        await audio.play();
+      } catch {
+        showToast("Audio is ready. Tap Play to hear the reply.");
+      }
+    }
+    return;
+  }
+  if (state.voiceAudioLoading.has(key)) return;
+  state.voiceAudioLoading.add(key);
+  if (state.view === "chat") renderView();
+  try {
+    const blob = await api.conversationAudio(conversationId, messageId);
+    const url = URL.createObjectURL(blob);
+    state.voiceAudioUrls.set(key, url);
+    if (state.view === "chat") renderView();
+    const row = $(".message-row").find((element) => element.dataset.messageId === String(messageId));
+    const audio = row?.querySelector("audio");
+    if (autoplay && audio) {
+      try {
+        await audio.play();
+      } catch {
+        showToast("Audio is ready. Tap Play to hear the reply.");
+      }
+    }
+  } catch (error) {
+    showToast(errorMessage(error), "error");
+  } finally {
+    state.voiceAudioLoading.delete(key);
+    if (state.view === "chat") renderView();
+  }
 }
 
 async function startCoordinatedRun() {
@@ -1623,7 +1902,11 @@ function init() {
     }
   });
   window.addEventListener("online", () => void refreshConnection());
-  window.addEventListener("beforeunload", stopAllRunStreams);
+  window.addEventListener("beforeunload", () => {
+    stopAllRunStreams();
+    stopRecordingTracks();
+    for (const url of state.voiceAudioUrls.values()) URL.revokeObjectURL(url);
+  });
   setView("chat");
   void boot();
   if (
