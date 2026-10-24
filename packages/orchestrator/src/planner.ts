@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { RouteProfile } from "@kurochan/contracts";
+import type { ProviderId, RouteProfile } from "@kurochan/contracts";
 import type {
   AgentCatalog,
   AgentProfile,
@@ -38,6 +38,8 @@ const PlanPayloadSchema = z
 export interface CreatePlanRequest {
   readonly goal: string;
   readonly profile: RouteProfile;
+  readonly preferredProvider?: ProviderId;
+  readonly providerModel?: string;
   readonly conversationContext?: readonly {
     readonly role: "user" | "assistant";
     readonly content: string;
@@ -578,6 +580,13 @@ export class PlanService {
       try {
         response = await this.options.router.complete({
           profile: request.profile,
+          ...(request.preferredProvider
+            ? {
+                preferredProvider: request.preferredProvider,
+                lockProvider: true,
+              }
+            : {}),
+          ...(request.providerModel ? { model: request.providerModel } : {}),
           context: { operation: "planning" },
           messages: [{ role: "user", content: message }],
           systemPrompt,

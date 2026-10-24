@@ -26,7 +26,9 @@ The API key placeholder above is illustrative. Keep the real value in the server
 
 The default streaming capability reflects FreeLLMAPI's documented OpenAI-compatible streaming surface. To disable it for a deployment, set `FREELLMAPI_CAP_STREAMING=false`. Capability overrides are deliberately explicit because arbitrary compatible endpoints and selected models can differ.
 
-For OpenRouter, configure `OPENROUTER_API_KEY` and `OPENROUTER_MODEL`. Set `OPENROUTER_CAP_STREAMING=true` only after confirming the configured model/endpoint supports streaming. OmniRouter only selects a provider for a capability when that capability is declared.
+For OpenRouter, `OPENROUTER_API_KEY` is enough to enable the free-only `openrouter/free` router by default; `OPENROUTER_MODEL` can override it. Streaming is enabled by default for this route so it can participate in the normal chat path. Set `OPENROUTER_CAP_STREAMING=false` when you override the model with one that cannot stream. Avoid `openrouter/auto` for a free-first setup because its model choice can have paid token rates.
+
+The default OmniRouter **Auto / Quality** order is FreeLLMAPI first, then OpenRouter's free-only router. **Balanced** uses OpenRouter first. A fallback can happen when the first upstream reports a retryable error before streaming output starts; once a streamed answer has begun, Kuro-chan cannot safely switch providers in the middle of that answer.
 
 ## Network address matters
 

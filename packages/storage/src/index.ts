@@ -77,6 +77,7 @@ export interface CreateRunInput {
   readonly id?: string;
   readonly goal: string;
   readonly profile: RouteProfile;
+  readonly model?: string;
   readonly tasks: readonly PlannedTask[];
   readonly createdBy?: string;
   readonly plan?: RunPlanMetadata;
@@ -111,6 +112,7 @@ export interface RunRecord {
   readonly id: string;
   readonly goal: string;
   readonly profile: RouteProfile;
+  readonly model?: string;
   readonly status: RunStatus;
   readonly createdBy?: string;
   readonly output?: unknown;
@@ -258,6 +260,7 @@ interface RunRow {
   id: string;
   goal: string;
   profile: RouteProfile;
+  model: string | null;
   status: RunStatus;
   created_by: string | null;
   output_json: string | null;
@@ -445,6 +448,7 @@ function asRun(row: RunRow | undefined): RunRecord | undefined {
     id: row.id,
     goal: row.goal,
     profile: row.profile,
+    ...(row.model ? { model: row.model } : {}),
     status: row.status,
     ...(row.created_by ? { createdBy: row.created_by } : {}),
     ...(row.output_json === null
@@ -502,7 +506,7 @@ export class RunStore {
     this.db.pragma("busy_timeout = 5000");
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS runs (
-        id TEXT PRIMARY KEY, goal TEXT NOT NULL, profile TEXT NOT NULL,
+        id TEXT PRIMARY KEY, goal TEXT NOT NULL, profile TEXT NOT NULL, model TEXT,
         status TEXT NOT NULL CHECK(status IN ('queued','planning','running','waiting_for_approval','verifying','completed','failed','cancelled')),
         created_by TEXT, output_json TEXT, error_code TEXT, error_message TEXT,
         created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, version INTEGER NOT NULL DEFAULT 1
@@ -603,8 +607,13 @@ export class RunStore {
       CREATE INDEX IF NOT EXISTS idx_tasks_claim ON tasks(status, available_at, created_at);
       CREATE INDEX IF NOT EXISTS idx_tasks_run_status ON tasks(run_id, status);
       CREATE INDEX IF NOT EXISTS idx_events_run_id ON run_events(run_id, id);
-      PRAGMA user_version = 4;
+      PRAGMA user_version = 5;
     `);
+    const runColumns = this.db.pragma("table_info(runs)") as { name: string }[];
+    if (!runColumns.some((column) => column.name === "model")) {
+      this.db.exec("ALTER TABLE runs ADD COLUMN model TEXT");
+    }
+    this.db.pragma("user_version = 5");
   }
 
   close(): void {
@@ -1158,6 +1167,7 @@ export class RunStore {
     assertText(input.goal, "goal", 20_000);
     if (!VALID_PROFILES.has(input.profile))
       throw new Error("Unknown OmniRouter profile.");
+    if (input.model !== undefined) assertText(input.model, "model", 200);
     assertText(input.createdBy ?? "anonymous", "createdBy", 200);
     if (
       !Array.isArray(input.tasks) ||
@@ -1193,7 +1203,7 @@ export class RunStore {
       input.tasks.map((task) => [task.key, randomUUID()]),
     );
     const insertRun = this.db.prepare(
-      "INSERT INTO runs(id,goal,profile,status,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+      "INSERT INTO runs(id,goal,profile,model,status,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
     );
     const insertTask = this.db.prepare(
       "INSERT INTO tasks(id,run_id,plan_key,agent_id,objective,status,input_json,attempts,max_attempts,approval_required,available_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -1209,6 +1219,7 @@ export class RunStore {
         runId,
         input.goal,
         input.profile,
+        input.model ?? null,
         "queued",
         input.createdBy ?? null,
         now,
@@ -1246,6 +1257,7 @@ export class RunStore {
         {
           goal: input.goal,
           profile: input.profile,
+          ...(input.model ? { model: input.model } : {}),
           taskCount: input.tasks.length,
         },
         now,

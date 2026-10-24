@@ -1202,6 +1202,76 @@ describe("Kuro-chan API", () => {
     expect(signal?.aborted).toBe(true);
   });
 
+  it("keeps the configured free router selectable when the upstream model catalog omits it", async () => {
+    const provider: ChatProvider = {
+      id: "openrouter",
+      displayName: "OpenRouter",
+      defaultModel: "openrouter/free",
+      isConfigured: true,
+      complete: async (): Promise<ChatCompletionOutput> => ({
+        providerId: "openrouter",
+        model: "openrouter/free",
+        content: "ok",
+        latencyMs: 1,
+      }),
+      listModels: async () => [
+        {
+          id: "vendor/other-model",
+          name: "Other model",
+        },
+      ],
+    };
+    app = buildServer({
+      env: {},
+      providers: {
+        providers: new Map<ProviderId, ChatProvider>([
+          ["openrouter", provider],
+        ]),
+        statuses: [
+          {
+            id: "openrouter",
+            name: "OpenRouter",
+            configured: true,
+            defaultModel: "openrouter/free",
+            capabilityNotes: [],
+          },
+        ],
+      },
+      logger: false,
+      store: new RunStore(":memory:"),
+    });
+
+    const response = await app.inject({ method: "GET", url: "/v1/models" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().providers[0].models).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "openrouter/free",
+          name: "Free Models Router",
+          value: "openrouter/openrouter/free",
+          isDefault: true,
+        }),
+        expect.objectContaining({
+          id: "vendor/other-model",
+          value: "openrouter/vendor/other-model",
+          isDefault: false,
+        }),
+      ]),
+    );
+    expect(response.json()).toMatchObject({
+      object: "list",
+      data: expect.arrayContaining([
+        {
+          id: "openrouter/openrouter/free",
+          object: "model",
+          owned_by: "openrouter",
+        },
+        { id: "omni/quality", object: "model", owned_by: "kurochan" },
+      ]),
+    });
+  });
+
   it("requires an API token when one is configured", async () => {
     app = buildServer({
       env: { KUROCHAN_API_TOKEN: "test-token" },
@@ -1296,6 +1366,74 @@ describe("Kuro-chan API", () => {
     );
   });
 
+  it("passes a selected provider model into planning and persists it on the run", async () => {
+    const store = new RunStore(":memory:");
+    const conversation = store.createConversation({
+      title: "Selected model test",
+    });
+    const planned = {
+      intent: "Implement a feature with a selected model",
+      summary: "A test plan",
+      assumptions: [],
+      clarificationRequired: false,
+      tasks: [
+        {
+          key: "implementation",
+          agentId: "engineering/implementer",
+          objective: "Implement the feature.",
+          dependsOn: [],
+          maxAttempts: 1,
+          approvalRequired: false,
+        },
+      ],
+      selectedAgents: [
+        {
+          id: "engineering/implementer",
+          name: "Engineering Implementer",
+          division: "Engineering",
+        },
+      ],
+      providerId: "openrouter",
+      model: "openrouter/free",
+      latencyMs: 1,
+      attempts: 1,
+    };
+    const createPlan = vi.fn(async () => planned);
+    app = buildServer({
+      env: {},
+      logger: false,
+      store,
+      planner: { createPlan } as unknown as PlanService,
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/conversations/" + conversation.id + "/runs",
+      payload: {
+        goal: "Implement a feature",
+        profile: "quality",
+        model: "openrouter/openrouter/free",
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(createPlan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        goal: "Implement a feature",
+        profile: "balanced",
+        preferredProvider: "openrouter",
+        providerModel: "openrouter/free",
+      }),
+    );
+    expect(response.json().run).toMatchObject({
+      profile: "balanced",
+      model: "openrouter/openrouter/free",
+    });
+    expect(store.getRun(response.json().run.id)?.model).toBe(
+      "openrouter/openrouter/free",
+    );
+  });
+
   it("locks provider-qualified model IDs to the named provider", async () => {
     const calls: Array<{ provider: ProviderId; model?: string }> = [];
     const fakeProvider = (
@@ -1357,6 +1495,70 @@ describe("Kuro-chan API", () => {
     expect(response.statusCode).toBe(200);
     expect(calls).toEqual([{ provider: "freellmapi", model: "acme/model-v2" }]);
     expect(response.headers["x-omnirouter-provider"]).toBe("freellmapi");
+  });
+
+  it("accepts auto as the free-first OmniRouter quality alias", async () => {
+    const calls: ProviderId[] = [];
+    const fakeProvider = (
+      id: ProviderId,
+      defaultModel: string,
+    ): ChatProvider => ({
+      id,
+      displayName: id,
+      defaultModel,
+      isConfigured: true,
+      complete: async (
+        input: ChatCompletionInput,
+      ): Promise<ChatCompletionOutput> => {
+        calls.push(id);
+        return {
+          providerId: id,
+          model: input.model ?? defaultModel,
+          content: "ok",
+          latencyMs: 1,
+        };
+      },
+    });
+    app = buildServer({
+      env: {},
+      providers: {
+        providers: new Map<ProviderId, ChatProvider>([
+          ["openrouter", fakeProvider("openrouter", "openrouter/free")],
+          ["freellmapi", fakeProvider("freellmapi", "auto")],
+        ]),
+        statuses: [
+          {
+            id: "openrouter",
+            name: "OpenRouter",
+            configured: true,
+            defaultModel: "openrouter/free",
+            capabilityNotes: [],
+          },
+          {
+            id: "freellmapi",
+            name: "FreeLLMAPI",
+            configured: true,
+            defaultModel: "auto",
+            capabilityNotes: [],
+          },
+        ],
+      },
+      logger: false,
+      store: new RunStore(":memory:"),
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      payload: {
+        model: "auto",
+        messages: [{ role: "user", content: "hello" }],
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(calls).toEqual(["freellmapi"]);
+    expect(response.headers["x-omnirouter-profile"]).toBe("quality");
   });
 
   it("rejects unknown model IDs instead of quietly changing route profiles", async () => {
