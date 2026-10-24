@@ -11,7 +11,8 @@ const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const API_BASE_KEY = "kurochan.apiBaseUrl.v1";
 const API_TOKEN_KEY = "kurochan.apiToken.session.v1";
-const FRONTEND_PREVIEW = new URLSearchParams(location.search).get("preview") === "1";
+const FRONTEND_PREVIEW =
+  new URLSearchParams(location.search).get("preview") === "1";
 const TERMINAL = new Set(["completed", "failed", "cancelled"]);
 const state = {
   view: "chat",
@@ -441,7 +442,10 @@ function renderChatView(workspace) {
     : "Tell Kuro-chan what you have in mind…";
   textarea.setAttribute("aria-label", "Message Kuro-chan");
   textarea.required = true;
-  textarea.disabled = state.sending || state.recording || (!state.authenticated && !FRONTEND_PREVIEW);
+  textarea.disabled =
+    state.sending ||
+    state.recording ||
+    (!state.authenticated && !FRONTEND_PREVIEW);
   const toolbar = makeElement("div", "composer-toolbar");
   const hint = makeElement(
     "span",
@@ -457,7 +461,10 @@ function renderChatView(workspace) {
     makeElement("span", "button-icon", "✳"),
     makeElement("span", "", "Build with agents"),
   );
-  const integrationsButton = makeElement("button", "button button-integrations");
+  const integrationsButton = makeElement(
+    "button",
+    "button button-integrations",
+  );
   integrationsButton.type = "button";
   integrationsButton.id = "open-integrations-from-composer";
   integrationsButton.title = "Browse integrations";
@@ -501,7 +508,9 @@ function renderChatView(workspace) {
   sendButton.type = "submit";
   sendButton.id = "send-message";
   sendButton.disabled =
-    state.sending || state.recording || (!state.authenticated && !FRONTEND_PREVIEW);
+    state.sending ||
+    state.recording ||
+    (!state.authenticated && !FRONTEND_PREVIEW);
   sendButton.append(
     makeElement("span", "", state.sending ? "Sending…" : "Send"),
     makeElement("span", "send-arrow", "↗"),
@@ -652,7 +661,8 @@ async function sendMessage() {
       { role: "user", content, createdAt: new Date().toISOString() },
       {
         role: "assistant",
-        content: "This is a frontend-only preview. No AI model was called and your message was not sent anywhere. Connect a running Kuro-chan API to use real inference.",
+        content:
+          "This is a frontend-only preview. No AI model was called and your message was not sent anywhere. Connect a running Kuro-chan API to use real inference.",
         createdAt: new Date().toISOString(),
       },
     ];
@@ -1811,8 +1821,10 @@ function renderIntegrationsView(workspace) {
   detail.id = "integration-detail";
   detail.setAttribute("aria-live", "polite");
 
-  actions.hidden = state.integrationTab === "api" || state.integrationTab === "tools";
-  message.hidden = state.integrationTab === "api" || state.integrationTab === "tools";
+  actions.hidden =
+    state.integrationTab === "api" || state.integrationTab === "tools";
+  message.hidden =
+    state.integrationTab === "api" || state.integrationTab === "tools";
   page.append(intro, tabs, actions, message, summary, filters, grid, detail);
   workspace.append(page);
   renderIntegrationCards();
@@ -1906,7 +1918,8 @@ function renderIntegrationCards() {
       ? snapshot.config.providers
       : [];
     const configured = providers.filter(
-      (provider) => provider.configured === true || provider.isConfigured === true,
+      (provider) =>
+        provider.configured === true || provider.isConfigured === true,
     ).length;
     summary.replaceChildren(
       integrationMetric(String(configured), "Providers configured"),
@@ -1927,7 +1940,8 @@ function renderIntegrationCards() {
     providers.forEach((provider) => {
       const isConfigured =
         provider.configured === true || provider.isConfigured === true;
-      const name = provider.name || provider.id || provider.provider || "Model provider";
+      const name =
+        provider.name || provider.id || provider.provider || "Model provider";
       const card = makeElement("article", "integration-card");
       const top = makeElement("div", "integration-card-top");
       top.append(
@@ -2807,7 +2821,9 @@ function init() {
     (location.protocol === "https:" ||
       ["localhost", "127.0.0.1"].includes(location.hostname))
   ) {
-    navigator.serviceWorker.register(new URL("./sw.js", import.meta.url)).catch(() => {});
+    navigator.serviceWorker
+      .register(new URL("./sw.js", import.meta.url))
+      .catch(() => {});
   }
   if (!FRONTEND_PREVIEW) {
     window.setInterval(() => {

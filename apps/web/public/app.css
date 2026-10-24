@@ -2711,7 +2711,6 @@ button:disabled {
   }
 }
 
-
 /* Screenshot-inspired graphite interface. Keep the existing interaction and
    accessibility rules while using the compact, mobile-first visual language. */
 :root {
@@ -3344,7 +3343,6 @@ input::placeholder {
     transition: none;
   }
 }
-
 
 .button-integrations {
   display: inline-flex;
