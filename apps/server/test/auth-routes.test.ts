@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { RunStore } from "@kurochan/storage";
-import { OAuthService, readOAuthStateCookie } from "../src/auth.js";
+import {
+  OAuthService,
+  readOAuthStateCookie,
+  type OAuthSessionRevocationStore,
+} from "../src/auth.js";
 import { buildServer, validateServerConfiguration } from "../src/server.js";
 
 const authEnvironment = {
@@ -23,7 +27,7 @@ function response(value: unknown, status = 200): Response {
   });
 }
 
-function makeOAuth() {
+function makeOAuth(revocationStore?: OAuthSessionRevocationStore) {
   const fetchImpl = vi.fn(
     async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       const url = String(input);
@@ -70,7 +74,12 @@ function makeOAuth() {
       return response({ message: "unexpected test endpoint" }, 404);
     },
   );
-  const service = new OAuthService(authEnvironment, fetchImpl as typeof fetch);
+  const service = new OAuthService(
+    authEnvironment,
+    fetchImpl as typeof fetch,
+    Date.now,
+    revocationStore,
+  );
   return { service, fetchImpl };
 }
 
@@ -251,6 +260,48 @@ describe("Kuro-chan OAuth API", () => {
     expect(
       bobRuns.json().data.map((run: { id: string }) => run.id),
     ).not.toContain("run-alice");
+  });
+
+  it("revokes an account session on sign-out and rejects the same token afterward", async () => {
+    const store = new RunStore(":memory:");
+    try {
+      const { service } = makeOAuth(store);
+      const token = await issueGithubSession(service, "logout-code");
+      app = buildServer({
+        env: authEnvironment,
+        oauth: service,
+        logger: false,
+        store,
+      });
+
+      const before = await app.inject({
+        method: "GET",
+        url: "/v1/session",
+        headers: { authorization: "Bearer " + token },
+      });
+      expect(before.statusCode).toBe(200);
+      expect(before.json().user.userId).toBe("github:101");
+
+      const logout = await app.inject({
+        method: "POST",
+        url: "/v1/session/logout",
+        headers: { authorization: "Bearer " + token },
+        payload: {},
+      });
+      expect(logout.statusCode).toBe(200);
+      expect(logout.json()).toEqual({ signedOut: true, revoked: true });
+
+      const after = await app.inject({
+        method: "GET",
+        url: "/v1/session",
+        headers: { authorization: "Bearer " + token },
+      });
+      expect(after.statusCode).toBe(401);
+    } finally {
+      await app?.close();
+      app = undefined;
+      store.close();
+    }
   });
 
   it("permits a remote bind only when a token or valid OAuth configuration is present", () => {
