@@ -1084,10 +1084,9 @@ export class TaskWorker {
                 ) {
                   let preview: string;
                   try {
-                    preview = JSON.stringify(redactMcpSensitiveValues(mcpArguments)).slice(
-                      0,
-                      2000,
-                    );
+                    preview = JSON.stringify(
+                      redactMcpSensitiveValues(mcpArguments),
+                    ).slice(0, 2000);
                   } catch {
                     preview = "[Arguments could not be serialized]";
                   }

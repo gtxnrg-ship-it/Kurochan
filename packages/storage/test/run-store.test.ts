@@ -557,7 +557,13 @@ describe("RunStore", () => {
       expect(store.getRun(run.id)?.status).toBe("waiting_for_approval");
       expect(store.claimNextTask("worker-c", { now: 103 })).toBeUndefined();
 
-      store.resolveTaskApproval(run.id, externalAction.id, true, "Approved", 104);
+      store.resolveTaskApproval(
+        run.id,
+        externalAction.id,
+        true,
+        "Approved",
+        104,
+      );
       expect(store.getRun(run.id)?.status).toBe("running");
       expect(store.claimNextTask("worker-c", { now: 105 })?.id).toBe(
         externalAction.id,
@@ -598,15 +604,39 @@ describe("RunStore", () => {
         leaseMs: 5_000,
       })!;
 
-      store.requestTaskApproval(run.id, publish.id, "worker-a", { action: "publish" }, 201);
-      store.requestTaskApproval(run.id, notify.id, "worker-b", { action: "notify" }, 202);
+      store.requestTaskApproval(
+        run.id,
+        publish.id,
+        "worker-a",
+        { action: "publish" },
+        201,
+      );
+      store.requestTaskApproval(
+        run.id,
+        notify.id,
+        "worker-b",
+        { action: "notify" },
+        202,
+      );
       expect(store.getRun(run.id)?.status).toBe("waiting_for_approval");
 
-      store.resolveTaskApproval(run.id, publish.id, true, "Approved publish", 203);
+      store.resolveTaskApproval(
+        run.id,
+        publish.id,
+        true,
+        "Approved publish",
+        203,
+      );
       expect(store.getRun(run.id)?.status).toBe("waiting_for_approval");
       expect(store.claimNextTask("worker-c", { now: 204 })).toBeUndefined();
 
-      store.resolveTaskApproval(run.id, notify.id, true, "Approved notification", 205);
+      store.resolveTaskApproval(
+        run.id,
+        notify.id,
+        true,
+        "Approved notification",
+        205,
+      );
       expect(store.getRun(run.id)?.status).toBe("running");
       expect(store.claimNextTask("worker-c", { now: 206 })).toBeDefined();
     } finally {

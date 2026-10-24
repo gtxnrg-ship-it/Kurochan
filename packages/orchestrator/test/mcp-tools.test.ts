@@ -228,7 +228,8 @@ describe("McpToolRuntime", () => {
       ok: false,
       error: {
         code: "invalid_result",
-        message: "MCP tool returned a value that cannot be represented as JSON.",
+        message:
+          "MCP tool returned a value that cannot be represented as JSON.",
       },
     });
     await runtime.close();

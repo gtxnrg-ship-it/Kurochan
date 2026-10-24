@@ -267,10 +267,7 @@ const SENSITIVE_MCP_VALUE_PATTERNS = [
   /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g,
 ];
 
-export function redactMcpSensitiveValues(
-  value: unknown,
-  depth = 0,
-): unknown {
+export function redactMcpSensitiveValues(value: unknown, depth = 0): unknown {
   if (depth > 32) return "[REDACTED: maximum nesting depth]";
   if (typeof value === "string") {
     return SENSITIVE_MCP_VALUE_PATTERNS.reduce(

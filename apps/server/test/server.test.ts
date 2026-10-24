@@ -1139,17 +1139,15 @@ describe("Kuro-chan API", () => {
     expect(() => validateServerConfiguration({ PORT: "8787oops" })).toThrow(
       /PORT/,
     );
-    expect(
-      () =>
-        validateServerConfiguration({
-          API_RATE_LIMIT_PER_MINUTE: "60junk",
-        }),
+    expect(() =>
+      validateServerConfiguration({
+        API_RATE_LIMIT_PER_MINUTE: "60junk",
+      }),
     ).toThrow(/API_RATE_LIMIT_PER_MINUTE/);
-    expect(
-      () =>
-        validateServerConfiguration({
-          OMNIROUTER_MAX_CONCURRENT: "24requests",
-        }),
+    expect(() =>
+      validateServerConfiguration({
+        OMNIROUTER_MAX_CONCURRENT: "24requests",
+      }),
     ).toThrow(/OMNIROUTER_MAX_CONCURRENT/);
     expect(() =>
       buildServer({

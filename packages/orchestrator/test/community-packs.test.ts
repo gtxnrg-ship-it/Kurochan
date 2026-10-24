@@ -43,7 +43,9 @@ describe("community pack registry", () => {
   it("provides pinned MCP presets with secret-free environment placeholders", () => {
     const presets = listCommunityMcpPresets();
     expect(presets).toHaveLength(3);
-    expect(presets.find((preset) => preset.id === "playwright-mcp")).toMatchObject({
+    expect(
+      presets.find((preset) => preset.id === "playwright-mcp"),
+    ).toMatchObject({
       transport: "stdio",
       configuration: {
         command: "npx",
@@ -59,7 +61,9 @@ describe("community pack registry", () => {
       },
     });
     const serializedPresets = JSON.stringify(presets);
-    expect(serializedPresets).not.toMatch(/Bearer\\s+(?:ghp_|github_pat_|[A-Za-z0-9_-]{24,})/);
+    expect(serializedPresets).not.toMatch(
+      /Bearer\\s+(?:ghp_|github_pat_|[A-Za-z0-9_-]{24,})/,
+    );
     expect(serializedPresets).not.toContain("ghp_");
     expect(serializedPresets).not.toContain("github_pat_");
     expect(() => listCommunityMcpPresets({ limit: 0 })).toThrow(

@@ -322,7 +322,8 @@ const MCP_PRESETS: readonly CommunityMcpPreset[] = [
     id: "context7",
     packId: "context7",
     name: "Context7 Documentation MCP",
-    summary: "Version-aware library documentation for better API and framework implementations.",
+    summary:
+      "Version-aware library documentation for better API and framework implementations.",
     transport: "streamable-http",
     configuration: {
       id: "context7",
@@ -334,16 +335,19 @@ const MCP_PRESETS: readonly CommunityMcpPreset[] = [
     requiredEnvironment: [
       {
         name: "CONTEXT7_AUTHORIZATION",
-        purpose: "Set to 'Bearer <your Context7 API key>' in the server/worker secret environment.",
+        purpose:
+          "Set to 'Bearer <your Context7 API key>' in the server/worker secret environment.",
       },
     ],
-    notes: "Remote service; no source is executed locally. Configure an API key and review Context7's current usage terms.",
+    notes:
+      "Remote service; no source is executed locally. Configure an API key and review Context7's current usage terms.",
   },
   {
     id: "playwright-mcp",
     packId: "playwright-mcp",
     name: "Microsoft Playwright MCP",
-    summary: "Browser inspection and repeatable UI workflows for test environments.",
+    summary:
+      "Browser inspection and repeatable UI workflows for test environments.",
     transport: "stdio",
     configuration: {
       id: "playwright",
@@ -354,13 +358,15 @@ const MCP_PRESETS: readonly CommunityMcpPreset[] = [
       env: {},
     },
     requiredEnvironment: [],
-    notes: "Requires Node.js and npm/npx on the worker host. The package version is pinned. Use a dedicated test browser/profile and test environment; browser actions can change external state.",
+    notes:
+      "Requires Node.js and npm/npx on the worker host. The package version is pinned. Use a dedicated test browser/profile and test environment; browser actions can change external state.",
   },
   {
     id: "github-mcp-server",
     packId: "github-mcp-server",
     name: "GitHub MCP Server",
-    summary: "Official GitHub repository, issue, and pull-request tools through GitHub's hosted MCP endpoint.",
+    summary:
+      "Official GitHub repository, issue, and pull-request tools through GitHub's hosted MCP endpoint.",
     transport: "streamable-http",
     configuration: {
       id: "github-mcp-server",
@@ -372,10 +378,12 @@ const MCP_PRESETS: readonly CommunityMcpPreset[] = [
     requiredEnvironment: [
       {
         name: "GITHUB_MCP_AUTHORIZATION",
-        purpose: "Set to 'Bearer <least-privilege fine-grained GitHub token>' in the server/worker secret environment.",
+        purpose:
+          "Set to 'Bearer <least-privilege fine-grained GitHub token>' in the server/worker secret environment.",
       },
     ],
-    notes: "Use minimal repository permissions and retain per-tool approval for writes. This is separate from Kurochan's native GitHub project connector.",
+    notes:
+      "Use minimal repository permissions and retain per-tool approval for writes. This is separate from Kurochan's native GitHub project connector.",
   },
 ];
 
@@ -390,26 +398,26 @@ export function listCommunityMcpPresets(
   const query = options.query?.trim().toLowerCase() ?? "";
   const limit = options.limit ?? 100;
   if (query.length > 200) {
-    throw new Error("Community MCP preset query must not exceed 200 characters.");
+    throw new Error(
+      "Community MCP preset query must not exceed 200 characters.",
+    );
   }
   if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
     throw new Error("Community MCP preset limit must be between 1 and 100.");
   }
 
   return MCP_PRESETS.filter((preset) =>
-    [
-      preset.id,
-      preset.packId,
-      preset.name,
-      preset.summary,
-      preset.notes,
-    ].some((value) => value.toLowerCase().includes(query)),
+    [preset.id, preset.packId, preset.name, preset.summary, preset.notes].some(
+      (value) => value.toLowerCase().includes(query),
+    ),
   )
     .slice(0, limit)
     .map((preset) => ({
       ...preset,
       configuration: { ...preset.configuration },
-      requiredEnvironment: preset.requiredEnvironment.map((item) => ({ ...item })),
+      requiredEnvironment: preset.requiredEnvironment.map((item) => ({
+        ...item,
+      })),
     }));
 }
 
@@ -422,7 +430,9 @@ export function getCommunityMcpPreset(
     ? {
         ...preset,
         configuration: { ...preset.configuration },
-        requiredEnvironment: preset.requiredEnvironment.map((item) => ({ ...item })),
+        requiredEnvironment: preset.requiredEnvironment.map((item) => ({
+          ...item,
+        })),
       }
     : undefined;
 }

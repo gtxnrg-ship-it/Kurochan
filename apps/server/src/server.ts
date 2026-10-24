@@ -3346,7 +3346,19 @@ export function validateServerConfiguration(env: Environment = process.env): {
       "Refusing to bind Kuro-chan API to a non-loopback host without KUROCHAN_API_TOKEN.",
     );
   }
-  parseEnvironmentInteger("API_RATE_LIMIT_PER_MINUTE", env.API_RATE_LIMIT_PER_MINUTE, 60, 1, 1000);
-  parseEnvironmentInteger("OMNIROUTER_MAX_CONCURRENT", env.OMNIROUTER_MAX_CONCURRENT, 24, 1, 256);
+  parseEnvironmentInteger(
+    "API_RATE_LIMIT_PER_MINUTE",
+    env.API_RATE_LIMIT_PER_MINUTE,
+    60,
+    1,
+    1000,
+  );
+  parseEnvironmentInteger(
+    "OMNIROUTER_MAX_CONCURRENT",
+    env.OMNIROUTER_MAX_CONCURRENT,
+    24,
+    1,
+    256,
+  );
   return { host, port: parsedPort };
 }
