@@ -418,13 +418,20 @@ function renderChatView(workspace) {
     typeof MediaRecorder !== "undefined" &&
     Boolean(navigator.mediaDevices?.getUserMedia);
   voiceButton.disabled =
-    !state.authenticated || state.sending || (!state.recording && !recordingSupported);
+    !state.authenticated ||
+    state.sending ||
+    (!state.recording && !recordingSupported);
   voiceButton.title = !recordingSupported
     ? "Microphone recording requires a supported browser and secure context."
     : !state.speech?.voiceTurn?.enabled && !state.recording
       ? "Configure speech-to-text and text-to-speech on the API server."
       : "Record a voice turn and receive an audio reply.";
-  voiceButton.setAttribute("aria-label", state.recording ? "Stop recording and send voice turn" : "Record a voice turn");
+  voiceButton.setAttribute(
+    "aria-label",
+    state.recording
+      ? "Stop recording and send voice turn"
+      : "Record a voice turn",
+  );
   voiceButton.append(
     makeElement("span", "button-icon", state.recording ? "■" : "♫"),
     makeElement("span", "", state.recording ? "Stop & send" : "Voice turn"),
@@ -432,7 +439,8 @@ function renderChatView(workspace) {
   const sendButton = makeElement("button", "button button-send");
   sendButton.type = "submit";
   sendButton.id = "send-message";
-  sendButton.disabled = state.sending || state.recording || !state.authenticated;
+  sendButton.disabled =
+    state.sending || state.recording || !state.authenticated;
   sendButton.append(
     makeElement("span", "", state.sending ? "Sending…" : "Send"),
     makeElement("span", "send-arrow", "↗"),
@@ -522,8 +530,9 @@ function renderMessage(message) {
     );
     playButton.type = "button";
     playButton.disabled = state.voiceAudioLoading.has(key);
-    playButton.addEventListener("click", () =>
-      void loadVoiceAudio(state.currentConversationId, message.id),
+    playButton.addEventListener(
+      "click",
+      () => void loadVoiceAudio(state.currentConversationId, message.id),
     );
     audioActions.append(playButton);
     const audioUrl = state.voiceAudioUrls.get(key);
@@ -641,9 +650,17 @@ function stopRecordingTracks() {
 
 function chooseRecordingType() {
   const candidates = [
-    { mimeType: "audio/webm;codecs=opus", contentType: "audio/webm", extension: "webm" },
+    {
+      mimeType: "audio/webm;codecs=opus",
+      contentType: "audio/webm",
+      extension: "webm",
+    },
     { mimeType: "audio/webm", contentType: "audio/webm", extension: "webm" },
-    { mimeType: "audio/ogg;codecs=opus", contentType: "audio/ogg", extension: "ogg" },
+    {
+      mimeType: "audio/ogg;codecs=opus",
+      contentType: "audio/ogg",
+      extension: "ogg",
+    },
     { mimeType: "audio/mp4", contentType: "audio/mp4", extension: "m4a" },
   ];
   const candidate = candidates.find(
@@ -656,12 +673,21 @@ function chooseRecordingType() {
 
 async function startVoiceRecording() {
   if (!state.authenticated || state.sending || state.recording) return;
-  if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
-    showToast("This browser cannot record audio. Open Kuro-chan over HTTPS on your phone, or use a supported browser.", "error");
+  if (
+    !navigator.mediaDevices?.getUserMedia ||
+    typeof MediaRecorder === "undefined"
+  ) {
+    showToast(
+      "This browser cannot record audio. Open Kuro-chan over HTTPS on your phone, or use a supported browser.",
+      "error",
+    );
     return;
   }
   if (!state.speech?.voiceTurn?.enabled) {
-    showToast("Voice turns need both speech-to-text and text-to-speech configured on the API server.", "error");
+    showToast(
+      "Voice turns need both speech-to-text and text-to-speech configured on the API server.",
+      "error",
+    );
     setView("system");
     return;
   }
@@ -679,7 +705,9 @@ async function startVoiceRecording() {
     const recorder = preferred
       ? new MediaRecorder(stream, { mimeType: preferred.mimeType })
       : new MediaRecorder(stream);
-    const actualType = (recorder.mimeType || preferred?.mimeType || "").split(";")[0].toLowerCase();
+    const actualType = (recorder.mimeType || preferred?.mimeType || "")
+      .split(";")[0]
+      .toLowerCase();
     const details = {
       "audio/webm": { extension: "webm", contentType: "audio/webm" },
       "audio/ogg": { extension: "ogg", contentType: "audio/ogg" },
@@ -688,7 +716,10 @@ async function startVoiceRecording() {
     }[actualType];
     if (!details) {
       stream.getTracks().forEach((track) => track.stop());
-      showToast("This browser's recording format is not supported by the configured speech adapter.", "error");
+      showToast(
+        "This browser's recording format is not supported by the configured speech adapter.",
+        "error",
+      );
       return;
     }
     state.recordingStream = stream;
@@ -700,7 +731,8 @@ async function startVoiceRecording() {
       if (event.data?.size) state.recordingChunks.push(event.data);
     });
     recorder.addEventListener("error", () => {
-      state.recordingError = "The microphone recording failed. Check browser microphone permission and try again.";
+      state.recordingError =
+        "The microphone recording failed. Check browser microphone permission and try again.";
       if (recorder.state !== "inactive") recorder.stop();
     });
     recorder.addEventListener("stop", () => {
@@ -718,12 +750,18 @@ async function startVoiceRecording() {
       }
       const blob = new Blob(recorded, { type: details.contentType });
       if (!blob.size) {
-        showToast("No audio was captured. Try again and speak after recording starts.", "error");
+        showToast(
+          "No audio was captured. Try again and speak after recording starts.",
+          "error",
+        );
         renderView();
         return;
       }
       if (blob.size > 24 * 1024 * 1024) {
-        showToast("That recording is too large. Please record a shorter voice message.", "error");
+        showToast(
+          "That recording is too large. Please record a shorter voice message.",
+          "error",
+        );
         renderView();
         return;
       }
@@ -760,7 +798,10 @@ function stopVoiceRecording() {
     state.mediaRecorder = null;
     stopRecordingTracks();
     renderView();
-    showToast("The recording could not be stopped cleanly. Please try again.", "error");
+    showToast(
+      "The recording could not be stopped cleanly. Please try again.",
+      "error",
+    );
   }
 }
 
@@ -782,7 +823,9 @@ async function submitVoiceTurn(blob, details) {
     const result = await api.voiceTurn(conversationId, form);
     await loadConversation(conversationId);
     if (result.audio?.messageId) {
-      await loadVoiceAudio(conversationId, result.audio.messageId, { autoplay: true });
+      await loadVoiceAudio(conversationId, result.audio.messageId, {
+        autoplay: true,
+      });
     }
     const heardText = result.transcript?.text || result.userMessage?.content;
     if (heardText) {
@@ -807,12 +850,18 @@ async function submitVoiceTurn(blob, details) {
   }
 }
 
-async function loadVoiceAudio(conversationId, messageId, { autoplay = false } = {}) {
+async function loadVoiceAudio(
+  conversationId,
+  messageId,
+  { autoplay = false } = {},
+) {
   if (!conversationId || !messageId) return;
   const key = voiceAudioKey(conversationId, messageId);
   const currentUrl = state.voiceAudioUrls.get(key);
   if (currentUrl) {
-    const row = $(".message-row").find((element) => element.dataset.messageId === String(messageId));
+    const row = $(".message-row").find(
+      (element) => element.dataset.messageId === String(messageId),
+    );
     const audio = row?.querySelector("audio");
     if (autoplay && audio) {
       try {
@@ -831,7 +880,9 @@ async function loadVoiceAudio(conversationId, messageId, { autoplay = false } = 
     const url = URL.createObjectURL(blob);
     state.voiceAudioUrls.set(key, url);
     if (state.view === "chat") renderView();
-    const row = $(".message-row").find((element) => element.dataset.messageId === String(messageId));
+    const row = $(".message-row").find(
+      (element) => element.dataset.messageId === String(messageId),
+    );
     const audio = row?.querySelector("audio");
     if (autoplay && audio) {
       try {

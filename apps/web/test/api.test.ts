@@ -87,10 +87,13 @@ describe("Kuro-chan web API helpers", () => {
   it("sends recorded voice as multipart without overriding the browser boundary", async () => {
     const fetchImpl = vi.fn(
       async () =>
-        new Response(JSON.stringify({ transcript: { text: "Hello Kuro-chan" } }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        }),
+        new Response(
+          JSON.stringify({ transcript: { text: "Hello Kuro-chan" } }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
     );
     const client = new ApiClient({
       getBaseUrl: () => "https://api.example.test",
@@ -98,14 +101,22 @@ describe("Kuro-chan web API helpers", () => {
       fetchImpl,
     });
     const form = new FormData();
-    form.append("file", new Blob(["fake audio"], { type: "audio/webm" }), "recording.webm");
+    form.append(
+      "file",
+      new Blob(["fake audio"], { type: "audio/webm" }),
+      "recording.webm",
+    );
     form.append("clientMessageId", "voice-123");
 
-    await expect(client.voiceTurn("conversation-1", form)).resolves.toMatchObject({
+    await expect(
+      client.voiceTurn("conversation-1", form),
+    ).resolves.toMatchObject({
       transcript: { text: "Hello Kuro-chan" },
     });
     const [url, options] = fetchImpl.mock.calls[0] || [];
-    expect(url).toBe("https://api.example.test/v1/conversations/conversation-1/voice-turn");
+    expect(url).toBe(
+      "https://api.example.test/v1/conversations/conversation-1/voice-turn",
+    );
     expect(options?.method).toBe("POST");
     expect(options?.body).toBe(form);
     expect(new Headers(options?.headers).get("authorization")).toBe(
@@ -118,17 +129,23 @@ describe("Kuro-chan web API helpers", () => {
 
   it("fetches a protected audio artifact with bearer auth and returns a Blob", async () => {
     const audio = new Blob(["audio bytes"], { type: "audio/wav" });
-    const fetchImpl = vi.fn(async () => new Response(audio, {
-      status: 200,
-      headers: { "content-type": "audio/wav" },
-    }));
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(audio, {
+          status: 200,
+          headers: { "content-type": "audio/wav" },
+        }),
+    );
     const client = new ApiClient({
       getBaseUrl: () => "https://api.example.test",
       getToken: () => "audio-session-token",
       fetchImpl,
     });
 
-    const result = await client.conversationAudio("conversation-1", "message-2");
+    const result = await client.conversationAudio(
+      "conversation-1",
+      "message-2",
+    );
     const [url, options] = fetchImpl.mock.calls[0] || [];
     expect(result).toBeInstanceOf(Blob);
     expect(await result.text()).toBe("audio bytes");
