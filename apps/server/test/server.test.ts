@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { request as httpRequest } from "node:http";
+import type { AddressInfo } from "node:net";
 import type { FastifyInstance } from "fastify";
 import { buildServer, validateServerConfiguration } from "../src/server.js";
 import {
@@ -1104,6 +1106,90 @@ describe("Kuro-chan API", () => {
       },
     ]);
     expect(response.body).not.toContain("api_key");
+  });
+
+  it("cancels upstream inference when the HTTP client disconnects", async () => {
+    let signal: AbortSignal | undefined;
+    let signalProviderEntered!: () => void;
+    const providerEntered = new Promise<void>((resolve) => {
+      signalProviderEntered = resolve;
+    });
+    let signalAborted!: () => void;
+    const providerAborted = new Promise<void>((resolve) => {
+      signalAborted = resolve;
+    });
+    const slowProvider: ChatProvider = {
+      id: "openrouter",
+      displayName: "OpenRouter",
+      defaultModel: "test-model",
+      isConfigured: true,
+      complete: async (input): Promise<ChatCompletionOutput> => {
+        signal = input.signal;
+        signalProviderEntered();
+        return await new Promise<ChatCompletionOutput>((_resolve, reject) => {
+          const onAbort = () => {
+            signalAborted();
+            reject(Object.assign(new Error("cancelled"), { code: "cancelled" }));
+          };
+          if (input.signal?.aborted) onAbort();
+          else input.signal?.addEventListener("abort", onAbort, { once: true });
+        });
+      },
+    };
+    app = buildServer({
+      env: {},
+      providers: {
+        providers: new Map<ProviderId, ChatProvider>([
+          ["openrouter", slowProvider],
+        ]),
+        statuses: [
+          {
+            id: "openrouter",
+            name: "OpenRouter",
+            configured: true,
+            defaultModel: "test-model",
+            capabilityNotes: [],
+          },
+        ],
+      },
+      logger: false,
+      store: new RunStore(":memory:"),
+    });
+    await app.listen({ host: "127.0.0.1", port: 0 });
+    const address = app.server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Test API server did not bind to a TCP address.");
+    }
+    const request = httpRequest(
+      {
+        hostname: "127.0.0.1",
+        port: (address as AddressInfo).port,
+        path: "/v1/chat/completions",
+        method: "POST",
+        headers: { "content-type": "application/json" },
+      },
+      (response) => response.resume(),
+    );
+    request.on("error", () => undefined);
+    request.end(
+      JSON.stringify({
+        model: "omni/balanced",
+        messages: [{ role: "user", content: "Wait for cancellation." }],
+      }),
+    );
+    await providerEntered;
+    request.destroy();
+
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const wasAborted = await Promise.race([
+      providerAborted.then(() => true),
+      new Promise<boolean>((resolve) => {
+        timeout = setTimeout(() => resolve(false), 2000);
+      }),
+    ]);
+    if (timeout) clearTimeout(timeout);
+    expect(wasAborted).toBe(true);
+    expect(signal?.aborted).toBe(true);
   });
 
   it("requires an API token when one is configured", async () => {
