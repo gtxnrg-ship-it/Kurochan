@@ -1,7 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, mkdir, open, readdir, readFile } from "node:fs/promises";
-import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import {
+  basename,
+  dirname,
+  extname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 import { z } from "zod";
 
 const RelativePathSchema = z.string().min(1).max(1000);
@@ -45,20 +54,79 @@ const SAFE_DOTFILES = new Set([
 ]);
 const SAFE_DOT_DIRECTORIES = new Set([".github"]);
 const IGNORED_WORKSPACE_DIRECTORIES = new Set([
-  ".git", ".next", ".nuxt", ".parcel-cache", ".pytest_cache", ".turbo",
-  ".venv", "__pycache__", "build", "coverage", "dist", "node_modules",
-  "out", "playwright-report", "target", "test-results", "venv",
+  ".git",
+  ".next",
+  ".nuxt",
+  ".parcel-cache",
+  ".pytest_cache",
+  ".turbo",
+  ".venv",
+  "__pycache__",
+  "build",
+  "coverage",
+  "dist",
+  "node_modules",
+  "out",
+  "playwright-report",
+  "target",
+  "test-results",
+  "venv",
 ]);
 const INDEXABLE_EXTENSIONS = new Set([
-  ".c", ".cc", ".cpp", ".cs", ".css", ".cjs", ".cts", ".go", ".graphql",
-  ".h", ".hpp", ".htm", ".html", ".java", ".js", ".json", ".jsonc", ".jsx",
-  ".md", ".mdx", ".mjs", ".mts", ".php", ".properties", ".proto", ".py",
-  ".rb", ".rs", ".scss", ".sh", ".sql", ".svelte", ".swift", ".toml",
-  ".ts", ".tsx", ".vue", ".xml", ".yaml", ".yml",
+  ".c",
+  ".cc",
+  ".cpp",
+  ".cs",
+  ".css",
+  ".cjs",
+  ".cts",
+  ".go",
+  ".graphql",
+  ".h",
+  ".hpp",
+  ".htm",
+  ".html",
+  ".java",
+  ".js",
+  ".json",
+  ".jsonc",
+  ".jsx",
+  ".md",
+  ".mdx",
+  ".mjs",
+  ".mts",
+  ".php",
+  ".properties",
+  ".proto",
+  ".py",
+  ".rb",
+  ".rs",
+  ".scss",
+  ".sh",
+  ".sql",
+  ".svelte",
+  ".swift",
+  ".toml",
+  ".ts",
+  ".tsx",
+  ".vue",
+  ".xml",
+  ".yaml",
+  ".yml",
 ]);
 const INDEXABLE_FILENAMES = new Set([
-  "AGENTS.md", "Dockerfile", "Gemfile", "Justfile", "LICENSE", "Makefile",
-  "Procfile", "README", "README.md", "go.mod", "go.sum", "requirements.txt",
+  "AGENTS.md",
+  "Dockerfile",
+  "Gemfile",
+  "Justfile",
+  "LICENSE",
+  "Makefile",
+  "Procfile",
+  "README",
+  "README.md",
+  "go.mod",
+  "go.sum",
+  "requirements.txt",
 ]);
 
 const SearchTextSchema = z
@@ -113,12 +181,35 @@ function indexPathPriority(path: string): number {
   const extension = extname(path).toLowerCase();
   if (
     [
-      ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".go", ".rs",
-      ".java", ".cs", ".cpp", ".c", ".h", ".rb", ".php", ".sql", ".graphql",
-      ".svelte", ".vue", ".swift",
+      ".ts",
+      ".tsx",
+      ".js",
+      ".jsx",
+      ".mjs",
+      ".cjs",
+      ".py",
+      ".go",
+      ".rs",
+      ".java",
+      ".cs",
+      ".cpp",
+      ".c",
+      ".h",
+      ".rb",
+      ".php",
+      ".sql",
+      ".graphql",
+      ".svelte",
+      ".vue",
+      ".swift",
     ].includes(extension)
-  ) return 0;
-  if ([".md", ".mdx", ".json", ".jsonc", ".yaml", ".yml", ".toml"].includes(extension)) {
+  )
+    return 0;
+  if (
+    [".md", ".mdx", ".json", ".jsonc", ".yaml", ".yml", ".toml"].includes(
+      extension,
+    )
+  ) {
     return 1;
   }
   return 2;
@@ -368,7 +459,8 @@ export class WorkspaceRuntime {
           (entry.name.startsWith(".") &&
             !SAFE_DOTFILES.has(entry.name) &&
             !SAFE_DOT_DIRECTORIES.has(entry.name))
-        ) continue;
+        )
+          continue;
         const fullPath = join(directory, entry.name);
         const info = await lstat(fullPath, { bigint: true });
         if (info.isSymbolicLink()) continue;
@@ -382,8 +474,14 @@ export class WorkspaceRuntime {
             path: rel,
             bytes: Number(info.size),
             fingerprint: [
-              info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs,
-            ].map(String).join(":"),
+              info.dev,
+              info.ino,
+              info.size,
+              info.mtimeNs,
+              info.ctimeNs,
+            ]
+              .map(String)
+              .join(":"),
           });
         }
       }
@@ -704,7 +802,11 @@ export class WorkspaceRuntime {
       for (let index = 0; index < lines.length; index++) {
         const line = lines[index]!;
         if (line.toLowerCase().includes(needle)) {
-          matches.push({ path: file.path, line: index + 1, text: line.slice(0, 500) });
+          matches.push({
+            path: file.path,
+            line: index + 1,
+            text: line.slice(0, 500),
+          });
           if (matches.length >= boundedLimit) break;
         }
       }
@@ -719,7 +821,9 @@ export class WorkspaceRuntime {
   ): Promise<readonly { path: string; line: number; text: string }[]> {
     const details = await this.listFilesDetailed(runId);
     const candidates = details
-      .filter((file) => file.bytes <= this.maxFileBytes && isIndexablePath(file.path))
+      .filter(
+        (file) => file.bytes <= this.maxFileBytes && isIndexablePath(file.path),
+      )
       .sort(
         (left, right) =>
           indexPathPriority(left.path) - indexPathPriority(right.path) ||
@@ -735,9 +839,10 @@ export class WorkspaceRuntime {
     }
 
     const previous = new Map(
-      this.searchIndex!
-        .getWorkspaceIndexState(runId)
-        .map((file) => [file.path, file]),
+      this.searchIndex!.getWorkspaceIndexState(runId).map((file) => [
+        file.path,
+        file,
+      ]),
     );
     const changedContents = new Map<string, string | null>();
     for (const file of selected) {
@@ -746,10 +851,14 @@ export class WorkspaceRuntime {
         indexed &&
         indexed.fingerprint === file.fingerprint &&
         indexed.bytes === file.bytes
-      ) continue;
+      )
+        continue;
       try {
         const read = await this.readFile(runId, file.path);
-        changedContents.set(file.path, read.content.includes("\0") ? null : read.content);
+        changedContents.set(
+          file.path,
+          read.content.includes("\0") ? null : read.content,
+        );
       } catch {
         changedContents.set(file.path, null);
       }
@@ -772,14 +881,21 @@ export class WorkspaceRuntime {
           line,
           index,
           score: terms.reduce(
-            (score, term) => score + (line.toLowerCase().includes(term) ? 1 : 0),
+            (score, term) =>
+              score + (line.toLowerCase().includes(term) ? 1 : 0),
             0,
           ),
         }))
         .filter((item) => item.score > 0)
-        .sort((left, right) => right.score - left.score || left.index - right.index);
+        .sort(
+          (left, right) => right.score - left.score || left.index - right.index,
+        );
       for (const item of scoredLines) {
-        matches.push({ path: document.path, line: item.index + 1, text: item.line.slice(0, 500) });
+        matches.push({
+          path: document.path,
+          line: item.index + 1,
+          text: item.line.slice(0, 500),
+        });
         if (matches.length >= limit) return matches;
       }
     }

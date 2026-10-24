@@ -143,10 +143,7 @@ describe("RunStore", () => {
         1000,
       );
 
-      const matches = store.searchWorkspaceIndex(
-        run.id,
-        "provider fallback",
-      );
+      const matches = store.searchWorkspaceIndex(run.id, "provider fallback");
       expect(matches[0]?.path).toBe("src/router.ts");
       expect(matches[0]?.content).toContain("routeProviderFallback");
       expect(store.getWorkspaceIndexState(run.id)).toHaveLength(2);
@@ -165,17 +162,15 @@ describe("RunStore", () => {
             bytes: 80,
           },
         ],
-        new Map([
-          ["src/router.ts", 'export const selectModel = "chosen";'],
-        ]),
+        new Map([["src/router.ts", 'export const selectModel = "chosen";']]),
         2000,
       );
       expect(
         store.searchWorkspaceIndex(run.id, "routeProviderFallback"),
       ).toHaveLength(0);
-      expect(
-        store.searchWorkspaceIndex(run.id, "selectModel")[0]?.path,
-      ).toBe("src/router.ts");
+      expect(store.searchWorkspaceIndex(run.id, "selectModel")[0]?.path).toBe(
+        "src/router.ts",
+      );
 
       store.syncWorkspaceIndex(
         run.id,
@@ -196,9 +191,7 @@ describe("RunStore", () => {
           bytes: 80,
         },
       ]);
-      expect(
-        store.searchWorkspaceIndex(run.id, "selectModel"),
-      ).toHaveLength(0);
+      expect(store.searchWorkspaceIndex(run.id, "selectModel")).toHaveLength(0);
     } finally {
       store.close();
     }

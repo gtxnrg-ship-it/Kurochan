@@ -696,16 +696,22 @@ export class RunStore {
       if (
         file.path.startsWith("/") ||
         file.path.includes("\\") ||
-        file.path.split("/").some((part) => !part || part === "." || part === "..")
+        file.path
+          .split("/")
+          .some((part) => !part || part === "." || part === "..")
       ) {
-        throw new Error("Workspace index path must be a normalized relative path.");
+        throw new Error(
+          "Workspace index path must be a normalized relative path.",
+        );
       }
       if (
         !Number.isInteger(file.bytes) ||
         file.bytes < 0 ||
         file.bytes > 2_000_000
       ) {
-        throw new Error("Workspace index file size is outside the allowed limit.");
+        throw new Error(
+          "Workspace index file size is outside the allowed limit.",
+        );
       }
       if (files.has(file.path)) {
         throw new Error("Workspace index contains a duplicate path.");
@@ -724,10 +730,7 @@ export class RunStore {
       if (!files.has(path)) {
         throw new Error("Workspace index content references an unknown path.");
       }
-      if (
-        content !== null &&
-        Buffer.byteLength(content, "utf8") > 300_000
-      ) {
+      if (content !== null && Buffer.byteLength(content, "utf8") > 300_000) {
         throw new Error("Workspace index content exceeds the file-size limit.");
       }
     }
@@ -784,13 +787,7 @@ export class RunStore {
             deleteFts.run(old.id);
             updateFile.run(file.fingerprint, file.bytes, now, old.id);
           } else {
-            insertFile.run(
-              runId,
-              file.path,
-              file.fingerprint,
-              file.bytes,
-              now,
-            );
+            insertFile.run(runId, file.path, file.fingerprint, file.bytes, now);
           }
           continue;
         }
@@ -826,7 +823,9 @@ export class RunStore {
     assertText(runId, "runId", 200);
     assertText(query, "workspace search query", 500);
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
-      throw new Error("Workspace search result limit must be between 1 and 100.");
+      throw new Error(
+        "Workspace search result limit must be between 1 and 100.",
+      );
     }
     const tokens = [...query.matchAll(/[\p{L}\p{N}_$]+/gu)]
       .map((match) => match[0].slice(0, 80))
