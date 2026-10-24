@@ -59,7 +59,7 @@ describe("Kuro-chan API", () => {
         id: "superpowers",
         mode: "vendored-skill-pack",
         pinnedRevision: "2ce8aa15d05bd57213e6f746f953aafb7ded7a8b",
-        runtime: {
+        skillCatalog: {
           packId: "superpowers",
           available: false,
           skillCount: 0,
