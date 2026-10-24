@@ -281,7 +281,7 @@ function rankCatalogAgents(
 
 function safeAgentDescription(profile: AgentProfile): string {
   // Planning needs enough metadata to route the task, not the full profile.
-  // The worker loads the selected specialist's full pinned instructions later.
+  // The worker loads the selected profile's separately bounded instructions later.
   const description = profile.description.slice(0, 320);
   const lower = description.toLowerCase();
   return FORBIDDEN_AGENT_INSTRUCTIONS.some((phrase) => lower.includes(phrase))
