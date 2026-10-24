@@ -3,7 +3,11 @@ import type { Evidence } from "@kurochan/storage";
 
 const API_ROOT = "https://api.search.brave.com/res/v1/llm/context";
 const MAX_QUERY_LENGTH = 600;
-const MAX_RESULTS = 8;
+const MAX_RESULTS = 12;
+const DEFAULT_RESULTS = 8;
+const MAX_CONTEXT_CHARACTERS = 42_000;
+const MAX_SNIPPETS_PER_URL = 4;
+const MAX_SNIPPET_CHARACTERS = 1_400;
 const DEFAULT_TIMEOUT_MS = 15_000;
 
 const SearchArgsSchema = z
@@ -17,7 +21,7 @@ const SearchArgsSchema = z
         (value) => value.split(/\s+/).filter(Boolean).length <= 75,
         "query must contain at most 75 words",
       ),
-    limit: z.number().int().min(1).max(MAX_RESULTS).default(5),
+    limit: z.number().int().min(1).max(MAX_RESULTS).default(DEFAULT_RESULTS),
     country: z
       .string()
       .trim()
@@ -216,10 +220,10 @@ export class WebResearchRuntime implements WebResearchExecutor {
         search_lang: args.searchLang ?? this.searchLang,
         count: String(args.limit),
         maximum_number_of_urls: String(args.limit),
-        maximum_number_of_tokens: String(Math.max(1024, args.limit * 512)),
-        maximum_number_of_tokens_per_url: "1024",
-        maximum_number_of_snippets: String(Math.min(24, args.limit * 3)),
-        maximum_number_of_snippets_per_url: "3",
+        maximum_number_of_tokens: String(Math.min(16_384, Math.max(4_096, args.limit * 1_024))),
+        maximum_number_of_tokens_per_url: "2048",
+        maximum_number_of_snippets: String(Math.min(96, args.limit * 6)),
+        maximum_number_of_snippets_per_url: "6",
         context_threshold_mode: "balanced",
         safesearch: "moderate",
         enable_source_metadata: "true",
@@ -304,6 +308,7 @@ export class WebResearchRuntime implements WebResearchExecutor {
         );
       }
       const data = BraveResponseSchema.parse(payload);
+      let remainingSnippetCharacters = MAX_CONTEXT_CHARACTERS;
       const items = data.grounding.generic
         .slice(0, args.limit)
         .flatMap((item) => {
@@ -315,9 +320,16 @@ export class WebResearchRuntime implements WebResearchExecutor {
           }
           const title = (item.title?.trim() || hostname(url)).slice(0, 500);
           const snippets = (item.snippets ?? [])
-            .map((snippet) => snippet.trim().slice(0, 2_000))
+            .map((snippet) => snippet.trim().slice(0, MAX_SNIPPET_CHARACTERS))
             .filter(Boolean)
-            .slice(0, 3);
+            .slice(0, MAX_SNIPPETS_PER_URL)
+            .map((snippet) => {
+              if (remainingSnippetCharacters <= 0) return "";
+              const bounded = snippet.slice(0, remainingSnippetCharacters);
+              remainingSnippetCharacters -= bounded.length;
+              return bounded;
+            })
+            .filter(Boolean);
           const metadataValue = data.sources?.[item.url];
           const age =
             metadataValue &&
