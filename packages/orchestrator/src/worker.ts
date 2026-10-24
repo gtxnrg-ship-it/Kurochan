@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { AgentCatalog } from "@kurochan/agent-catalog";
-import type { RouteProfile } from "@kurochan/contracts";
+import type { ProviderId, RouteProfile } from "@kurochan/contracts";
 import { OmniRouter } from "@kurochan/omnirouter";
 import {
   RunStore,
@@ -627,6 +627,24 @@ function hasSuccessfulVerificationCommand(
   });
 }
 
+function routeOptionsForRun(model: string | undefined): {
+  readonly preferredProvider?: ProviderId;
+  readonly lockProvider?: true;
+  readonly model?: string;
+} {
+  if (!model) return {};
+  for (const providerId of ["openrouter", "freellmapi"] as const) {
+    const prefix = providerId + "/";
+    if (model.startsWith(prefix)) {
+      const providerModel = model.slice(prefix.length).trim();
+      return providerModel
+        ? { preferredProvider: providerId, lockProvider: true, model: providerModel }
+        : {};
+    }
+  }
+  return {};
+}
+
 function isRetryable(error: unknown): boolean {
   const typed = error as { retryable?: boolean; code?: string };
   return (
@@ -1182,6 +1200,7 @@ export class TaskWorker {
               id: run.id,
               goal: boundedText(run.goal, 5_000),
               profile: run.profile,
+              ...(run.model ? { model: run.model } : {}),
             },
             task: {
               id: task.id,
@@ -1303,6 +1322,7 @@ export class TaskWorker {
       );
       const response = await this.options.router.complete({
         profile: run.profile ?? this.profile,
+        ...routeOptionsForRun(run.model),
         context: { operation: "task", runId: run.id, taskId: task.id },
         messages,
         systemPrompt: workerSystemPrompt(
@@ -1863,6 +1883,7 @@ export class TaskWorker {
       const response = await this.options.router
         .complete({
           profile: "quality",
+          ...routeOptionsForRun(run.model),
           context: { operation: "verification", runId: run.id },
           systemPrompt: [
             "You are Kuro-chan's independent consistency reviewer.",
