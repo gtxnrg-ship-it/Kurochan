@@ -80,30 +80,28 @@ describe("WebResearchRuntime", () => {
 
   it("returns deeper bounded source context for research-heavy queries", async () => {
     let requestedUrl = "";
-    const fetchImpl = vi.fn(
-      async (input: string | URL | Request) => {
-        requestedUrl = String(input);
-        return jsonResponse({
-          grounding: {
-            generic: Array.from({ length: 12 }, (_, sourceIndex) => ({
-              url: "https://docs.example.dev/guide-" + sourceIndex,
-              title: "Guide " + sourceIndex,
-              snippets: Array.from(
-                { length: 8 },
-                (_, snippetIndex) =>
-                  "Source " +
-                  sourceIndex +
-                  " chunk " +
-                  snippetIndex +
-                  ": " +
-                  "evidence ".repeat(220),
-              ),
-            })),
-          },
-          sources: {},
-        });
-      },
-    ) as unknown as typeof fetch;
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      requestedUrl = String(input);
+      return jsonResponse({
+        grounding: {
+          generic: Array.from({ length: 12 }, (_, sourceIndex) => ({
+            url: "https://docs.example.dev/guide-" + sourceIndex,
+            title: "Guide " + sourceIndex,
+            snippets: Array.from(
+              { length: 8 },
+              (_, snippetIndex) =>
+                "Source " +
+                sourceIndex +
+                " chunk " +
+                snippetIndex +
+                ": " +
+                "evidence ".repeat(220),
+            ),
+          })),
+        },
+        sources: {},
+      });
+    }) as unknown as typeof fetch;
     const runtime = new WebResearchRuntime({
       apiKey: "brave-test-key",
       fetchImpl,
@@ -121,15 +119,13 @@ describe("WebResearchRuntime", () => {
     const requested = new URL(requestedUrl);
     expect(requested.searchParams.get("count")).toBe("12");
     expect(requested.searchParams.get("maximum_number_of_urls")).toBe("12");
-    expect(
-      requested.searchParams.get("maximum_number_of_tokens"),
-    ).toBe("12288");
-    expect(
-      requested.searchParams.get("maximum_number_of_tokens_per_url"),
-    ).toBe("2048");
-    expect(
-      requested.searchParams.get("maximum_number_of_snippets"),
-    ).toBe("72");
+    expect(requested.searchParams.get("maximum_number_of_tokens")).toBe(
+      "12288",
+    );
+    expect(requested.searchParams.get("maximum_number_of_tokens_per_url")).toBe(
+      "2048",
+    );
+    expect(requested.searchParams.get("maximum_number_of_snippets")).toBe("72");
     expect(
       requested.searchParams.get("maximum_number_of_snippets_per_url"),
     ).toBe("6");
@@ -138,9 +134,7 @@ describe("WebResearchRuntime", () => {
       items: { snippets: string[] }[];
     };
     expect(body.items).toHaveLength(12);
-    expect(
-      body.items.every((item) => item.snippets.length <= 4),
-    ).toBe(true);
+    expect(body.items.every((item) => item.snippets.length <= 4)).toBe(true);
     const totalSnippetCharacters = body.items
       .flatMap((item) => item.snippets)
       .reduce((total, snippet) => total + snippet.length, 0);
