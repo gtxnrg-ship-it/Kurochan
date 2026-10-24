@@ -414,7 +414,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         ? rawStatusCode
         : 500;
     if (status >= 500) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = error instanceof Error ? redactSensitiveText(error.message) : String(error);
       request.log.error(
         {
           err: {
@@ -882,7 +882,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
             code,
             message:
               error instanceof SpeechProviderError
-                ? error.message
+                ? redactSensitiveText(error.message)
                 : "Speech transcription failed. Check the server-side speech configuration.",
             retryable:
               error instanceof SpeechProviderError
@@ -979,7 +979,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
             code,
             message:
               error instanceof SpeechProviderError
-                ? error.message
+                ? redactSensitiveText(error.message)
                 : "Speech synthesis failed. Check the server-side speech configuration.",
             retryable:
               error instanceof SpeechProviderError
@@ -1424,7 +1424,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           code: "conversation_create_failed",
           message:
             error instanceof Error
-              ? error.message
+              ? redactSensitiveText(error.message)
               : "Conversation could not be created.",
           retryable: false,
           requestId: request.id,
@@ -1609,7 +1609,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       } catch (error) {
         const message =
           error instanceof Error
-            ? error.message
+            ? redactSensitiveText(error.message)
             : "Message could not be saved.";
         const idempotencyConflict = message.includes(
           "clientMessageId was already used",
@@ -2526,7 +2526,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
             code,
             message:
               error instanceof SpeechProviderError
-                ? error.message
+                ? redactSensitiveText(error.message)
                 : "Voice turn failed. Retry with the same clientMessageId to resume from persisted transcript/reply state.",
             retryable:
               error instanceof SpeechProviderError
@@ -2622,7 +2622,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         return reply.code(status).send({
           error: {
             code: error.code,
-            message: error.message,
+            message: redactSensitiveText(error.message),
             retryable: error.retryable,
             requestId: request.id,
           },
@@ -2719,7 +2719,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         error: {
           code: "invalid_run_plan",
           message:
-            error instanceof Error ? error.message : "Run plan was rejected.",
+            error instanceof Error ? redactSensitiveText(error.message) : "Run plan was rejected.",
           retryable: false,
           requestId: request.id,
         },
@@ -2798,7 +2798,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         return reply.code(status).send({
           error: {
             code: error.code,
-            message: error.message,
+            message: redactSensitiveText(error.message),
             retryable: error.retryable,
             requestId: request.id,
           },
@@ -2935,7 +2935,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           code,
           message:
             error instanceof Error
-              ? error.message
+              ? redactSensitiveText(error.message)
               : "Artifact could not be read.",
           retryable: false,
         },
@@ -3039,7 +3039,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           code: "approval_conflict",
           message:
             error instanceof Error
-              ? error.message
+              ? redactSensitiveText(error.message)
               : "Task is not awaiting approval.",
           retryable: false,
         },
@@ -3335,7 +3335,7 @@ function requestWarning(
   error: unknown,
   code: string,
 ): void {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = error instanceof Error ? redactSensitiveText(error.message) : String(error);
   app.log.warn(
     { error: redactSensitiveText(message), code },
     "Backend request could not be completed",
