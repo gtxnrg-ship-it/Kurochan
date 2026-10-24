@@ -28,10 +28,7 @@ const PlanPayloadSchema = z
   .object({
     intent: z.string().trim().min(1).max(2000).optional(),
     summary: z.string().trim().min(1).max(6000),
-    assumptions: z
-      .array(z.string().trim().min(1).max(500))
-      .max(8)
-      .default([]),
+    assumptions: z.array(z.string().trim().min(1).max(500)).max(8).default([]),
     clarificationRequired: z.boolean().default(false),
     clarificationQuestion: z.string().trim().min(1).max(600).optional(),
     tasks: z.array(PlannedTaskSchema).min(1).max(32),
@@ -206,7 +203,10 @@ function scoreAgentForGoal(goal: string, profile: AgentProfile): number {
   return score;
 }
 
-function plannerCandidateBudget(goal: string, configuredMaximum: number): number {
+function plannerCandidateBudget(
+  goal: string,
+  configuredMaximum: number,
+): number {
   const wordCount = goal.trim().split(/\s+/).filter(Boolean).length;
   const complexGoal =
     /\b(end[- ]to[- ]end|entire|full system|production|architecture|integrat\w*|migrat\w*|refactor\w*|multi[- ](?:agent|step|service|stage)|all features|multiple workstreams|large[- ]scale|security audit|benchmark)\b/i.test(
