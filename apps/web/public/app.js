@@ -374,10 +374,18 @@ async function refreshConnection({ quiet = true } = {}) {
       state.providers = Array.isArray(config?.providers)
         ? config.providers
         : [];
+      const currentSession = await api.session().catch(() => null);
+      state.authUser =
+        currentSession?.user?.provider && currentSession.user.provider !== "local"
+          ? currentSession.user
+          : null;
       updateConnectionBadge("Connected", "is-online");
     } catch (error) {
       if (error?.status === 401 || error?.code === "unauthorized") {
         state.authenticated = false;
+        state.authUser = null;
+        state.apiToken = "";
+        sessionStorage.removeItem(API_TOKEN_KEY);
         state.authStatus = await api.authProviders().catch(() => state.authStatus);
         updateConnectionBadge(
           state.authStatus?.enabled ? "Sign in required" : "Token needed",
