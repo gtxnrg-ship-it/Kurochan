@@ -122,7 +122,12 @@ function modelSelection(
   const normalized = model.toLowerCase();
   if (normalized === "omni/fast") return { profile: "fast" };
   if (normalized === "omni/balanced") return { profile: "balanced" };
-  if (normalized === "omni/quality") return { profile: "quality" };
+  if (
+    normalized === "auto" ||
+    normalized === "omni/auto" ||
+    normalized === "omni/quality"
+  )
+    return { profile: "quality" };
 
   for (const id of ["openrouter", "freellmapi"] as const) {
     const prefix = id + "/";
@@ -601,8 +606,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   // Model discovery never exposes provider credentials. Cache the normalized
   // catalog briefly so opening the model picker does not repeatedly call vendors.
   let modelCatalogCache:
-    | { expiresAt: number; value: Record<string, unknown> }
-    | undefined;
+    { expiresAt: number; value: Record<string, unknown> } | undefined;
   app.get("/v1/models", async () => {
     const now = Date.now();
     if (modelCatalogCache && modelCatalogCache.expiresAt > now)
@@ -626,12 +630,19 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           const discovered = provider.listModels
             ? await provider.listModels()
             : [];
-          const models =
-            discovered.length > 0
-              ? discovered
-              : defaultModel
-                ? [{ id: defaultModel, name: defaultModel }]
-                : [];
+          const models = [...discovered];
+          if (
+            defaultModel &&
+            !models.some((model) => model.id === defaultModel)
+          ) {
+            const name =
+              status.id === "openrouter" && defaultModel === "openrouter/free"
+                ? "Free Models Router"
+                : status.id === "freellmapi" && defaultModel === "auto"
+                  ? "FreeLLMAPI Auto Router"
+                  : defaultModel;
+            models.unshift({ id: defaultModel, name });
+          }
           return {
             providerId: status.id,
             name: status.name,
@@ -652,11 +663,17 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         } catch {
           // Do not send raw provider errors to the browser, as they can contain
           // account, endpoint, or credential-adjacent diagnostic details.
+          const defaultModelName =
+            status.id === "openrouter" && defaultModel === "openrouter/free"
+              ? "Free Models Router"
+              : status.id === "freellmapi" && defaultModel === "auto"
+                ? "FreeLLMAPI Auto Router"
+                : defaultModel;
           const models = defaultModel
             ? [
                 {
                   id: defaultModel,
-                  name: defaultModel,
+                  name: defaultModelName,
                   value: status.id + "/" + defaultModel,
                   isDefault: true,
                 },
@@ -676,6 +693,9 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     );
 
     const value = {
+      // Keep both the workbench catalog and the OpenAI-compatible model-list
+      // shape on this single route. External clients rely on { object, data }.
+      object: "list",
       name: "OmniRoute",
       profiles: [
         { id: "auto", label: "Auto · OmniRoute" },
@@ -684,6 +704,20 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         { id: "quality", label: "Quality" },
       ],
       providers,
+      data: [
+        { id: "auto", object: "model", owned_by: "kurochan" },
+        { id: "omni/auto", object: "model", owned_by: "kurochan" },
+        { id: "omni/fast", object: "model", owned_by: "kurochan" },
+        { id: "omni/balanced", object: "model", owned_by: "kurochan" },
+        { id: "omni/quality", object: "model", owned_by: "kurochan" },
+        ...providers.flatMap((provider) =>
+          provider.models.map((model) => ({
+            id: model.value,
+            object: "model",
+            owned_by: provider.providerId,
+          })),
+        ),
+      ],
       fetchedAt: new Date(now).toISOString(),
       cacheTtlMs: 300_000,
     };
@@ -1532,6 +1566,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     .object({
       goal: z.string().trim().min(1).max(20_000),
       profile: z.enum(["fast", "balanced", "quality"]).default("balanced"),
+      model: z.string().trim().min(1).max(200).optional(),
     })
     .strict();
 
@@ -2692,6 +2727,20 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         },
       });
     }
+    const selection: ModelSelection | undefined = parsed.data.model
+      ? modelSelection(parsed.data.model, registry)
+      : { profile: parsed.data.profile };
+    if (!selection) {
+      return reply.code(400).send({
+        error: {
+          code: "unknown_model",
+          message:
+            "Select Auto, an OmniRouter profile, or a model listed by a configured provider.",
+          retryable: false,
+          requestId: request.id,
+        },
+      });
+    }
     const conversation = store.getConversation(conversationId);
     if (!conversation || conversation.createdBy !== "local") {
       return reply.code(404).send({
@@ -2707,7 +2756,13 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     try {
       const plan = await planner.createPlan({
         goal: parsed.data.goal,
-        profile: parsed.data.profile,
+        profile: selection.profile,
+        ...(selection.preferredProvider
+          ? { preferredProvider: selection.preferredProvider }
+          : {}),
+        ...(selection.providerModel
+          ? { providerModel: selection.providerModel }
+          : {}),
         conversationContext: store
           .listConversationMessages(conversationId, { limit: 10 })
           .filter(
@@ -2767,7 +2822,8 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       }
       const run = store.createRun({
         goal: parsed.data.goal,
-        profile: parsed.data.profile,
+        profile: selection.profile,
+        ...(parsed.data.model ? { model: parsed.data.model } : {}),
         createdBy: "local",
         tasks: plan.tasks,
         plan: {
@@ -2862,6 +2918,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     .object({
       goal: z.string().trim().min(1).max(20_000),
       profile: z.enum(["fast", "balanced", "quality"]).default("balanced"),
+      model: z.string().trim().min(1).max(200).optional(),
       tasks: z.array(PlannedTaskSchema).min(1).max(200),
       createdBy: z.string().trim().min(1).max(200).optional(),
     })
@@ -2878,6 +2935,20 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           requestId: request.id,
         },
       });
+    const selection: ModelSelection | undefined = parsed.data.model
+      ? modelSelection(parsed.data.model, registry)
+      : { profile: parsed.data.profile };
+    if (!selection) {
+      return reply.code(400).send({
+        error: {
+          code: "unknown_model",
+          message:
+            "Select Auto, an OmniRouter profile, or a model listed by a configured provider.",
+          retryable: false,
+          requestId: request.id,
+        },
+      });
+    }
     let knownAgents: readonly (string | undefined)[];
     try {
       knownAgents = await Promise.all(
@@ -2916,7 +2987,10 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       });
     }
     try {
-      const run = store.createRun(parsed.data as CreateRunInput);
+      const run = store.createRun({
+        ...(parsed.data as CreateRunInput),
+        profile: selection.profile,
+      });
       return reply.code(201).send({
         run,
         tasks: store.listTasks(run.id),
@@ -2941,6 +3015,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     .object({
       goal: z.string().trim().min(1).max(20_000),
       profile: z.enum(["fast", "balanced", "quality"]).default("balanced"),
+      model: z.string().trim().min(1).max(200).optional(),
       createdBy: z.string().trim().min(1).max(200).optional(),
     })
     .strict();
@@ -2958,11 +3033,31 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         },
       });
     }
+    const selection: ModelSelection | undefined = parsed.data.model
+      ? modelSelection(parsed.data.model, registry)
+      : { profile: parsed.data.profile };
+    if (!selection) {
+      return reply.code(400).send({
+        error: {
+          code: "unknown_model",
+          message:
+            "Select Auto, an OmniRouter profile, or a model listed by a configured provider.",
+          retryable: false,
+          requestId: request.id,
+        },
+      });
+    }
     const abort = createRequestAbortController(request, reply);
     try {
       const plan = await planner.createPlan({
         goal: parsed.data.goal,
-        profile: parsed.data.profile,
+        profile: selection.profile,
+        ...(selection.preferredProvider
+          ? { preferredProvider: selection.preferredProvider }
+          : {}),
+        ...(selection.providerModel
+          ? { providerModel: selection.providerModel }
+          : {}),
         signal: abort.signal,
       });
       if (plan.clarificationRequired) {
@@ -3474,22 +3569,6 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       });
     }
   });
-
-  app.get("/v1/models", async () => ({
-    object: "list",
-    data: [
-      { id: "omni/fast", object: "model", owned_by: "kurochan" },
-      { id: "omni/balanced", object: "model", owned_by: "kurochan" },
-      { id: "omni/quality", object: "model", owned_by: "kurochan" },
-      ...[...registry.providers.values()]
-        .filter((provider) => Boolean(provider.defaultModel))
-        .map((provider) => ({
-          id: provider.id + "/" + provider.defaultModel,
-          object: "model",
-          owned_by: provider.id,
-        })),
-    ],
-  }));
 
   app.post("/v1/chat/completions", async (request, reply) => {
     const parsed = ChatCompletionRequestSchema.safeParse(request.body);

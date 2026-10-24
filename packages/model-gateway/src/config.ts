@@ -20,8 +20,8 @@ const definitions: Record<
   openrouter: {
     name: "OpenRouter",
     capabilityNotes: [
-      "OpenAI-compatible text chat",
-      "Capabilities must be enabled only for the chosen model",
+      "OpenAI-compatible text chat and streaming",
+      "Model capabilities such as vision, tools, JSON, and reasoning depend on the selected model",
     ],
   },
   freellmapi: {
@@ -61,11 +61,12 @@ export function createProviderRegistry(
     {
       id: "openrouter" as const,
       key: env.OPENROUTER_API_KEY?.trim(),
-      model: env.OPENROUTER_MODEL?.trim(),
+      model: env.OPENROUTER_MODEL?.trim() || "openrouter/free",
       baseUrl:
         env.OPENROUTER_BASE_URL?.trim() || "https://openrouter.ai/api/v1",
       capabilityPrefix: "OPENROUTER",
       allowInsecureHttp: false,
+      defaultCapabilities: ["streaming"] as const,
       extraHeaders: {
         ...(env.OPENROUTER_SITE_URL?.trim()
           ? { "HTTP-Referer": env.OPENROUTER_SITE_URL.trim() }

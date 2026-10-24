@@ -312,10 +312,11 @@ export class ApiClient {
   }
 
   startRun(conversationId, goal, profile = "balanced", options = {}) {
+    const { model = "omni/" + profile, ...requestOptions } = options;
     return this.request("/v1/conversations/" + encodeURIComponent(conversationId) + "/runs", {
-      ...options,
+      ...requestOptions,
       method: "POST",
-      body: { goal, profile },
+      body: { goal, profile, model },
     });
   }
 

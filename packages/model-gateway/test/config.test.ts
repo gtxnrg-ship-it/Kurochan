@@ -1,6 +1,41 @@
 import { describe, expect, it } from "vitest";
 import { createProviderRegistry } from "../src/config.js";
 
+describe("OpenRouter provider configuration", () => {
+  it("uses the free-only router and enables streaming when only the key is supplied", () => {
+    const registry = createProviderRegistry({
+      OPENROUTER_API_KEY: "openrouter-test-key",
+    });
+    const provider = registry.providers.get("openrouter");
+
+    expect(provider).toBeDefined();
+    expect(provider?.defaultModel).toBe("openrouter/free");
+    expect(registry.statuses).toContainEqual(
+      expect.objectContaining({
+        id: "openrouter",
+        configured: true,
+        defaultModel: "openrouter/free",
+        capabilities: expect.objectContaining({
+          text: true,
+          streaming: true,
+        }),
+      }),
+    );
+  });
+
+  it("respects an explicit model override and disabled streaming", () => {
+    const registry = createProviderRegistry({
+      OPENROUTER_API_KEY: "openrouter-test-key",
+      OPENROUTER_MODEL: "vendor/custom-model",
+      OPENROUTER_CAP_STREAMING: "false",
+    });
+    const provider = registry.providers.get("openrouter");
+
+    expect(provider?.defaultModel).toBe("vendor/custom-model");
+    expect(provider?.capabilities?.streaming).toBe(false);
+  });
+});
+
 describe("FreeLLMAPI provider configuration", () => {
   it("uses the documented local OpenAI-compatible endpoint and automatic model with a unified key", () => {
     const registry = createProviderRegistry({

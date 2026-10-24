@@ -321,7 +321,11 @@ export class OpenAICompatibleChatProvider implements ChatProvider {
           { retryable: true, statusCode: 402 },
         );
       }
-      if (response.status === 429 || response.status === 408 || response.status >= 500) {
+      if (
+        response.status === 429 ||
+        response.status === 408 ||
+        response.status >= 500
+      ) {
         throw new ProviderError(
           response.status === 429 ? "rate_limited" : "upstream_unavailable",
           `${this.displayName} model catalog is temporarily unavailable.`,
@@ -347,7 +351,8 @@ export class OpenAICompatibleChatProvider implements ChatProvider {
     }
 
     const rawModels =
-      payload && typeof payload === "object" &&
+      payload &&
+      typeof payload === "object" &&
       Array.isArray((payload as { data?: unknown }).data)
         ? (payload as { data: unknown[] }).data
         : undefined;
@@ -358,13 +363,20 @@ export class OpenAICompatibleChatProvider implements ChatProvider {
       );
     }
 
-    const stringValue = (value: unknown, maximumLength: number): string | undefined =>
+    const stringValue = (
+      value: unknown,
+      maximumLength: number,
+    ): string | undefined =>
       typeof value === "string" && value.trim()
         ? value.trim().slice(0, maximumLength)
         : undefined;
     const numericValue = (value: unknown): number | undefined => {
-      const number = typeof value === "number" ? value :
-        typeof value === "string" && value.trim() ? Number(value) : Number.NaN;
+      const number =
+        typeof value === "number"
+          ? value
+          : typeof value === "string" && value.trim()
+            ? Number(value)
+            : Number.NaN;
       return Number.isFinite(number) && number >= 0 ? number : undefined;
     };
     const stringArray = (value: unknown): string[] | undefined =>
@@ -399,16 +411,20 @@ export class OpenAICompatibleChatProvider implements ChatProvider {
           stringArray(record.architecture?.input_modalities) ??
           stringArray(record.architecture?.modality);
         const supportedParameters = stringArray(record.supported_parameters);
-        return [{
-          id,
-          ...(name ? { name } : {}),
-          ...(description ? { description } : {}),
-          ...(contextLength === undefined ? {} : { contextLength }),
-          ...(inputPricePerToken === undefined ? {} : { inputPricePerToken }),
-          ...(outputPricePerToken === undefined ? {} : { outputPricePerToken }),
-          ...(modalities ? { modalities } : {}),
-          ...(supportedParameters ? { supportedParameters } : {}),
-        }];
+        return [
+          {
+            id,
+            ...(name ? { name } : {}),
+            ...(description ? { description } : {}),
+            ...(contextLength === undefined ? {} : { contextLength }),
+            ...(inputPricePerToken === undefined ? {} : { inputPricePerToken }),
+            ...(outputPricePerToken === undefined
+              ? {}
+              : { outputPricePerToken }),
+            ...(modalities ? { modalities } : {}),
+            ...(supportedParameters ? { supportedParameters } : {}),
+          },
+        ];
       })
       .slice(0, 5_000);
   }
