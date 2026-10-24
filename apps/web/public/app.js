@@ -2251,7 +2251,7 @@ function init() {
     (location.protocol === "https:" ||
       ["localhost", "127.0.0.1"].includes(location.hostname))
   ) {
-    navigator.serviceWorker.register("/sw.js").catch(() => {});
+    navigator.serviceWorker.register("./sw.js").catch(() => {});
   }
   window.setInterval(() => {
     if (document.visibilityState === "visible") void refreshConnection();
