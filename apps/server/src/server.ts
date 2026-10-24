@@ -22,6 +22,7 @@ import {
   OpenAICompatibleSpeechRuntime,
   SpeechProviderError,
   type Environment,
+  type SpeechRuntime,
 } from "@kurochan/model-gateway";
 import { OmniRouter, routeOrdersFromEnvironment } from "@kurochan/omnirouter";
 import { AgentCatalog } from "@kurochan/agent-catalog";
@@ -74,7 +75,7 @@ export interface ServerOptions {
   readonly githubProject?: GitHubProjectExecutor;
   readonly mcpTools?: McpToolRuntime;
   readonly communitySkills?: CommunitySkillCatalog;
-  readonly speech?: OpenAICompatibleSpeechRuntime;
+  readonly speech?: SpeechRuntime;
 }
 
 function createRequestAbortController(
@@ -783,6 +784,14 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
 
   app.get("/v1/speech/status", async () => ({
     ...speech.status,
+    voiceTurn: {
+      enabled:
+        speech.isTranscriptionConfigured && speech.isSynthesisConfigured,
+      mode: "recorded-audio-turn",
+      realtimeDuplex: false,
+      bargeInInterruption: false,
+      requiresConfiguredTranscriptionAndSynthesis: true,
+    },
     security: {
       credentialsInResponses: false,
       arbitraryUrlsAllowed: false,
@@ -2409,6 +2418,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
               routeProfile: result.routeProfile,
               voice: voice ?? speech.status.synthesis.voice,
               format: requestedFormat ?? speech.status.synthesis.format,
+              synthesisModel: speech.status.synthesis.model,
               transcriptionModel: transcription.model,
             },
           });
