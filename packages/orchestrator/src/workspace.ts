@@ -6,7 +6,14 @@ import { z } from "zod";
 
 const RelativePathSchema = z.string().min(1).max(1000);
 const ListFilesSchema = z.object({}).strict();
-const ReadFileSchema = z.object({ path: RelativePathSchema }).strict();
+const ReadFileSchema = z
+  .object({
+    path: RelativePathSchema,
+    startLine: z.number().int().min(1).max(1_000_000).optional(),
+    endLine: z.number().int().min(1).max(1_000_000).optional(),
+    maxCharacters: z.number().int().min(1_000).max(50_000).default(20_000),
+  })
+  .strict();
 const WriteFileSchema = z
   .object({
     path: RelativePathSchema,
@@ -209,7 +216,11 @@ export class WorkspaceRuntime {
           break;
         case "workspace.read_file": {
           const args = ReadFileSchema.parse(call.arguments);
-          result = await this.readFile(runId, args.path);
+          result = await this.readFileRange(runId, args.path, {
+            ...(args.startLine === undefined ? {} : { startLine: args.startLine }),
+            ...(args.endLine === undefined ? {} : { endLine: args.endLine }),
+            maxCharacters: args.maxCharacters,
+          });
           break;
         }
         case "workspace.write_file": {
@@ -348,6 +359,80 @@ export class WorkspaceRuntime {
     } finally {
       await handle?.close();
     }
+  }
+
+  async readFileRange(
+    runId: string,
+    relativePath: string,
+    options: {
+      readonly startLine?: number;
+      readonly endLine?: number;
+      readonly maxCharacters?: number;
+    } = {},
+  ): Promise<{
+    path: string;
+    content: string;
+    bytes: number;
+    startLine: number;
+    endLine: number;
+    totalLines: number;
+    truncated: boolean;
+    notice?: string;
+  }> {
+    const startLine = options.startLine ?? 1;
+    const endLine = options.endLine;
+    const maxCharacters = options.maxCharacters ?? 20_000;
+    if (
+      !Number.isInteger(startLine) ||
+      startLine < 1 ||
+      !Number.isInteger(maxCharacters) ||
+      maxCharacters < 1_000 ||
+      maxCharacters > 50_000 ||
+      (endLine !== undefined &&
+        (!Number.isInteger(endLine) || endLine < startLine || endLine > 1_000_000))
+    ) {
+      throw new WorkspaceToolError(
+        "invalid_line_range",
+        "File line range or maxCharacters is outside the allowed bounds.",
+      );
+    }
+
+    const file = await this.readFile(runId, relativePath);
+    const lines = file.content.split(/\r?\n/);
+    const requestedEnd = Math.min(endLine ?? lines.length, lines.length);
+    const selected = startLine > lines.length
+      ? ""
+      : lines.slice(startLine - 1, requestedEnd).join("\n");
+    const truncated = selected.length > maxCharacters;
+    const content = truncated
+      ? selected.slice(0, maxCharacters)
+      : selected;
+    const endLineReturned =
+      startLine > lines.length
+        ? startLine - 1
+        : Math.min(
+            requestedEnd,
+            startLine + (content.match(/\n/g)?.length ?? 0),
+          );
+    const rangeIsPartial =
+      startLine > 1 || requestedEnd < lines.length || truncated;
+
+    return {
+      path: file.path,
+      content,
+      bytes: Buffer.byteLength(content, "utf8"),
+      startLine,
+      endLine: endLineReturned,
+      totalLines: lines.length,
+      truncated,
+      ...(rangeIsPartial
+        ? {
+            notice: truncated
+              ? "Output was truncated at maxCharacters; request a smaller line range to inspect later content."
+              : "Only the requested line range is shown; use startLine/endLine to inspect other sections.",
+          }
+        : {}),
+    };
   }
 
   async writeFile(
