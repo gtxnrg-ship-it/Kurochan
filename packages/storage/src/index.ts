@@ -1440,9 +1440,14 @@ export class RunStore {
       const tasks = this.db
         .prepare("SELECT status FROM tasks WHERE run_id=?")
         .all(runId) as Array<{ status: TaskStatus }>;
-      const nextStatus: RunStatus = tasks.every((t) => t.status === "succeeded")
-        ? "verifying"
-        : "running";
+      const hasPendingApproval = tasks.some(
+        (item) => item.status === "waiting_for_approval",
+      );
+      const nextStatus: RunStatus = hasPendingApproval
+        ? "waiting_for_approval"
+        : tasks.every((item) => item.status === "succeeded")
+          ? "verifying"
+          : "running";
       this.db
         .prepare(
           "UPDATE runs SET status=?,updated_at=?,version=version+1 WHERE id=?",
@@ -1566,11 +1571,20 @@ export class RunStore {
             "UPDATE tasks SET status='ready',available_at=?,updated_at=? WHERE id=?",
           )
           .run(now, now, taskId);
+        const pendingApproval = this.db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM tasks WHERE run_id=? AND status='waiting_for_approval'",
+          )
+          .get(runId) as { count: number };
         this.db
           .prepare(
-            "UPDATE runs SET status='running',updated_at=?,version=version+1 WHERE id=?",
+            "UPDATE runs SET status=?,updated_at=?,version=version+1 WHERE id=?",
           )
-          .run(now, runId);
+          .run(
+            pendingApproval.count > 0 ? "waiting_for_approval" : "running",
+            now,
+            runId,
+          );
         this.addEvent(
           runId,
           taskId,
