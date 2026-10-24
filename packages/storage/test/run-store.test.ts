@@ -944,4 +944,54 @@ describe("RunStore", () => {
     }
   });
 
+
+  it("scopes run lists to the requested owner and preserves unowned legacy runs for local mode", () => {
+    const store = makeStore();
+    try {
+      store.createRun(
+        {
+          id: "run-local",
+          goal: "Local run",
+          profile: "balanced",
+          createdBy: "local",
+          tasks: [
+            { key: "task", agentId: "engineering/backend-architect", objective: "Local task" },
+          ],
+        },
+        100,
+      );
+      store.createRun(
+        {
+          id: "run-alice",
+          goal: "Alice run",
+          profile: "balanced",
+          createdBy: "github:101",
+          tasks: [
+            { key: "task", agentId: "engineering/backend-architect", objective: "Alice task" },
+          ],
+        },
+        110,
+      );
+      store.createRun(
+        {
+          id: "run-bob",
+          goal: "Bob run",
+          profile: "balanced",
+          createdBy: "github:202",
+          tasks: [
+            { key: "task", agentId: "engineering/backend-architect", objective: "Bob task" },
+          ],
+        },
+        120,
+      );
+
+      expect(store.listRuns(50, undefined, "local").map((run) => run.id)).toEqual(["run-local"]);
+      expect(store.listRuns(50, undefined, "github:101").map((run) => run.id)).toEqual(["run-alice"]);
+      expect(store.listRuns(50, 115, "github:101").map((run) => run.id)).toEqual(["run-alice"]);
+      expect(store.listRuns(50).map((run) => run.id)).toEqual(["run-bob", "run-alice", "run-local"]);
+    } finally {
+      store.close();
+    }
+  });
+
 });
