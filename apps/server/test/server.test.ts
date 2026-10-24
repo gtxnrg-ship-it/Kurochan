@@ -1505,6 +1505,78 @@ describe("Kuro-chan API", () => {
     expect(resumed.body).toContain("event: stream.end");
   });
 
+  it("asks one blocking clarification without creating an executable run", async () => {
+    const store = new RunStore(":memory:");
+    const question = "Should the first version be a web app or a native mobile app?";
+    const planner = {
+      createPlan: vi.fn(async () => ({
+        intent: "Build a lightweight study-planning app.",
+        summary: "Confirm the target platform before implementation.",
+        assumptions: ["Keep the first version small and easy to use."],
+        clarificationRequired: true,
+        clarificationQuestion: question,
+        tasks: [
+          {
+            key: "define-mvp",
+            agentId: "game-development/unreal-engine/unreal-world-builder",
+            objective: "Define a platform-neutral MVP.",
+            dependsOn: [],
+          },
+        ],
+        selectedAgents: [
+          {
+            id: "game-development/unreal-engine/unreal-world-builder",
+            name: "Unreal World Builder",
+            division: "game-development",
+          },
+        ],
+        providerId: "freellmapi",
+        model: "auto",
+        latencyMs: 5,
+        attempts: 1,
+      })),
+    };
+    app = buildServer({
+      env: {},
+      planner: planner as unknown as PlanService,
+      logger: false,
+      store,
+    });
+    const created = await app.inject({
+      method: "POST",
+      url: "/v1/conversations",
+      payload: {},
+    });
+    const conversationId = created.json().conversation.id as string;
+    const payload = {
+      goal: "Make it real",
+      profile: "balanced",
+    };
+    const url = `/v1/conversations/${conversationId}/runs`;
+
+    const response = await app.inject({ method: "POST", url, payload });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      status: "clarification_required",
+      clarification: {
+        question,
+        intent: "Build a lightweight study-planning app.",
+      },
+    });
+    expect(response.json().run).toBeUndefined();
+    expect(store.listRuns()).toHaveLength(0);
+    expect(store.listConversationMessages(conversationId)).toHaveLength(1);
+    expect(store.listConversationMessages(conversationId)[0]?.content).toBe(
+      question,
+    );
+
+    const retry = await app.inject({ method: "POST", url, payload });
+    expect(retry.statusCode).toBe(200);
+    expect(store.listRuns()).toHaveLength(0);
+    expect(store.listConversationMessages(conversationId)).toHaveLength(1);
+    expect(planner.createPlan).toHaveBeenCalledTimes(2);
+  });
+
   it("exposes catalog metadata and searches agents without exposing full prompts", async () => {
     app = buildServer({
       env: {},
