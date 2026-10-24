@@ -15,16 +15,17 @@ KUROCHAN_STT_LANGUAGE=en
 KUROCHAN_TTS_BASE_URL=
 KUROCHAN_TTS_API_KEY=
 KUROCHAN_TTS_MODEL=
-KUROCHAN_TTS_VOICE=nova
+# Leave voice/style blank until a compatible provider/model is selected.
+KUROCHAN_TTS_VOICE=
 KUROCHAN_TTS_FORMAT=mp3
-KUROCHAN_TTS_INSTRUCTIONS=Speak English in a natural, warm feminine voice with a light Japanese accent.
+KUROCHAN_TTS_INSTRUCTIONS=.
 
 KUROCHAN_SPEECH_MAX_AUDIO_BYTES=26214400
 KUROCHAN_SPEECH_MAX_TEXT_CHARACTERS=20000
 KUROCHAN_SPEECH_MAX_RESPONSE_BYTES=20971520
 ```
 
-The blank URL/model values disable that operation. API keys are optional only when the configured local service itself does not require authentication. The example voice ID and style instructions are not universal standards: use a voice ID and instruction fields actually supported by your selected TTS model. Accent and voice characteristics depend on the model and are not guaranteed by a prompt.
+The blank URL/model values disable that operation. API keys are optional only when the configured local service itself does not require authentication. Kuro-chan does not choose a voice ID or speaking style for you: leave those values blank until the TTS provider/model is selected and evaluated. If the provider requires a voice ID, configure one it explicitly supports. Accent, naturalness, latency, and voice characteristics depend on the model and must be tested rather than promised by a prompt.
 
 For a local service, loopback HTTP is permitted for development. Remote speech endpoints must use HTTPS. Credentials cannot be embedded in base URLs; Kuro-chan never returns secret values from status routes.
 
