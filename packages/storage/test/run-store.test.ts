@@ -1,3 +1,7 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import Database from "better-sqlite3";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { RunStore } from "../src/index.js";
 
@@ -6,6 +10,97 @@ function makeStore(): RunStore {
 }
 
 describe("RunStore", () => {
+  it("migrates legacy SQLite data and commits the schema version after the column migration", () => {
+    const directory = mkdtempSync(join(tmpdir(), "kurochan-migration-"));
+    const filename = join(directory, "legacy.sqlite");
+    const legacy = new Database(filename);
+    legacy.exec(`
+      CREATE TABLE runs (
+        id TEXT PRIMARY KEY,
+        goal TEXT NOT NULL,
+        profile TEXT NOT NULL,
+        status TEXT NOT NULL,
+        created_by TEXT,
+        output_json TEXT,
+        error_code TEXT,
+        error_message TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1
+      );
+      INSERT INTO runs (
+        id, goal, profile, status, created_by, created_at, updated_at
+      ) VALUES (
+        'legacy-run', 'Preserve existing data', 'balanced', 'completed',
+        'local-user', 100, 200
+      );
+      PRAGMA user_version = 4;
+    `);
+    legacy.close();
+
+    let store: RunStore | undefined;
+    try {
+      store = new RunStore(filename);
+      store.close();
+      store = undefined;
+
+      const migrated = new Database(filename, { readonly: true });
+      try {
+        const columns = migrated.pragma("table_info(runs)") as {
+          name: string;
+        }[];
+        expect(columns.some((column) => column.name === "model")).toBe(true);
+        expect(migrated.pragma("user_version", { simple: true })).toBe(5);
+        const row = migrated
+          .prepare(
+            "SELECT id, goal, created_by, created_at, updated_at, model FROM runs WHERE id=?",
+          )
+          .get("legacy-run") as
+          | {
+              id: string;
+              goal: string;
+              created_by: string;
+              created_at: number;
+              updated_at: number;
+              model: string | null;
+            }
+          | undefined;
+        expect(row).toEqual({
+          id: "legacy-run",
+          goal: "Preserve existing data",
+          created_by: "local-user",
+          created_at: 100,
+          updated_at: 200,
+          model: null,
+        });
+      } finally {
+        migrated.close();
+      }
+    } finally {
+      store?.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses databases with a schema version newer than this binary", () => {
+    const directory = mkdtempSync(join(tmpdir(), "kurochan-future-schema-"));
+    const filename = join(directory, "future.sqlite");
+    const future = new Database(filename);
+    future.pragma("user_version = 99");
+    future.close();
+
+    try {
+      expect(() => new RunStore(filename)).toThrow(/newer than supported/);
+      const check = new Database(filename, { readonly: true });
+      try {
+        expect(check.pragma("user_version", { simple: true })).toBe(99);
+      } finally {
+        check.close();
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
   it("persists task dependencies and requires a verification gate before completion", () => {
     const store = makeStore();
     try {
