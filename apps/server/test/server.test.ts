@@ -1454,11 +1454,15 @@ describe("Kuro-chan API", () => {
     const runId = created.json().run.id as string;
     const createdEvent = created
       .json()
-      .events.find((event: { type: string }) => event.type === "run.created") as {
+      .events.find(
+        (event: { type: string }) => event.type === "run.created",
+      ) as {
       payload: { goal: string };
     };
     expect(createdEvent.payload.goal).toContain("[REDACTED_SECRET]");
-    expect(createdEvent.payload.goal).not.toContain("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+    expect(createdEvent.payload.goal).not.toContain(
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    );
     expect(created.json().tasks).toHaveLength(2);
     expect(
       created
@@ -1483,7 +1487,9 @@ describe("Kuro-chan API", () => {
     expect(details.statusCode).toBe(200);
     const detailCreatedEvent = details
       .json()
-      .events.find((event: { type: string }) => event.type === "run.created") as {
+      .events.find(
+        (event: { type: string }) => event.type === "run.created",
+      ) as {
       payload: { goal: string };
     };
     expect(detailCreatedEvent.payload.goal).toContain("[REDACTED_SECRET]");
