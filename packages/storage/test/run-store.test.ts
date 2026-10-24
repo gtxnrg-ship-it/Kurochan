@@ -684,7 +684,7 @@ describe("RunStore", () => {
       })!;
 
       expect(
-        store.consumeExternalWriteApproval(
+        store.consumeExternalActionApproval(
           run.id,
           task.id,
           "worker-a",
@@ -697,7 +697,7 @@ describe("RunStore", () => {
         ),
       ).toBe(false);
       expect(
-        store.consumeExternalWriteApproval(
+        store.consumeExternalActionApproval(
           run.id,
           task.id,
           "worker-a",
@@ -710,7 +710,7 @@ describe("RunStore", () => {
         ),
       ).toBe(true);
       expect(
-        store.consumeExternalWriteApproval(
+        store.consumeExternalActionApproval(
           run.id,
           task.id,
           "worker-a",
