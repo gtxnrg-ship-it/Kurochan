@@ -258,13 +258,14 @@ function withMcpDeadline<T>(
 }
 
 const SENSITIVE_MCP_FIELD =
-  /authorization|cookie|password|passwd|secret|api.?key|access.?token|refresh.?token|id.?token|client.?secret|private.?key|credential/i;
+  /authorization|cookie|password|passwd|secret|api.?key|access.?token|refresh.?token|id.?token|client.?secret|private.?key|credential|token|auth.?key/i;
 const SENSITIVE_MCP_VALUE_PATTERNS = [
   /\bBearer\s+[A-Za-z0-9._~+/-]{16,}=?/gi,
   /\b(?:gh[pousr]|github_pat)_[A-Za-z0-9_]{12,}\b/g,
   /\bsk-(?:proj-|ant-)?[A-Za-z0-9_-]{16,}\b/g,
   /\bAIza[0-9A-Za-z_-]{35}\b/g,
   /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g,
+  /\b(?:api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|client[-_ ]?secret|password|passwd|secret|token)\s*[:=]\s*["']?[A-Za-z0-9._~+/-]{12,}["']?/gi,
 ];
 
 export function redactMcpSensitiveValues(value: unknown, depth = 0): unknown {
@@ -1121,11 +1122,15 @@ export class McpToolRuntime {
         typeof typed.message === "string"
           ? typed.message
           : "MCP tool call failed.";
+      const safeMessage = redactMcpSensitiveValues(message);
       return {
         name: "mcp.call",
         ok: false,
         tool: descriptor,
-        error: { code, message: message.slice(0, 1000) },
+        error: {
+          code,
+          message: String(safeMessage).slice(0, 1000),
+        },
       };
     }
   }
