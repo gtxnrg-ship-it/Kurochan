@@ -1,0 +1,30 @@
+name: Temporary formatter diagnostic
+
+on:
+  push:
+    branches: [fix/backend-reliability-2026-10-24]
+
+permissions:
+  contents: read
+
+jobs:
+  format-diff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: pnpm install --frozen-lockfile
+      - name: Print formatter diffs only
+        run: |
+          pnpm exec prettier apps/server/src/server.ts > /tmp/server.ts
+          diff -u apps/server/src/server.ts /tmp/server.ts || true
+          pnpm exec prettier apps/server/test/server.test.ts > /tmp/server.test.ts
+          diff -u apps/server/test/server.test.ts /tmp/server.test.ts || true
