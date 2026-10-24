@@ -66,6 +66,34 @@ describe("OpenAICompatibleSpeechRuntime", () => {
     expect(JSON.stringify(runtime.status)).not.toContain("stt-test-secret");
   });
 
+  it("allows provider-side language detection when no language is configured", async () => {
+    let submittedLanguage: FormDataEntryValue | null = null;
+    const fetchImpl = vi.fn(
+      async (_input: string | URL | Request, init?: RequestInit) => {
+        const form = init?.body as FormData;
+        submittedLanguage = form.get("language");
+        return new Response(JSON.stringify({ text: "Detected language." }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    );
+    const runtime = OpenAICompatibleSpeechRuntime.fromEnvironment(
+      {
+        KUROCHAN_STT_BASE_URL: "https://speech.example.test/v1",
+        KUROCHAN_STT_MODEL: "whisper-compatible",
+      },
+      { fetchImpl },
+    );
+    expect(runtime.status.transcription.defaultLanguage).toBeNull();
+    await runtime.transcribe({
+      audio: new TextEncoder().encode("fake audio bytes"),
+      filename: "sample.webm",
+      contentType: "audio/webm",
+    });
+    expect(submittedLanguage).toBeNull();
+  });
+
   it("does not assume a provider-specific voice when none has been selected", async () => {
     let sentBody: Record<string, unknown> | undefined;
     const fetchImpl = vi.fn(
