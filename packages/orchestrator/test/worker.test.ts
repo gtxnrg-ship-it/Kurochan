@@ -366,6 +366,18 @@ describe("TaskWorker", () => {
             },
             annotations: { readOnlyHint: false },
           },
+          ...Array.from({ length: 10 }, (_, index) => ({
+            name: "a_auxiliary_tool_" + index,
+            description: "A generic auxiliary utility operation",
+            inputSchema: { type: "object", properties: {} },
+            annotations: { readOnlyHint: true },
+          })),
+          {
+            name: "zz_hidden_tool",
+            description: "A generic utility with no relevance to this task",
+            inputSchema: { type: "object", properties: {} },
+            annotations: { readOnlyHint: true },
+          },
         ],
       })),
       callTool: vi.fn(async (_name, args) => {
@@ -390,6 +402,7 @@ describe("TaskWorker", () => {
       connectorFactory: () => mcpClient,
     });
     let toolRequested = false;
+    let hiddenToolAttempted = false;
     const fakeProvider = provider(
       async (input: ChatCompletionInput): Promise<ChatCompletionOutput> => {
         if (
@@ -413,6 +426,29 @@ describe("TaskWorker", () => {
                 },
               ],
               blockers: [],
+            }),
+            latencyMs: 1,
+          };
+        }
+        if (!hiddenToolAttempted) {
+          hiddenToolAttempted = true;
+          return {
+            providerId: "openrouter",
+            model: "test-model",
+            content: JSON.stringify({
+              status: "tool_calls",
+              summary: "Attempt to use a configured but unlisted read-only tool.",
+              toolCalls: [
+                {
+                  name: "mcp.call",
+                  arguments: {
+                    serverId: "workspace-service",
+                    toolName: "zz_hidden_tool",
+                    arguments: {},
+                  },
+                },
+              ],
+              evidence: [],
             }),
             latencyMs: 1,
           };
@@ -485,8 +521,14 @@ describe("TaskWorker", () => {
         kind: "waiting_for_approval",
         runId,
       });
+      expect(hiddenToolAttempted).toBe(true);
       expect(toolRequested).toBe(true);
       expect(mcpClient.callTool).not.toHaveBeenCalled();
+      expect(
+        store
+          .listEvents(runId)
+          .some((event) => (event.payload as { code?: string })?.code === "tool_not_selected"),
+      ).toBe(true);
       const task = store.listTasks(runId)[0]!;
       expect(task.status).toBe("waiting_for_approval");
       const approval = store
