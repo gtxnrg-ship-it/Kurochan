@@ -251,4 +251,63 @@ describe("Kuro-chan web API helpers", () => {
       retryable: false,
     } satisfies Partial<ApiError>);
   });
+
+  it("exchanges OAuth codes, restores the current session, and signs out through the API", async () => {
+    const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/auth/providers")) {
+        return new Response(JSON.stringify({ enabled: true, providers: [{ id: "github", configured: true }] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.endsWith("/auth/session/exchange")) {
+        return new Response(JSON.stringify({ token: "oauth-session-token", user: { userId: "github:101", provider: "github", displayName: "Alice" } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.endsWith("/v1/session")) {
+        return new Response(JSON.stringify({ user: { userId: "github:101", provider: "github", displayName: "Alice" } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.endsWith("/v1/session/logout")) {
+        return new Response(JSON.stringify({ signedOut: true, revoked: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ error: { code: "not_found", message: "Unexpected request" } }), {
+        status: 404,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    const client = new ApiClient({
+      getBaseUrl: () => "https://api.example.test",
+      getToken: () => "oauth-session-token",
+      fetchImpl,
+    });
+
+    await expect(client.authProviders()).resolves.toMatchObject({ enabled: true });
+    await expect(client.exchangeOAuthCode("one-time-code-123456789012")).resolves.toMatchObject({
+      token: "oauth-session-token",
+      user: { userId: "github:101" },
+    });
+    await expect(client.session()).resolves.toMatchObject({ user: { userId: "github:101" } });
+    await expect(client.logoutSession()).resolves.toEqual({ signedOut: true, revoked: true });
+
+    expect(fetchImpl.mock.calls.map(([url]) => String(url))).toEqual([
+      "https://api.example.test/auth/providers",
+      "https://api.example.test/auth/session/exchange",
+      "https://api.example.test/v1/session",
+      "https://api.example.test/v1/session/logout",
+    ]);
+    const exchange = fetchImpl.mock.calls[1]?.[1];
+    expect(JSON.parse(String(exchange?.body))).toEqual({ code: "one-time-code-123456789012" });
+    const logout = fetchImpl.mock.calls[3]?.[1];
+    expect(new Headers(logout?.headers).get("authorization")).toBe("Bearer oauth-session-token");
+  });
+
 });
