@@ -35,6 +35,17 @@ export interface ChatCompletionOutput {
   readonly latencyMs: number;
 }
 
+export interface ProviderModelInfo {
+  readonly id: string;
+  readonly name?: string;
+  readonly description?: string;
+  readonly contextLength?: number;
+  readonly inputPricePerToken?: number;
+  readonly outputPricePerToken?: number;
+  readonly modalities?: readonly string[];
+  readonly supportedParameters?: readonly string[];
+}
+
 export interface ChatProvider {
   readonly id: ProviderId;
   readonly displayName: string;
@@ -47,6 +58,8 @@ export interface ChatProvider {
   stream?(
     input: ChatCompletionInput,
   ): Promise<AsyncIterable<ChatCompletionStreamChunk>>;
+  /** Optional server-side model discovery, when the upstream supports GET /models. */
+  listModels?(): Promise<readonly ProviderModelInfo[]>;
 }
 
 export type ProviderErrorCode =
