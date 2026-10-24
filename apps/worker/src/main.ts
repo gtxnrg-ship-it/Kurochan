@@ -230,7 +230,9 @@ process.once("SIGTERM", () => {
       JSON.stringify({
         level: "error",
         service: "kurochan-worker",
-        message: error instanceof Error ? error.message : "Shutdown failed",
+        message: redactSensitiveText(
+          error instanceof Error ? error.message : "Shutdown failed",
+        ),
       }) + "\n",
     );
     process.exitCode = 1;
