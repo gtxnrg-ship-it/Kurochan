@@ -93,7 +93,9 @@ interface MutableProviderHealth {
 const DEFAULT_ROUTES: Record<RouteProfile, readonly ProviderId[]> = {
   fast: ["freellmapi", "openrouter"],
   balanced: ["openrouter", "freellmapi"],
-  quality: ["openrouter", "freellmapi"],
+  // FreeLLMAPI's auto route chooses among its available upstreams. Keep
+  // OpenRouter as a free-only fallback rather than silently selecting paid models.
+  quality: ["freellmapi", "openrouter"],
 };
 
 export class OmniRouterError extends Error {
