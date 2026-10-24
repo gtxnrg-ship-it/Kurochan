@@ -161,7 +161,8 @@ describe("PlanService", () => {
       conversationContext: [
         {
           role: "user",
-          content: "I want a lightweight study planner that helps me stay organized.",
+          content:
+            "I want a lightweight study planner that helps me stay organized.",
         },
         {
           role: "assistant",
@@ -173,7 +174,9 @@ describe("PlanService", () => {
     expect(plan.intent).toContain("study-planning app");
     expect(plan.assumptions).toHaveLength(2);
     expect(plan.clarificationRequired).toBe(true);
-    expect(plan.clarificationQuestion).toContain("web app or a native mobile app");
+    expect(plan.clarificationQuestion).toContain(
+      "web app or a native mobile app",
+    );
     expect(plan.tasks[0]?.input).toMatchObject({
       userIntent: plan.intent,
       assumptions: plan.assumptions,
