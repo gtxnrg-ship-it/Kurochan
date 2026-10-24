@@ -313,9 +313,7 @@ export function selectRelevantDependencyHandoffs(
   });
 
   return ranked
-    .sort(
-      (left, right) => right.score - left.score || left.index - right.index,
-    )
+    .sort((left, right) => right.score - left.score || left.index - right.index)
     .slice(0, maxDependencies)
     .map(({ dependency }) => dependency);
 }
