@@ -785,8 +785,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   app.get("/v1/speech/status", async () => ({
     ...speech.status,
     voiceTurn: {
-      enabled:
-        speech.isTranscriptionConfigured && speech.isSynthesisConfigured,
+      enabled: speech.isTranscriptionConfigured && speech.isSynthesisConfigured,
       mode: "recorded-audio-turn",
       realtimeDuplex: false,
       bargeInInterruption: false,
@@ -1770,7 +1769,6 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           const routed = await router.stream({
             profile: selection.profile,
             context: { operation: "chat" },
-          systemPrompt: KUROCHAN_CONVERSATION_SYSTEM_PROMPT,
             systemPrompt: KUROCHAN_CONVERSATION_SYSTEM_PROMPT,
             ...(selection.preferredProvider
               ? {
@@ -1944,6 +1942,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         const result = await router.complete({
           profile: selection.profile,
           context: { operation: "chat" },
+          systemPrompt: KUROCHAN_CONVERSATION_SYSTEM_PROMPT,
           ...(selection.preferredProvider
             ? {
                 preferredProvider: selection.preferredProvider,
@@ -2619,7 +2618,10 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         profile: parsed.data.profile,
         conversationContext: store
           .listConversationMessages(conversationId, { limit: 10 })
-          .filter((message) => message.role === "user" || message.role === "assistant")
+          .filter(
+            (message) =>
+              message.role === "user" || message.role === "assistant",
+          )
           .map((message) => ({
             role: message.role as "user" | "assistant",
             content: message.content,
