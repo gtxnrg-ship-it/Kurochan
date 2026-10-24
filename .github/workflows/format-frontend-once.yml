@@ -1,0 +1,58 @@
+name: Format frontend changes (one-time)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/web/public/app.css"
+      - "apps/web/public/app.js"
+      - ".github/workflows/format-frontend-once.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: format-frontend-once
+  cancel-in-progress: false
+
+jobs:
+  format-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.9.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Format changed frontend files
+        run: pnpm exec prettier --write apps/web/public/app.css apps/web/public/app.js
+
+      - name: Run repository quality gate
+        run: pnpm check
+
+      - name: Commit formatted files
+        run: |
+          if git diff --quiet -- apps/web/public/app.css apps/web/public/app.js; then
+            echo "Frontend files were already formatted."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/web/public/app.css apps/web/public/app.js
+          git commit -m "chore: format frontend with Prettier"
+          git push origin HEAD:main
