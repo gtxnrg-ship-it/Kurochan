@@ -11,7 +11,11 @@ import type {
 } from "@kurochan/model-gateway";
 import { OmniRouter } from "@kurochan/omnirouter";
 import { RunStore } from "@kurochan/storage";
-import { approvalGranted, selectMcpToolsForTask, TaskWorker } from "../src/worker.js";
+import {
+  approvalGranted,
+  selectMcpToolsForTask,
+  TaskWorker,
+} from "../src/worker.js";
 import {
   McpToolRuntime,
   type McpClientAdapter,
@@ -56,7 +60,7 @@ function provider(complete: ChatProvider["complete"]): ChatProvider {
 }
 
 describe("MCP tool relevance routing", () => {
-  it("ranks task-relevant MCP tools above lexically earlier but unrelated tools", () => {
+  it("prefers task-relevant MCP tools over unrelated tools", () => {
     const tools = [
       {
         serverId: "a-billing",
@@ -70,7 +74,8 @@ describe("MCP tool relevance routing", () => {
         serverId: "z-docs",
         serverName: "Documentation",
         name: "search_documentation",
-        description: "Search official API documentation and technical reference pages",
+        description:
+          "Search official API documentation and technical reference pages",
         inputSchema: { type: "object", properties: {} },
         readOnly: true,
       },
