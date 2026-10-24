@@ -644,6 +644,94 @@ describe("RunStore", () => {
     }
   });
 
+  it("consumes external write approvals once and only for the reviewed action", () => {
+    const store = makeStore();
+    try {
+      const run = store.createRun(
+        {
+          goal: "Approve a single external action",
+          profile: "balanced",
+          tasks: [
+            {
+              key: "external-action",
+              agentId: "release",
+              objective: "Create a record in an external service",
+            },
+          ],
+        },
+        100,
+      );
+      let task = store.claimNextTask("worker-a", {
+        now: 100,
+        leaseMs: 5_000,
+      })!;
+      task = store.requestTaskApproval(
+        run.id,
+        task.id,
+        "worker-a",
+        {
+          approvalType: "external-write",
+          mcpServerId: "records",
+          mcpToolName: "create_record",
+          argumentsHash: "approved-hash",
+        },
+        101,
+      );
+      store.resolveTaskApproval(run.id, task.id, true, "Approved", 102);
+      task = store.claimNextTask("worker-a", {
+        now: 103,
+        leaseMs: 5_000,
+      })!;
+
+      expect(
+        store.consumeExternalWriteApproval(
+          run.id,
+          task.id,
+          "worker-a",
+          {
+            mcpServerId: "records",
+            mcpToolName: "create_record",
+            argumentsHash: "different-hash",
+          },
+          104,
+        ),
+      ).toBe(false);
+      expect(
+        store.consumeExternalWriteApproval(
+          run.id,
+          task.id,
+          "worker-a",
+          {
+            mcpServerId: "records",
+            mcpToolName: "create_record",
+            argumentsHash: "approved-hash",
+          },
+          105,
+        ),
+      ).toBe(true);
+      expect(
+        store.consumeExternalWriteApproval(
+          run.id,
+          task.id,
+          "worker-a",
+          {
+            mcpServerId: "records",
+            mcpToolName: "create_record",
+            argumentsHash: "approved-hash",
+          },
+          106,
+        ),
+      ).toBe(false);
+      expect(
+        store
+          .listEvents(run.id)
+          .filter((event) => event.type === "approval.consumed"),
+      ).toHaveLength(1);
+    } finally {
+      store.close();
+    }
+  });
+
   it("supports approvals and cancellation", () => {
     const store = makeStore();
     try {
