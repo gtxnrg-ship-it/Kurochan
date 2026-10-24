@@ -2678,6 +2678,20 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         profile: parsed.data.profile,
         createdBy: "local",
         tasks: plan.tasks,
+        plan: {
+          intent: plan.intent,
+          summary: plan.summary,
+          assumptions: plan.assumptions,
+          selectedAgents: plan.selectedAgents,
+          ...(plan.selectedRunbook
+            ? { selectedRunbook: plan.selectedRunbook }
+            : {}),
+          provider: {
+            id: plan.providerId,
+            model: plan.model,
+            latencyMs: plan.latencyMs,
+          },
+        },
       });
       const eventMessage = store.appendConversationMessage(conversationId, {
         role: "assistant",
@@ -2891,6 +2905,20 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         profile: parsed.data.profile,
         tasks: plan.tasks,
         ...(parsed.data.createdBy ? { createdBy: parsed.data.createdBy } : {}),
+        plan: {
+          intent: plan.intent,
+          summary: plan.summary,
+          assumptions: plan.assumptions,
+          selectedAgents: plan.selectedAgents,
+          ...(plan.selectedRunbook
+            ? { selectedRunbook: plan.selectedRunbook }
+            : {}),
+          provider: {
+            id: plan.providerId,
+            model: plan.model,
+            latencyMs: plan.latencyMs,
+          },
+        },
       };
       const run = store.createRun(input);
       return reply.code(201).send({
