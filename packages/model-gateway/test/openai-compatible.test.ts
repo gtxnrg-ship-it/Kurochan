@@ -44,6 +44,28 @@ describe("OpenAICompatibleChatProvider", () => {
     ).toBe("Bearer secret-test-key");
   });
 
+  it("classifies exhausted credits as retryable so OmniRouter can fail over", async () => {
+    const fetchImpl = vi.fn(
+      async () => new Response("account has insufficient credits", { status: 402 }),
+    );
+    const provider = new OpenAICompatibleChatProvider({
+      id: "openrouter",
+      displayName: "OpenRouter",
+      baseUrl: "https://example.test/v1",
+      apiKey: "secret",
+      defaultModel: "test-model",
+      fetchImpl,
+    });
+
+    await expect(
+      provider.complete({ messages: [{ role: "user", content: "hi" }] }),
+    ).rejects.toMatchObject({
+      code: "quota_exhausted",
+      retryable: true,
+      statusCode: 402,
+    });
+  });
+
   it("does not reveal upstream response bodies for failed requests", async () => {
     const fetchImpl = vi.fn(
       async () =>
@@ -142,6 +164,31 @@ describe("OpenAICompatibleChatProvider", () => {
       provider.complete({ messages: [{ role: "user", content: "hi" }] }),
     ).rejects.toMatchObject({ code: "not_configured" });
   });
+  it("classifies exhausted credits as retryable for streaming requests", async () => {
+    const fetchImpl = vi.fn(
+      async () => new Response("account has insufficient credits", { status: 402 }),
+    );
+    const provider = new OpenAICompatibleChatProvider({
+      id: "openrouter",
+      displayName: "OpenRouter",
+      baseUrl: "https://example.test/v1",
+      apiKey: "secret",
+      defaultModel: "test-model",
+      capabilities: { streaming: true },
+      fetchImpl,
+    });
+    await expect(
+      provider.stream({
+        messages: [{ role: "user", content: "hi" }],
+        requiredCapabilities: ["text", "streaming"],
+      }),
+    ).rejects.toMatchObject({
+      code: "quota_exhausted",
+      retryable: true,
+      statusCode: 402,
+    });
+  });
+
   it("parses OpenAI-compatible SSE deltas and requests true provider streaming", async () => {
     const fetchImpl = vi.fn(
       async (_input: string | URL | Request, init?: RequestInit) =>
