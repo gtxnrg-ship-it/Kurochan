@@ -11,7 +11,7 @@ import type {
 } from "@kurochan/model-gateway";
 import { OmniRouter } from "@kurochan/omnirouter";
 import { RunStore } from "@kurochan/storage";
-import { approvalGranted, TaskWorker } from "../src/worker.js";
+import { approvalGranted, selectMcpToolsForTask, TaskWorker } from "../src/worker.js";
 import {
   McpToolRuntime,
   type McpClientAdapter,
@@ -54,6 +54,45 @@ function provider(complete: ChatProvider["complete"]): ChatProvider {
     complete,
   };
 }
+
+describe("MCP tool relevance routing", () => {
+  it("ranks task-relevant MCP tools above lexically earlier but unrelated tools", () => {
+    const tools = [
+      {
+        serverId: "a-billing",
+        serverName: "Billing",
+        name: "create_charge",
+        description: "Create a charge and bill a customer",
+        inputSchema: { type: "object", properties: {} },
+        readOnly: false,
+      },
+      {
+        serverId: "z-docs",
+        serverName: "Documentation",
+        name: "search_documentation",
+        description: "Search official API documentation and technical reference pages",
+        inputSchema: { type: "object", properties: {} },
+        readOnly: true,
+      },
+    ];
+    const selected = selectMcpToolsForTask(
+      "Search official API documentation for TypeScript configuration",
+      {
+        id: "research/documentation-researcher",
+        name: "Documentation Researcher",
+        description: "Find and verify official technical documentation",
+        tools: ["search", "research"],
+      },
+      tools,
+      2,
+    );
+
+    expect(selected.map((tool) => tool.name)).toEqual([
+      "search_documentation",
+      "create_charge",
+    ]);
+  });
+});
 
 describe("Approval scope", () => {
   it("does not let approval of a later MCP tool authorize an earlier tool", () => {
