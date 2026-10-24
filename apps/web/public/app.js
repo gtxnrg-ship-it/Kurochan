@@ -1,4 +1,5 @@
 import { ApiClient, ApiError, normalizeApiBaseUrl } from "./api.mjs";
+import { renderMarkdown } from "./markdown.mjs";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -459,7 +460,8 @@ function renderMessage(message) {
   if (message.createdAt)
     meta.append(makeElement("time", "", formatDate(message.createdAt)));
   const content = makeElement("div", "message-text");
-  content.textContent = escapeText(message.content);
+  if (role === "assistant") renderMarkdown(content, message.content);
+  else content.textContent = escapeText(message.content);
   contentWrap.append(meta, content);
   const kind = message.metadata?.kind;
   if (kind === "run_started" && message.runId) {
