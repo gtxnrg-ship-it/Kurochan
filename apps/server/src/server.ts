@@ -1,5 +1,14 @@
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { resolve } from "node:path";
+import {
+  OAuthError,
+  OAuthService,
+  clearOAuthStateCookie,
+  isOAuthEnvironmentConfigured,
+  readOAuthStateCookie,
+  type AuthPrincipal,
+  type OAuthProviderId,
+} from "./auth.js";
 import Fastify, {
   type FastifyInstance,
   type FastifyReply,
@@ -46,6 +55,12 @@ import {
   type WebResearchExecutor,
 } from "@kurochan/orchestrator";
 
+declare module "fastify" {
+  interface FastifyRequest {
+    kurochanPrincipal?: AuthPrincipal;
+  }
+}
+
 const KUROCHAN_CONVERSATION_SYSTEM_PROMPT = [
   "You are Kuro-chan, an expert assistant that helps people turn unclear ideas into useful outcomes.",
   "Understand intent from the current message and recent conversation, not only the literal wording of the latest sentence.",
@@ -91,6 +106,17 @@ function createRequestAbortController(
   request.raw.once("aborted", abortOnRequestAborted);
   reply.raw.once("close", abortOnResponseClose);
   return controller;
+}
+
+function principalId(request: FastifyRequest): string {
+  return request.kurochanPrincipal?.userId ?? "local";
+}
+
+function ownsRun(
+  run: { readonly createdBy?: string } | undefined,
+  userId: string,
+): boolean {
+  return Boolean(run) && (run?.createdBy ?? "local") === userId;
 }
 
 function safeEqual(a: string, b: string): boolean {
@@ -159,6 +185,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   const store =
     options.store ??
     new RunStore(env.KUROCHAN_DB_PATH?.trim() || "data/kurochan.sqlite");
+  const oauth = new OAuthService(env);
   const catalog = options.catalog ?? new AgentCatalog();
   const communitySkills =
     options.communitySkills ?? new CommunitySkillCatalog();
