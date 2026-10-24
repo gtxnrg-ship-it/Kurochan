@@ -295,7 +295,7 @@ export function selectMcpToolsForTask(
     readonly tools: readonly string[];
   },
   tools: readonly McpToolDescriptor[],
-  maxTools = 30,
+  maxTools = 10,
 ): readonly McpToolDescriptor[] {
   const terms = [
     ...new Set(
