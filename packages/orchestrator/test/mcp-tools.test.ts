@@ -412,6 +412,126 @@ describe("McpToolRuntime", () => {
     await runtime.close();
   });
 
+  it("validates standard JSON Schema constraints and dialect-specific keywords", async () => {
+    const client = adapter([
+      {
+        name: "submit_profile",
+        inputSchema: {
+          $schema: "https://json-schema.org/draft/2020-12/schema",
+          type: "object",
+          properties: {
+            email: { type: "string", format: "email" },
+            slug: {
+              type: "string",
+              pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            },
+            kind: { type: "string", enum: ["general", "repository"] },
+            repository: { type: "string", minLength: 1 },
+            labels: {
+              type: "array",
+              prefixItems: [{ type: "string" }],
+              items: { type: "string" },
+            },
+          },
+          required: ["email", "slug", "kind"],
+          if: {
+            properties: { kind: { const: "repository" } },
+            required: ["kind"],
+          },
+          then: { required: ["repository"] },
+          additionalProperties: false,
+        },
+      },
+    ]);
+    const runtime = new McpToolRuntime({
+      servers: [serverConfig],
+      connectorFactory: () => client,
+    });
+
+    const invalidFormat = await runtime.execute({
+      serverId: "records",
+      toolName: "submit_profile",
+      arguments: {
+        email: "not-an-email",
+        slug: "valid-slug",
+        kind: "general",
+      },
+    });
+    expect(invalidFormat).toMatchObject({
+      ok: false,
+      error: { code: "invalid_tool_arguments" },
+    });
+
+    const invalidConditional = await runtime.execute({
+      serverId: "records",
+      toolName: "submit_profile",
+      arguments: {
+        email: "user@example.com",
+        slug: "valid-slug",
+        kind: "repository",
+      },
+    });
+    expect(invalidConditional).toMatchObject({
+      ok: false,
+      error: { code: "invalid_tool_arguments" },
+    });
+
+    const valid = await runtime.execute({
+      serverId: "records",
+      toolName: "submit_profile",
+      arguments: {
+        email: "user@example.com",
+        slug: "valid-slug",
+        kind: "repository",
+        repository: "owner/project",
+        labels: ["backend", "security"],
+      },
+    });
+    expect(valid).toMatchObject({ ok: true });
+    expect(client.callTool).toHaveBeenCalledOnce();
+    await runtime.close();
+  });
+
+  it("fails closed on unknown schema dialects and unresolved external references", async () => {
+    const client = adapter([
+      {
+        name: "unknown_dialect",
+        inputSchema: {
+          $schema: "https://example.invalid/draft/9999/schema",
+          type: "object",
+        },
+      },
+      {
+        name: "external_reference",
+        inputSchema: {
+          $schema: "http://json-schema.org/draft-07/schema#",
+          type: "object",
+          properties: {
+            value: { $ref: "https://example.invalid/schema.json" },
+          },
+        },
+      },
+    ]);
+    const runtime = new McpToolRuntime({
+      servers: [serverConfig],
+      connectorFactory: () => client,
+    });
+
+    for (const toolName of ["unknown_dialect", "external_reference"]) {
+      const result = await runtime.execute({
+        serverId: "records",
+        toolName,
+        arguments: { value: "anything" },
+      });
+      expect(result).toMatchObject({
+        ok: false,
+        error: { code: "invalid_tool_schema" },
+      });
+    }
+    expect(client.callTool).not.toHaveBeenCalled();
+    await runtime.close();
+  });
+
   it("fails closed when a discovered tool advertises an unsupported input schema", async () => {
     const client = adapter([
       {

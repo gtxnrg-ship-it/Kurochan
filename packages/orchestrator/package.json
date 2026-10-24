@@ -22,6 +22,8 @@
     "@kurochan/model-gateway": "workspace:*",
     "@kurochan/omnirouter": "workspace:*",
     "@kurochan/storage": "workspace:*",
-    "zod": "^3.25.2"
+    "zod": "^3.25.2",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1"
   }
 }
