@@ -756,6 +756,78 @@ describe("TaskWorker", () => {
     }
   });
 
+  it("backs off transient verification failures instead of hammering the model provider", async () => {
+    const catalogRoot = await fakeCatalogRoot();
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "kuro-workspaces-"));
+    created.push(workspaceRoot);
+    const runId = "94c95c32-fce4-4e1e-9a77-35b4b9075ab7";
+    const store = new RunStore(":memory:");
+    let reviewerCalls = 0;
+    try {
+      store.createRun({
+        id: runId,
+        goal: "Summarize the requested project structure",
+        profile: "balanced",
+        tasks: [
+          {
+            key: "summarize",
+            agentId: "engineering/engineering-test-agent",
+            objective: "Produce a concise project-structure summary.",
+          },
+        ],
+      });
+      const fakeProvider = provider(
+        async (input: ChatCompletionInput): Promise<ChatCompletionOutput> => {
+          if (
+            (input.systemPrompt ?? "").includes(
+              "independent consistency reviewer",
+            )
+          ) {
+            reviewerCalls += 1;
+            throw Object.assign(new Error("Temporary reviewer outage."), {
+              code: "upstream_unavailable",
+              retryable: true,
+            });
+          }
+          return {
+            providerId: "openrouter",
+            model: "test-model",
+            content: JSON.stringify({
+              status: "completed",
+              summary: "Summarized the project structure.",
+              toolCalls: [],
+              evidence: [],
+            }),
+            latencyMs: 1,
+          };
+        },
+      );
+      const router = new OmniRouter({
+        providers: new Map<ProviderId, ChatProvider>([
+          ["openrouter", fakeProvider],
+        ]),
+      });
+      const worker = new TaskWorker({
+        store,
+        catalog: new AgentCatalog(catalogRoot),
+        router,
+        workspaceRoot: resolve(workspaceRoot),
+        pollIntervalMs: 100,
+      });
+
+      const first = await worker.runOnce();
+      expect(first.kind).toBe("completed");
+      expect(store.getRun(runId)?.status).toBe("verifying");
+      expect(reviewerCalls).toBe(1);
+
+      await worker.runOnce();
+      expect(reviewerCalls).toBe(1);
+      expect(store.getRun(runId)?.status).toBe("verifying");
+    } finally {
+      store.close();
+    }
+  });
+
   it("requires a separate external-write approval before publishing a pull request", async () => {
     const catalogRoot = await fakeCatalogRoot();
     const workspaceRoot = await mkdtemp(join(tmpdir(), "kuro-workspaces-"));
