@@ -101,3 +101,7 @@ An integration is considered ready only when all of these pass:
 ## Important status note
 
 This document records the recommended integration roadmap. It does not mean these services are installed, authenticated, enabled, or verified in a live Kurochan deployment. Add them incrementally and prove each integration works before advertising it as available.
+
+## Community skill and plugin sources
+
+Kurochan exposes a curated community source directory and loads task-relevant, pinned `SKILL.md` instructions from four MIT-licensed repositories. See [COMMUNITY_PLUGIN_PACKS.md](COMMUNITY_PLUGIN_PACKS.md) for exact revisions, API routes, license notes, and the boundary between locally usable skills and sources that still need an adapter. The directory is not a claim that every referenced external plugin is installed or executable.
