@@ -91,6 +91,7 @@ export interface ServerOptions {
   readonly mcpTools?: McpToolRuntime;
   readonly communitySkills?: CommunitySkillCatalog;
   readonly speech?: SpeechRuntime;
+  readonly oauth?: OAuthService;
 }
 
 function createRequestAbortController(
@@ -185,7 +186,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   const store =
     options.store ??
     new RunStore(env.KUROCHAN_DB_PATH?.trim() || "data/kurochan.sqlite");
-  const oauth = new OAuthService(env);
+  const oauth = options.oauth ?? new OAuthService(env);
   const catalog = options.catalog ?? new AgentCatalog();
   const communitySkills =
     options.communitySkills ?? new CommunitySkillCatalog();
@@ -3895,7 +3896,7 @@ export function validateServerConfiguration(env: Environment = process.env): {
     !isOAuthEnvironmentConfigured(env)
   ) {
     throw new Error(
-      "Refusing to bind Kuro-chan API to a non-loopback host without an API token or fully configured HTTPS OAuth authentication.",
+      "Refusing to bind Kuro-chan API to a non-loopback host without KUROCHAN_API_TOKEN or fully configured HTTPS OAuth authentication.",
     );
   }
   parseEnvironmentInteger(
