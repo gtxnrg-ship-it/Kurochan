@@ -1353,6 +1353,72 @@ describe("Kuro-chan API", () => {
     );
   });
 
+  it("passes a selected provider model into planning and persists it on the run", async () => {
+    const store = new RunStore(":memory:");
+    const conversation = store.createConversation({ title: "Selected model test" });
+    const planned = {
+      intent: "Implement a feature with a selected model",
+      summary: "A test plan",
+      assumptions: [],
+      clarificationRequired: false,
+      tasks: [
+        {
+          key: "implementation",
+          agentId: "engineering/implementer",
+          objective: "Implement the feature.",
+          dependsOn: [],
+          maxAttempts: 1,
+          approvalRequired: false,
+        },
+      ],
+      selectedAgents: [
+        {
+          id: "engineering/implementer",
+          name: "Engineering Implementer",
+          division: "Engineering",
+        },
+      ],
+      providerId: "openrouter",
+      model: "openrouter/free",
+      latencyMs: 1,
+      attempts: 1,
+    };
+    const createPlan = vi.fn(async () => planned);
+    app = buildServer({
+      env: {},
+      logger: false,
+      store,
+      planner: { createPlan } as unknown as PlanService,
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/conversations/" + conversation.id + "/runs",
+      payload: {
+        goal: "Implement a feature",
+        profile: "quality",
+        model: "openrouter/openrouter/free",
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(createPlan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        goal: "Implement a feature",
+        profile: "balanced",
+        preferredProvider: "openrouter",
+        providerModel: "openrouter/free",
+      }),
+    );
+    expect(response.json().run).toMatchObject({
+      profile: "balanced",
+      model: "openrouter/openrouter/free",
+    });
+    expect(store.getRun(response.json().run.id)?.model).toBe(
+      "openrouter/openrouter/free",
+    );
+  });
+
   it("locks provider-qualified model IDs to the named provider", async () => {
     const calls: Array<{ provider: ProviderId; model?: string }> = [];
     const fakeProvider = (
