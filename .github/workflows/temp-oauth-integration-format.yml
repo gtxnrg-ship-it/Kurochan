@@ -1,0 +1,54 @@
+name: Temporary OAuth integration formatter
+
+on:
+  push:
+    branches:
+      - integration/optional-account-auth-2026-10-24
+
+permissions:
+  contents: write
+
+jobs:
+  format-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: integration/optional-account-auth-2026-10-24
+          submodules: recursive
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: pnpm install --frozen-lockfile
+      - name: Format only the integration files
+        run: >-
+          pnpm exec prettier --write
+          apps/server/src/auth.ts
+          apps/server/src/server.ts
+          apps/server/test/auth.test.ts
+          apps/server/test/auth-routes.test.ts
+          packages/storage/src/index.ts
+          packages/storage/test/run-store.test.ts
+          apps/web/public/app.js
+          apps/web/public/api.mjs
+          apps/web/public/index.html
+          apps/web/public/app.css
+          apps/web/test/api.test.ts
+          .env.example
+      - name: Run the complete repository checks
+        run: pnpm check
+      - name: Commit formatter output when needed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/server/src/auth.ts apps/server/src/server.ts apps/server/test/auth.test.ts apps/server/test/auth-routes.test.ts packages/storage/src/index.ts packages/storage/test/run-store.test.ts apps/web/public/app.js apps/web/public/api.mjs apps/web/public/index.html apps/web/public/app.css apps/web/test/api.test.ts .env.example
+          if ! git diff --cached --quiet; then
+            git commit -m "Format optional account authentication integration"
+            git push origin HEAD:integration/optional-account-auth-2026-10-24
+          fi
