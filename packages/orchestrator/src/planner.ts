@@ -352,10 +352,7 @@ export class PlanService {
       .filter((message) => message.role === "user")
       .slice(-4)
       .map((message) => message.content.slice(0, 1_500));
-    const catalogIntent = [
-      goal,
-      ...recentUserContext,
-    ].join("\n");
+    const catalogIntent = [goal, ...recentUserContext].join("\n");
 
     const configuredMaxCandidates = this.options.maxCandidates ?? 96;
     if (
