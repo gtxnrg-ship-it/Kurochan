@@ -84,6 +84,37 @@ describe("Kuro-chan web API helpers", () => {
     expect(options?.credentials).toBe("omit");
   });
 
+  it("requests live MCP, preset and research diagnostics through safe API paths", async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    const client = new ApiClient({
+      getBaseUrl: () => "http://127.0.0.1:8787",
+      getToken: () => "tab-token",
+      fetchImpl,
+    });
+
+    await client.mcpStatus({ probe: true });
+    await client.communityMcpPresets("firebase supabase");
+    await client.researchStatus();
+
+    expect(fetchImpl.mock.calls.map(([url]) => url)).toEqual([
+      "http://127.0.0.1:8787/v1/mcp/status?probe=true",
+      "http://127.0.0.1:8787/v1/community-mcp-presets?limit=100&q=firebase+supabase",
+      "http://127.0.0.1:8787/v1/research/status",
+    ]);
+    for (const [, options] of fetchImpl.mock.calls) {
+      expect(new Headers(options?.headers).get("authorization")).toBe(
+        "Bearer tab-token",
+      );
+      expect(options?.credentials).toBe("omit");
+    }
+  });
+
   it("normalizes structured API errors for the UI", async () => {
     const fetchImpl = vi.fn(
       async () =>
