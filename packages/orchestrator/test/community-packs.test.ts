@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   CommunitySkillCatalog,
+  listCommunityMcpPresets,
   listCommunityPacks,
 } from "../src/community-packs.js";
 
@@ -36,6 +37,31 @@ describe("community pack registry", () => {
     );
     expect(() => listCommunityPacks({ mode: "unknown" as never })).toThrow(
       "Community pack mode",
+    );
+  });
+
+  it("provides pinned MCP presets with secret-free environment placeholders", () => {
+    const presets = listCommunityMcpPresets();
+    expect(presets).toHaveLength(3);
+    expect(presets.find((preset) => preset.id === "playwright-mcp")).toMatchObject({
+      transport: "stdio",
+      configuration: {
+        command: "npx",
+        args: ["--yes", "@playwright/mcp@0.0.83"],
+      },
+      requiredEnvironment: [],
+    });
+    expect(presets.find((preset) => preset.id === "context7")).toMatchObject({
+      transport: "streamable-http",
+      configuration: {
+        url: "https://mcp.context7.com/mcp",
+        headers: { Authorization: "CONTEXT7_AUTHORIZATION" },
+      },
+    });
+    expect(JSON.stringify(presets)).not.toContain("Bearer ");
+    expect(JSON.stringify(presets)).not.toContain("ghp_");
+    expect(() => listCommunityMcpPresets({ limit: 0 })).toThrow(
+      "Community MCP preset limit",
     );
   });
 
