@@ -151,18 +151,24 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   const router = new OmniRouter({
     providers: registry.providers,
     routeOrder: routeOrdersFromEnvironment(env),
-    maxAttempts: Number.parseInt(env.OMNIROUTER_MAX_ATTEMPTS ?? "2", 10),
-    maxConcurrentRequests: Number.parseInt(
-      env.OMNIROUTER_MAX_CONCURRENT ?? "24",
-      10,
+    maxAttempts: parseBoundedInteger(env.OMNIROUTER_MAX_ATTEMPTS, 2, 1, 5),
+    maxConcurrentRequests: parseBoundedInteger(
+      env.OMNIROUTER_MAX_CONCURRENT,
+      24,
+      1,
+      256,
     ),
-    failureThreshold: Number.parseInt(
-      env.OMNIROUTER_FAILURE_THRESHOLD ?? "3",
-      10,
+    failureThreshold: parseBoundedInteger(
+      env.OMNIROUTER_FAILURE_THRESHOLD,
+      3,
+      1,
+      20,
     ),
-    circuitCooldownMs: Number.parseInt(
-      env.OMNIROUTER_CIRCUIT_COOLDOWN_MS ?? "30000",
-      10,
+    circuitCooldownMs: parseBoundedInteger(
+      env.OMNIROUTER_CIRCUIT_COOLDOWN_MS,
+      30_000,
+      1_000,
+      300_000,
     ),
     onUsage: (event) => store.recordProviderUsage(event),
   });
@@ -363,7 +369,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     maxAge: 600,
   });
   void app.register(rateLimit, {
-    max: Number.parseInt(env.API_RATE_LIMIT_PER_MINUTE ?? "60", 10),
+    max: parseBoundedInteger(env.API_RATE_LIMIT_PER_MINUTE, 60, 1, 1000),
     timeWindow: "1 minute",
     keyGenerator: (request) => request.ip,
     errorResponseBuilder: (_request, context) => ({
@@ -3311,14 +3317,28 @@ function requestWarning(
   );
 }
 
+function parseEnvironmentInteger(
+  name: string,
+  raw: string | undefined,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  const value = raw?.trim() ?? "";
+  const parsed =
+    value === "" ? fallback : /^\d+$/.test(value) ? Number(value) : Number.NaN;
+  if (!Number.isSafeInteger(parsed) || parsed < min || parsed > max) {
+    throw new Error(`${name} must be an integer between ${min} and ${max}.`);
+  }
+  return parsed;
+}
+
 export function validateServerConfiguration(env: Environment = process.env): {
   host: string;
   port: number;
 } {
   const host = env.HOST?.trim() || "127.0.0.1";
-  const parsedPort = Number.parseInt(env.PORT ?? "8787", 10);
-  if (!Number.isInteger(parsedPort) || parsedPort < 1 || parsedPort > 65535)
-    throw new Error("PORT must be an integer between 1 and 65535.");
+  const parsedPort = parseEnvironmentInteger("PORT", env.PORT, 8787, 1, 65535);
   const loopback =
     host === "127.0.0.1" || host === "localhost" || host === "::1";
   if (!loopback && !env.KUROCHAN_API_TOKEN?.trim()) {
@@ -3326,14 +3346,7 @@ export function validateServerConfiguration(env: Environment = process.env): {
       "Refusing to bind Kuro-chan API to a non-loopback host without KUROCHAN_API_TOKEN.",
     );
   }
-  const rateLimit = Number.parseInt(env.API_RATE_LIMIT_PER_MINUTE ?? "60", 10);
-  if (!Number.isInteger(rateLimit) || rateLimit < 1 || rateLimit > 1000)
-    throw new Error("API_RATE_LIMIT_PER_MINUTE must be between 1 and 1000.");
-  const concurrency = Number.parseInt(
-    env.OMNIROUTER_MAX_CONCURRENT ?? "24",
-    10,
-  );
-  if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 256)
-    throw new Error("OMNIROUTER_MAX_CONCURRENT must be between 1 and 256.");
+  parseEnvironmentInteger("API_RATE_LIMIT_PER_MINUTE", env.API_RATE_LIMIT_PER_MINUTE, 60, 1, 1000);
+  parseEnvironmentInteger("OMNIROUTER_MAX_CONCURRENT", env.OMNIROUTER_MAX_CONCURRENT, 24, 1, 256);
   return { host, port: parsedPort };
 }
