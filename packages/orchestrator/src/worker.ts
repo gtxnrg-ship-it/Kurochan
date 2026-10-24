@@ -244,8 +244,23 @@ export interface DependencyHandoffCandidate {
 }
 
 const HANDOFF_STOP_WORDS = new Set([
-  "and", "are", "for", "from", "has", "have", "into", "its", "not", "that",
-  "the", "their", "then", "this", "with", "you", "your",
+  "and",
+  "are",
+  "for",
+  "from",
+  "has",
+  "have",
+  "into",
+  "its",
+  "not",
+  "that",
+  "the",
+  "their",
+  "then",
+  "this",
+  "with",
+  "you",
+  "your",
 ]);
 
 function handoffTerms(value: string): string[] {
@@ -298,7 +313,9 @@ export function selectRelevantDependencyHandoffs(
   });
 
   return ranked
-    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .sort(
+      (left, right) => right.score - left.score || left.index - right.index,
+    )
     .slice(0, maxDependencies)
     .map(({ dependency }) => dependency);
 }
