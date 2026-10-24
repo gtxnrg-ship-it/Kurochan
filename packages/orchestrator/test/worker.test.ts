@@ -413,7 +413,11 @@ describe("TaskWorker", () => {
         .filter((event) => event.type === "task.progress")
         .map(
           (event) =>
-            event.payload as { stage?: string; toolName?: string; sources?: unknown[] },
+            event.payload as {
+              stage?: string;
+              toolName?: string;
+              sources?: unknown[];
+            },
         );
       expect(progress.map((event) => event.stage)).toEqual(
         expect.arrayContaining([
