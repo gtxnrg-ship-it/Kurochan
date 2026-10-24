@@ -170,6 +170,15 @@ export class ApiClient {
   workerStatus(options) { return this.request("/v1/worker/status", options); }
   workers(options) { return this.request("/v1/workers?staleAfterMs=30000", options); }
   routerStatus(options) { return this.request("/v1/omnirouter/status", options); }
+  researchStatus(options) { return this.request("/v1/research/status", options); }
+  mcpStatus({ probe = false, ...options } = {}) {
+    return this.request("/v1/mcp/status?probe=" + (probe ? "true" : "false"), options);
+  }
+  communityMcpPresets(query = "", options = {}) {
+    const params = new URLSearchParams({ limit: "100" });
+    if (query.trim()) params.set("q", query.trim().slice(0, 200));
+    return this.request("/v1/community-mcp-presets?" + params.toString(), options);
+  }
   listConversations(options) { return this.request("/v1/conversations?limit=50&offset=0", options); }
 
   createConversation(title, options = {}) {
