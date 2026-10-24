@@ -86,12 +86,12 @@ describe("WebResearchRuntime", () => {
         return jsonResponse({
           grounding: {
             generic: Array.from({ length: 12 }, (_, sourceIndex) => ({
-              url: \`https://docs.example.dev/guide-\${sourceIndex}\`,
-              title: \`Guide \${sourceIndex}\`,
+              url: "https://docs.example.dev/guide-" + sourceIndex,
+              title: "Guide " + sourceIndex,
               snippets: Array.from(
                 { length: 8 },
                 (_, snippetIndex) =>
-                  \`Source \${sourceIndex} chunk \${snippetIndex}: \${"evidence ".repeat(220)}\`,
+                   "Source " + sourceIndex + " chunk " + snippetIndex + ": " + "evidence ".repeat(220),
               ),
             })),
           },
