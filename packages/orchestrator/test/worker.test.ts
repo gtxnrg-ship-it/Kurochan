@@ -623,6 +623,113 @@ describe("TaskWorker", () => {
     }
   });
 
+  it("honors each run's selected routing profile during task execution", async () => {
+    const catalogRoot = await fakeCatalogRoot();
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "kuro-workspaces-"));
+    created.push(workspaceRoot);
+    const store = new RunStore(":memory:");
+    const usage: Array<{ operation: string; profile: RouteProfile; runId?: string }> = [];
+    let worker: TaskWorker | undefined;
+    try {
+      store.createRun(
+        {
+          id: "d1111111-1111-4111-8111-111111111111",
+          goal: "Return a concise summary",
+          profile: "fast",
+          tasks: [
+            {
+              key: "summary",
+              agentId: "engineering/engineering-test-agent",
+              objective: "Return a concise summary of the requested work.",
+            },
+          ],
+        },
+        1_000,
+      );
+      store.createRun(
+        {
+          id: "e1111111-1111-4111-8111-111111111111",
+          goal: "Return a concise summary",
+          profile: "quality",
+          tasks: [
+            {
+              key: "summary",
+              agentId: "engineering/engineering-test-agent",
+              objective: "Return a concise summary of the requested work.",
+            },
+          ],
+        },
+        2_000,
+      );
+      const fakeProvider = provider(
+        async (input: ChatCompletionInput): Promise<ChatCompletionOutput> => {
+          if (
+            (input.systemPrompt ?? "").includes(
+              "independent consistency reviewer",
+            )
+          ) {
+            return {
+              providerId: "openrouter",
+              model: "test-model",
+              content: JSON.stringify({
+                passed: true,
+                summary: "The result is consistent with the request.",
+                checks: [
+                  {
+                    name: "A task result was produced",
+                    passed: true,
+                    notes: "The structured task output is present.",
+                  },
+                ],
+                blockers: [],
+              }),
+              latencyMs: 1,
+            };
+          }
+          return {
+            providerId: "openrouter",
+            model: "test-model",
+            content: JSON.stringify({
+              status: "completed",
+              summary: "Produced the requested summary.",
+              toolCalls: [],
+              evidence: [],
+            }),
+            latencyMs: 1,
+          };
+        },
+      );
+      const router = new OmniRouter({
+        providers: new Map<ProviderId, ChatProvider>([
+          ["openrouter", fakeProvider],
+        ]),
+        onUsage: (event) =>
+          usage.push({
+            operation: event.operation,
+            profile: event.profile,
+            ...(event.runId ? { runId: event.runId } : {}),
+          }),
+      });
+      worker = new TaskWorker({
+        store,
+        catalog: new AgentCatalog(catalogRoot),
+        router,
+        workspaceRoot: resolve(workspaceRoot),
+      });
+
+      expect((await worker.runOnce()).kind).toBe("completed");
+      expect((await worker.runOnce()).kind).toBe("completed");
+      expect(
+        usage
+          .filter((event) => event.operation === "task")
+          .map((event) => event.profile),
+      ).toEqual(["fast", "quality"]);
+    } finally {
+      await worker?.stop();
+      store.close();
+    }
+  });
+
   it("runs independent specialist tasks concurrently up to the configured worker limit", async () => {
     const catalogRoot = await fakeCatalogRoot();
     const workspaceRoot = await mkdtemp(join(tmpdir(), "kuro-workspaces-"));
