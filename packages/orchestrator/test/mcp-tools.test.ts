@@ -213,6 +213,26 @@ describe("McpToolRuntime", () => {
     await runtime.close();
   });
 
+  it("redacts secrets from MCP connection health errors", async () => {
+    const client = adapter([readonlyTool]);
+    client.connect = vi.fn(async () => {
+      throw Object.assign(
+        new Error("Connection failed with token=health-secret-value"),
+        { code: "connect_failed" },
+      );
+    });
+    const runtime = new McpToolRuntime({
+      servers: [serverConfig],
+      connectorFactory: () => client,
+    });
+
+    expect(await runtime.listTools()).toEqual([]);
+    const status = JSON.stringify(runtime.status());
+    expect(status).not.toContain("health-secret-value");
+    expect(status).toContain("[REDACTED_SECRET]");
+    await runtime.close();
+  });
+
   it("redacts secrets in exceptions thrown by an MCP server", async () => {
     const client = adapter([readonlyTool], async () => {
       throw Object.assign(
