@@ -327,7 +327,9 @@ describe("selectRelevantDependencyHandoffs", () => {
         planKey: "security-review",
         agentId: "security/security-architect",
         objective: "Review API security boundaries and authentication risks.",
-        output: { summary: "Security review of API authentication boundaries." },
+        output: {
+          summary: "Security review of API authentication boundaries.",
+        },
         evidence: [],
       },
     ];
