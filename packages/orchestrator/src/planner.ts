@@ -26,7 +26,14 @@ const PlannedTaskSchema = z
 
 const PlanPayloadSchema = z
   .object({
+    intent: z.string().trim().min(1).max(2000).optional(),
     summary: z.string().trim().min(1).max(6000),
+    assumptions: z
+      .array(z.string().trim().min(1).max(500))
+      .max(8)
+      .default([]),
+    clarificationRequired: z.boolean().default(false),
+    clarificationQuestion: z.string().trim().min(1).max(600).optional(),
     tasks: z.array(PlannedTaskSchema).min(1).max(32),
   })
   .strict();
@@ -34,11 +41,19 @@ const PlanPayloadSchema = z
 export interface CreatePlanRequest {
   readonly goal: string;
   readonly profile: RouteProfile;
+  readonly conversationContext?: readonly {
+    readonly role: "user" | "assistant";
+    readonly content: string;
+  }[];
   readonly signal?: AbortSignal;
 }
 
 export interface PreparedPlan {
+  readonly intent: string;
   readonly summary: string;
+  readonly assumptions: readonly string[];
+  readonly clarificationRequired: boolean;
+  readonly clarificationQuestion?: string;
   readonly tasks: readonly PlannedTask[];
   readonly selectedAgents: readonly {
     id: string;
@@ -189,6 +204,21 @@ function scoreAgentForGoal(goal: string, profile: AgentProfile): number {
   }
   if (terms.length && terms.every((term) => corpus.includes(term))) score += 3;
   return score;
+}
+
+function plannerCandidateBudget(goal: string, configuredMaximum: number): number {
+  const wordCount = goal.trim().split(/\s+/).filter(Boolean).length;
+  const complexGoal =
+    /\b(end[- ]to[- ]end|entire|full system|production|architecture|integrat\w*|migrat\w*|refactor\w*|multi[- ](?:agent|step|service|stage)|all features|multiple workstreams|large[- ]scale|security audit|benchmark)\b/i.test(
+      goal,
+    );
+  const mediumGoal =
+    /\b(build|implement|create|design|debug|fix|research|compare|analy[sz]e|plan|review|test|deploy|voice|speech|repository|database|api|application|app)\b/i.test(
+      goal,
+    ) || wordCount >= 12;
+
+  const desired = complexGoal ? 96 : mediumGoal ? 48 : 32;
+  return Math.min(configuredMaximum, desired);
 }
 
 function rankCatalogAgents(
@@ -369,24 +399,13 @@ export class PlanService {
             missingRequiredProfiles.join(", "),
         );
       }
-      const maxCandidates = this.options.maxCandidates ?? 96;
-      if (
-        !Number.isInteger(maxCandidates) ||
-        maxCandidates < 16 ||
-        maxCandidates > 1000
-      ) {
-        throw new PlanError(
-          "invalid_planner_configuration",
-          "Planner candidate limit must be between 16 and 1000.",
-        );
-      }
       candidates = rankCatalogAgents(
         goal,
         allProfiles,
         [goalMatches, researchMatches],
         runbookAgentIds,
         new Set(requiredRunbookAgentIds),
-        maxCandidates,
+        effectiveMaxCandidates,
       );
     } catch (error) {
       if (error instanceof PlanError) throw error;
@@ -414,9 +433,12 @@ export class PlanService {
     }));
 
     const systemPrompt = [
-      "You are Kuro-chan's planning engine.",
-      "Build a concise, executable task graph for the user's goal using only the provided specialist IDs.",
-      "Return only one JSON object matching: {summary:string,tasks:[{key,agentId,objective,dependsOn,maxAttempts,approvalRequired}]}",
+      "You are Kuro-chan's intent interpreter and planning engine.",
+      "First infer the outcome the user is actually trying to achieve, then plan the smallest reliable path to that outcome.",
+      "A vague idea is not automatically a reason to interrogate the user. Use context and reasonable, reversible assumptions for minor gaps; record those assumptions explicitly.",
+      "Ask for clarification only when one missing decision materially changes the solution, scope, safety, cost, or an irreversible action. If clarification is essential, set clarificationRequired=true and provide exactly one concise, high-value clarificationQuestion. Do not start executable work until that answer is available.",
+      "When no blocker exists, set clarificationRequired=false and clarificationQuestion should be omitted. Keep the intent, summary, assumptions, and tasks specific, short, and understandable by a non-expert.",
+      "Return only one JSON object matching: {intent:string,summary:string,assumptions:string[],clarificationRequired:boolean,clarificationQuestion?:string,tasks:[{key,agentId,objective,dependsOn,maxAttempts,approvalRequired}]}",
       "Use 3 to 8 tasks for typical goals, fewer for simple work, and up to 32 tasks for genuinely complex goals. Do not add specialists merely to inflate the roster.",
       "Use stable kebab-case unique task keys. Add dependencies only when one task genuinely needs another's output.",
       "Parallelize independent research, design, or implementation work rather than inventing serial dependencies.",
@@ -472,8 +494,30 @@ export class PlanService {
       "No markdown fences, prose outside the JSON, or additional fields.",
     ].join("\n");
 
+    const configuredMaxCandidates = this.options.maxCandidates ?? 96;
+    if (
+      !Number.isInteger(configuredMaxCandidates) ||
+      configuredMaxCandidates < 16 ||
+      configuredMaxCandidates > 1000
+    ) {
+      throw new PlanError(
+        "invalid_planner_configuration",
+        "Planner candidate limit must be between 16 and 1000.",
+      );
+    }
+    const effectiveMaxCandidates = plannerCandidateBudget(
+      goal,
+      configuredMaxCandidates,
+    );
+
     const userPrompt = JSON.stringify({
       goal,
+      recentConversation: (request.conversationContext ?? [])
+        .slice(-10)
+        .map((message) => ({
+          role: message.role,
+          content: message.content.slice(0, 1_500),
+        })),
       requestedProfile: request.profile,
       installationCapabilities: {
         githubProjectRepositories: [
@@ -550,6 +594,12 @@ export class PlanService {
         const payload = PlanPayloadSchema.parse(
           parseModelJson(response.content),
         );
+        if (payload.clarificationRequired && !payload.clarificationQuestion) {
+          throw new Error(
+            "A clarification-required plan must include one concise clarificationQuestion.",
+          );
+        }
+        const intent = payload.intent ?? payload.summary;
         const allowedIds = new Set(candidates.map((agent) => agent.id));
         for (const task of payload.tasks) {
           if (!allowedIds.has(task.agentId))
@@ -583,7 +633,9 @@ export class PlanService {
             task.approvalRequired || APPROVAL_REQUIRED.test(task.objective),
           input: {
             runGoal: goal,
+            userIntent: intent,
             planSummary: payload.summary,
+            assumptions: payload.assumptions,
             ...(relevantRunbooks[0]
               ? {
                   selectedNexusRunbook: {
@@ -597,7 +649,13 @@ export class PlanService {
           },
         }));
         return {
+          intent,
           summary: payload.summary,
+          assumptions: payload.assumptions,
+          clarificationRequired: payload.clarificationRequired,
+          ...(payload.clarificationQuestion
+            ? { clarificationQuestion: payload.clarificationQuestion }
+            : {}),
           tasks,
           selectedAgents: [...new Set(tasks.map((task) => task.agentId))].map(
             (id) => {
