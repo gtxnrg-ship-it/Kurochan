@@ -890,6 +890,125 @@ describe("TaskWorker", () => {
     }
   });
 
+  it("requires a fresh approval when the model repeats an already executed GitHub write", async () => {
+    const catalogRoot = await fakeCatalogRoot();
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "kuro-workspaces-"));
+    created.push(workspaceRoot);
+    const runId = "a4cfa012-3f28-4490-babb-19ce5fdd2cd2";
+    const store = new RunStore(":memory:");
+    let modelCalls = 0;
+    const execute = vi.fn(async () => ({
+      name: "github.create_pull_request" as const,
+      ok: true,
+      result: {
+        repository: "acme/demo",
+        pullRequest: {
+          number: 8,
+          url: "https://github.com/acme/demo/pull/8",
+          state: "open",
+        },
+      },
+      evidence: [
+        {
+          kind: "github_project",
+          summary: "Created pull request #8 for acme/demo",
+          uri: "https://github.com/acme/demo/pull/8",
+        },
+      ],
+    }));
+
+    try {
+      store.createRun({
+        id: runId,
+        goal: "Open a pull request for the approved source changes",
+        profile: "balanced",
+        tasks: [
+          {
+            key: "publish",
+            agentId: "engineering/engineering-test-agent",
+            objective: "Open the requested GitHub pull request.",
+          },
+        ],
+      });
+      const fakeProvider = provider(
+        async (input: ChatCompletionInput): Promise<ChatCompletionOutput> => {
+          if ((input.systemPrompt ?? "").includes("independent consistency reviewer")) {
+            return {
+              providerId: "openrouter",
+              model: "test-model",
+              content: JSON.stringify({
+                passed: true,
+                summary: "Reviewed task output.",
+                checks: [],
+                blockers: [],
+              }),
+              latencyMs: 1,
+            };
+          }
+          modelCalls += 1;
+          return {
+            providerId: "openrouter",
+            model: "test-model",
+            content: JSON.stringify({
+              status: "tool_calls",
+              summary: "Request the same pull request action again.",
+              toolCalls: [
+                {
+                  name: "github.create_pull_request",
+                  arguments: {
+                    repository: "acme/demo",
+                    title: "Implement the requested change",
+                    body: "Created by Kuro-chan.",
+                  },
+                },
+              ],
+              evidence: [],
+            }),
+            latencyMs: 1,
+          };
+        },
+      );
+      const router = new OmniRouter({
+        providers: new Map<ProviderId, ChatProvider>([["openrouter", fakeProvider]]),
+      });
+      const worker = new TaskWorker({
+        store,
+        catalog: new AgentCatalog(catalogRoot),
+        router,
+        workspaceRoot: resolve(workspaceRoot),
+        githubProject: {
+          isConfigured: true,
+          canPublish: true,
+          execute,
+        },
+      });
+
+      expect((await worker.runOnce()).kind).toBe("waiting_for_approval");
+      const task = store.listTasks(runId)[0]!;
+      store.resolveTaskApproval(runId, task.id, true, "Reviewed and approved.");
+
+      const repeated = await worker.runOnce();
+      expect(repeated.kind).toBe("waiting_for_approval");
+      expect(execute).toHaveBeenCalledOnce();
+      const requests = store
+        .listEvents(runId, 0, 1000)
+        .filter(
+          (event) =>
+            event.taskId === task.id && event.type === "approval.requested",
+        );
+      expect(requests).toHaveLength(2);
+      expect(requests[1]?.payload).toMatchObject({
+        action: {
+          approvalType: "external-write",
+          actionName: "github.create_pull_request",
+        },
+      });
+      expect(modelCalls).toBeGreaterThanOrEqual(3);
+    } finally {
+      store.close();
+    }
+  });
+
   it("cancels an in-flight model request when the run is cancelled", async () => {
     const catalogRoot = await fakeCatalogRoot();
     const workspaceRoot = await mkdtemp(join(tmpdir(), "kuro-workspaces-"));
