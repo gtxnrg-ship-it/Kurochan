@@ -23,6 +23,9 @@ import { OmniRouter, routeOrdersFromEnvironment } from "@kurochan/omnirouter";
 import { AgentCatalog } from "@kurochan/agent-catalog";
 import { RunStore, type CreateRunInput } from "@kurochan/storage";
 import {
+  CommunitySkillCatalog,
+  listCommunityPacks,
+  type CommunityPackMode,
   DockerSandboxRuntime,
   GitHubProjectRuntime,
   McpToolRuntime,
@@ -48,6 +51,7 @@ export interface ServerOptions {
   readonly webResearch?: WebResearchExecutor;
   readonly githubProject?: GitHubProjectExecutor;
   readonly mcpTools?: McpToolRuntime;
+  readonly communitySkills?: CommunitySkillCatalog;
   readonly speech?: OpenAICompatibleSpeechRuntime;
 }
 
@@ -118,6 +122,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     options.store ??
     new RunStore(env.KUROCHAN_DB_PATH?.trim() || "data/kurochan.sqlite");
   const catalog = options.catalog ?? new AgentCatalog();
+  const communitySkills = options.communitySkills ?? new CommunitySkillCatalog();
   const mcpTools = options.mcpTools ?? McpToolRuntime.fromEnvironment(env);
   const speech =
     options.speech ??
@@ -307,6 +312,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     webResearch,
     githubProject,
     mcpTools,
+    communitySkills,
     concurrency: parseBoundedInteger(env.KUROCHAN_WORKER_CONCURRENCY, 4, 1, 32),
     leaseMs: parseBoundedInteger(
       env.KUROCHAN_WORKER_LEASE_MS,
@@ -1113,6 +1119,124 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           message:
             "Agency Agents catalog is unavailable. Check that the pinned submodule is initialized.",
           retryable: true,
+        },
+      });
+    }
+  });
+
+  app.get("/v1/community-packs", async (request, reply) => {
+    const query = request.query as Record<string, unknown>;
+    const q = typeof query.q === "string" ? query.q.trim() : "";
+    const rawMode = typeof query.mode === "string" ? query.mode.trim() : "";
+    if (q.length > 200) {
+      return reply.code(400).send({
+        error: {
+          code: "invalid_query",
+          message: "q must not exceed 200 characters.",
+          retryable: false,
+          requestId: request.id,
+        },
+      });
+    }
+    let limit: number;
+    try {
+      limit = parseBoundedInteger(query.limit, q ? 30 : 100, 1, 100);
+    } catch {
+      return reply.code(400).send({
+        error: {
+          code: "invalid_query",
+          message: "limit must be an integer from 1 to 100.",
+          retryable: false,
+          requestId: request.id,
+        },
+      });
+    }
+
+    let data;
+    try {
+      data = listCommunityPacks({
+        query: q,
+        ...(rawMode ? { mode: rawMode as CommunityPackMode } : {}),
+        limit,
+      });
+    } catch {
+      return reply.code(400).send({
+        error: {
+          code: "invalid_query",
+          message: "mode is not a supported community pack mode.",
+          retryable: false,
+          requestId: request.id,
+        },
+      });
+    }
+
+    const status = await communitySkills.status();
+    const statusByPack = new Map(status.map((item) => [item.packId, item]));
+    return {
+      total: listCommunityPacks().length,
+      count: data.length,
+      data: data.map((pack) => ({
+        ...pack,
+        runtime: statusByPack.get(pack.id) ?? {
+          packId: pack.id,
+          available: false,
+          skillCount: 0,
+        },
+      })),
+      security: {
+        thirdPartyCodeAutoExecuted: false,
+        skillInstructionsAreUntrusted: true,
+        externalWritesAreNotEnabledByThisCatalog: true,
+      },
+    };
+  });
+
+  app.get("/v1/community-skills", async (request, reply) => {
+    const query = request.query as Record<string, unknown>;
+    const q = typeof query.q === "string" ? query.q.trim() : "";
+    if (!q || q.length > 200) {
+      return reply.code(400).send({
+        error: {
+          code: "invalid_query",
+          message: "q must contain 1 to 200 characters.",
+          retryable: false,
+          requestId: request.id,
+        },
+      });
+    }
+    let limit: number;
+    try {
+      limit = parseBoundedInteger(query.limit, 20, 1, 100);
+    } catch {
+      return reply.code(400).send({
+        error: {
+          code: "invalid_query",
+          message: "limit must be an integer from 1 to 100.",
+          retryable: false,
+          requestId: request.id,
+        },
+      });
+    }
+    try {
+      const data = await communitySkills.search(q, limit);
+      return {
+        query: q,
+        count: data.length,
+        data,
+        security: {
+          contentReturned: false,
+          instructionsAreUntrusted: true,
+          scriptsExecuted: false,
+        },
+      };
+    } catch (error) {
+      requestWarning(app, error, "community_skills_unavailable");
+      return reply.code(503).send({
+        error: {
+          code: "community_skills_unavailable",
+          message: "Community skill metadata could not be loaded.",
+          retryable: true,
+          requestId: request.id,
         },
       });
     }
