@@ -17,6 +17,7 @@ import {
   jsonCharacterLimit,
   selectMcpToolsForContext,
   selectMcpToolsForTask,
+  selectRelevantDependencyHandoffs,
   TaskWorker,
 } from "../src/worker.js";
 import {
@@ -307,6 +308,70 @@ describe("WorkspaceRuntime", () => {
     await expect(
       runtime.readFile(runId, "link/something"),
     ).rejects.toMatchObject({ code: "unsafe_path" });
+  });
+});
+
+describe("selectRelevantDependencyHandoffs", () => {
+  it("keeps task-relevant dependencies instead of blindly taking the first five", () => {
+    const dependencies = [
+      ...Array.from({ length: 5 }, (_, index) => ({
+        taskId: "task-" + index,
+        planKey: "research-" + index,
+        agentId: "research/generalist",
+        objective: "Collect background notes for the product overview.",
+        output: { summary: "General background and market context." },
+        evidence: [],
+      })),
+      {
+        taskId: "security-review",
+        planKey: "security-review",
+        agentId: "security/security-architect",
+        objective: "Review API security boundaries and authentication risks.",
+        output: { summary: "Security review of API authentication boundaries." },
+        evidence: [],
+      },
+    ];
+
+    const selected = selectRelevantDependencyHandoffs(
+      "Build and verify a secure API",
+      "Review security boundaries and authentication before implementation",
+      dependencies,
+      5,
+    );
+
+    expect(selected.map((dependency) => dependency.taskId)).toContain(
+      "security-review",
+    );
+    expect(selected).toHaveLength(5);
+  });
+
+  it("preserves plan order when dependency relevance scores tie", () => {
+    const dependencies = [
+      {
+        taskId: "first",
+        planKey: "first",
+        agentId: "research/analyst",
+        objective: "Collect unrelated background.",
+        output: {},
+        evidence: [],
+      },
+      {
+        taskId: "second",
+        planKey: "second",
+        agentId: "research/analyst",
+        objective: "Collect unrelated background.",
+        output: {},
+        evidence: [],
+      },
+    ];
+    expect(
+      selectRelevantDependencyHandoffs(
+        "Create an app",
+        "Implement feature",
+        dependencies,
+        1,
+      ).map((dependency) => dependency.taskId),
+    ).toEqual(["first"]);
   });
 });
 
