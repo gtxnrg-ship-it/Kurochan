@@ -347,6 +347,48 @@ describe("WorkspaceRuntime", () => {
     );
   });
 
+  it("replaces exact text only when the expected match count is met", async () => {
+    const root = await mkdtemp(join(tmpdir(), "kuro-workspaces-"));
+    created.push(root);
+    const runtime = new WorkspaceRuntime({ root: resolve(root) });
+    const runId = "2900e9d8-3a3a-46f2-80cb-2ab9afce7f84";
+
+    await runtime.writeFile(
+      runId,
+      "src/app.ts",
+      'const label = "old";\nconst label = "old";\n',
+    );
+    await expect(
+      runtime.replaceText(
+        runId,
+        "src/app.ts",
+        'const label = "old";',
+        'const label = "new";',
+        1,
+      ),
+    ).rejects.toMatchObject({ code: "replacement_count_mismatch" });
+
+    expect((await runtime.readFile(runId, "src/app.ts")).content).toBe(
+      'const label = "old";\nconst label = "old";\n',
+    );
+
+    const changed = await runtime.replaceText(
+      runId,
+      "src/app.ts",
+      'const label = "old";',
+      'const label = "new";',
+      2,
+    );
+    expect(changed).toMatchObject({
+      path: "src/app.ts",
+      matchesReplaced: 2,
+      overwritten: true,
+    });
+    expect((await runtime.readFile(runId, "src/app.ts")).content).toBe(
+      'const label = "new";\nconst label = "new";\n',
+    );
+  });
+
   it("rejects traversal, absolute paths and symbolic links", async () => {
     const root = await mkdtemp(join(tmpdir(), "kuro-workspaces-"));
     created.push(root);
