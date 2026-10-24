@@ -66,6 +66,35 @@ describe("OpenAICompatibleSpeechRuntime", () => {
     expect(JSON.stringify(runtime.status)).not.toContain("stt-test-secret");
   });
 
+  it("does not assume a provider-specific voice when none has been selected", async () => {
+    let sentBody: Record<string, unknown> | undefined;
+    const fetchImpl = vi.fn(
+      async (_input: string | URL | Request, init?: RequestInit) => {
+        sentBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return new Response(new Uint8Array([1, 2, 3]), {
+          status: 200,
+          headers: { "content-type": "audio/mpeg" },
+        });
+      },
+    );
+    const runtime = new OpenAICompatibleSpeechRuntime({
+      synthesis: {
+        baseUrl: "https://speech.example.test/v1",
+        model: "unselected-voice-model",
+      },
+      fetchImpl,
+    });
+
+    expect(runtime.status.synthesis.voice).toBeNull();
+    await runtime.synthesize({ text: "Test speech." });
+    expect(sentBody).toMatchObject({
+      model: "unselected-voice-model",
+      input: "Test speech.",
+      response_format: "mp3",
+    });
+    expect(sentBody).not.toHaveProperty("voice");
+  });
+
   it("synthesizes text into bounded audio bytes without exposing upstream keys", async () => {
     const fetchImpl = vi.fn(
       async (input: string | URL | Request, init?: RequestInit) => {
