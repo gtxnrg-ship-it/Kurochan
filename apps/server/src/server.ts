@@ -24,6 +24,7 @@ import { AgentCatalog } from "@kurochan/agent-catalog";
 import { RunStore, type CreateRunInput } from "@kurochan/storage";
 import {
   CommunitySkillCatalog,
+  listCommunityMcpPresets,
   listCommunityPacks,
   type CommunityPackMode,
   DockerSandboxRuntime,
@@ -1184,6 +1185,44 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         thirdPartyCodeAutoExecuted: false,
         skillInstructionsAreUntrusted: true,
         externalWritesAreNotEnabledByThisCatalog: true,
+      },
+    };
+  });
+
+  app.get("/v1/community-mcp-presets", async (request, reply) => {
+    const query = request.query as Record<string, unknown>;
+    const q = typeof query.q === "string" ? query.q.trim() : "";
+    if (q.length > 200) {
+      return reply.code(400).send({
+        error: {
+          code: "invalid_query",
+          message: "q must not exceed 200 characters.",
+          retryable: false,
+          requestId: request.id,
+        },
+      });
+    }
+    let limit: number;
+    try {
+      limit = parseBoundedInteger(query.limit, q ? 20 : 100, 1, 100);
+    } catch {
+      return reply.code(400).send({
+        error: {
+          code: "invalid_query",
+          message: "limit must be an integer from 1 to 100.",
+          retryable: false,
+          requestId: request.id,
+        },
+      });
+    }
+    const data = listCommunityMcpPresets({ query: q, limit });
+    return {
+      count: data.length,
+      data,
+      security: {
+        secretsReturned: false,
+        configurationIsTemplate: true,
+        serversAreNotAutomaticallyInstalledOrStarted: true,
       },
     };
   });
