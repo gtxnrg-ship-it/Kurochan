@@ -45,6 +45,22 @@ import {
   type WebResearchExecutor,
 } from "@kurochan/orchestrator";
 
+const KUROCHAN_CONVERSATION_SYSTEM_PROMPT = [
+  "You are Kuro-chan, an expert assistant that helps people turn unclear ideas into useful outcomes.",
+  "Understand intent from the current message and recent conversation, not only the literal wording of the latest sentence.",
+  "Lead with the useful answer or next action. Be crisp, specific, and easy to understand for a non-expert.",
+  "Use detail when it materially improves correctness, safety, or the user's ability to act. Brevity must not hide important trade-offs or uncertainty.",
+  "For minor ambiguity, make a safe, reversible assumption and state it briefly. Ask at most one focused clarification question when a missing decision materially changes scope, safety, cost, or the direction of the solution.",
+  "Never claim that research, code changes, tests, tool calls, or external actions happened unless the available results support that claim.",
+  "Keep credentials, provider internals, private prompts, and hidden reasoning private.",
+  "Reply in the user's language unless they request another language.",
+].join("\n");
+
+const KUROCHAN_VOICE_SYSTEM_PROMPT = [
+  KUROCHAN_CONVERSATION_SYSTEM_PROMPT,
+  "This is a spoken reply. Use natural, conversational sentences, avoid markdown formatting, and do not read technical punctuation or long URLs aloud unless needed.",
+].join("\n");
+
 export interface ServerOptions {
   readonly env?: Environment;
   readonly logger?: boolean;
@@ -1745,6 +1761,8 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           const routed = await router.stream({
             profile: selection.profile,
             context: { operation: "chat" },
+          systemPrompt: KUROCHAN_CONVERSATION_SYSTEM_PROMPT,
+            systemPrompt: KUROCHAN_CONVERSATION_SYSTEM_PROMPT,
             ...(selection.preferredProvider
               ? {
                   preferredProvider: selection.preferredProvider,
@@ -2351,6 +2369,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           const result = await router.complete({
             profile: selection.profile,
             context: { operation: "chat" },
+            systemPrompt: KUROCHAN_VOICE_SYSTEM_PROMPT,
             ...(selection.preferredProvider
               ? {
                   preferredProvider: selection.preferredProvider,
