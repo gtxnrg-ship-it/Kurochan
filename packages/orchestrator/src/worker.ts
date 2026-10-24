@@ -251,7 +251,7 @@ const HANDOFF_STOP_WORDS = new Set([
 function handoffTerms(value: string): string[] {
   return [
     ...new Set(
-      (value.toLowerCase().match(/[\\p{L}\\p{N}]{3,}/gu) ?? []).filter(
+      (value.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? []).filter(
         (term) => !HANDOFF_STOP_WORDS.has(term),
       ),
     ),
