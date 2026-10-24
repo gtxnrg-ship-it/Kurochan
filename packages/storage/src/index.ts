@@ -1622,6 +1622,108 @@ export class RunStore {
     return this.getTask(taskId)!;
   }
 
+  consumeExternalWriteApproval(
+    runId: string,
+    taskId: string,
+    workerId: string,
+    expectedAction: Readonly<Record<string, unknown>>,
+    now = Date.now(),
+  ): boolean {
+    assertText(runId, "runId", 200);
+    assertText(taskId, "taskId", 200);
+    assertText(workerId, "workerId", 200);
+    const tx = this.db.transaction(() => {
+      const task = this.db
+        .prepare(
+          "SELECT status,lease_owner FROM tasks WHERE id=? AND run_id=?",
+        )
+        .get(taskId, runId) as
+        | { status: TaskStatus; lease_owner: string | null }
+        | undefined;
+      if (
+        !task ||
+        task.status !== "running" ||
+        task.lease_owner !== workerId
+      ) {
+        return false;
+      }
+
+      const events = this.db
+        .prepare(
+          "SELECT id,type,payload_json FROM run_events WHERE run_id=? AND task_id=? ORDER BY id ASC",
+        )
+        .all(runId, taskId) as Array<{
+        id: number;
+        type: string;
+        payload_json: string;
+      }>;
+      let latestRequest:
+        | { id: number; action: Record<string, unknown> }
+        | undefined;
+      for (const event of events) {
+        if (event.type !== "approval.requested") continue;
+        const payload = JSON.parse(event.payload_json) as {
+          action?: unknown;
+        };
+        const action = payload?.action;
+        if (
+          action &&
+          typeof action === "object" &&
+          !Array.isArray(action) &&
+          (action as Record<string, unknown>).approvalType === "external-write"
+        ) {
+          latestRequest = {
+            id: event.id,
+            action: action as Record<string, unknown>,
+          };
+        }
+      }
+      if (!latestRequest) return false;
+      if (
+        !Object.entries(expectedAction).every(
+          ([key, expected]) => latestRequest!.action[key] === expected,
+        )
+      ) {
+        return false;
+      }
+
+      const decision = events.find(
+        (event) =>
+          event.id > latestRequest!.id &&
+          (event.type === "approval.granted" ||
+            event.type === "approval.denied"),
+      );
+      if (decision?.type !== "approval.granted") return false;
+
+      const alreadyConsumed = events.some((event) => {
+        if (event.type !== "approval.consumed") return false;
+        const payload = JSON.parse(event.payload_json) as {
+          requestEventId?: unknown;
+        };
+        return payload.requestEventId === latestRequest!.id;
+      });
+      if (alreadyConsumed) return false;
+
+      this.addEvent(
+        runId,
+        taskId,
+        "approval.consumed",
+        {
+          approvalType: "external-write",
+          requestEventId: latestRequest.id,
+          action: {
+            mcpServerId: latestRequest.action.mcpServerId,
+            mcpToolName: latestRequest.action.mcpToolName,
+            argumentsHash: latestRequest.action.argumentsHash,
+          },
+        },
+        now,
+      );
+      return true;
+    });
+    return tx.immediate();
+  }
+
   verifyRun(
     runId: string,
     passed: boolean,
