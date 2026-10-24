@@ -383,8 +383,8 @@ export class PlanService {
         this.options.catalog.search(catalogIntent, { limit: 100 }),
         this.options.catalog.search(
           "research planning requirements " + catalogIntent,
-          limit: 100,
-        }),
+          { limit: 100 },
+        ),
         this.options.catalog.listRunbooks(),
         this.options.catalog.readNexusStrategy(8_000),
       ]);
