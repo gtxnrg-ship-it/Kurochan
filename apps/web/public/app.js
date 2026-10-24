@@ -12,6 +12,7 @@ const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const API_BASE_KEY = "kurochan.apiBaseUrl.v1";
 const API_TOKEN_KEY = "kurochan.apiToken.session.v1";
 const TERMINAL = new Set(["completed", "failed", "cancelled"]);
+const runRefreshTimers = new Map();
 const state = {
   view: "chat",
   apiBaseUrl: localStorage.getItem(API_BASE_KEY) || defaultApiBaseUrl(),
@@ -53,6 +54,7 @@ const state = {
   integrationError: "",
   loading: false,
   sending: false,
+  chatAbortController: null,
   transientMessage: "",
   lastError: "",
 };
@@ -466,7 +468,20 @@ function renderChatView(workspace) {
     makeElement("span", "", state.sending ? "Sending…" : "Send"),
     makeElement("span", "send-arrow", "↗"),
   );
-  actions.append(runButton, voiceButton, sendButton);
+  if (state.sending) {
+    const stopButton = makeElement("button", "button button-stop");
+    stopButton.type = "button";
+    stopButton.id = "stop-response";
+    stopButton.setAttribute("aria-label", "Stop the current response");
+    stopButton.append(
+      makeElement("span", "button-icon", "■"),
+      makeElement("span", "", "Stop response"),
+    );
+    stopButton.addEventListener("click", stopChatResponse);
+    actions.append(stopButton);
+  } else {
+    actions.append(runButton, voiceButton, sendButton);
+  }
   toolbar.append(hint, actions);
   composeBox.append(textarea, toolbar);
   compose.append(
@@ -578,17 +593,24 @@ function resizeTextarea() {
   textarea.style.height = Math.min(textarea.scrollHeight, 180) + "px";
 }
 
-async function ensureConversation(firstMessage) {
+async function ensureConversation(firstMessage, { signal } = {}) {
   if (state.currentConversationId) return state.currentConversationId;
   const title =
     String(firstMessage).replace(/\s+/g, " ").trim().slice(0, 64) ||
     "New conversation";
-  const result = await api.createConversation(title);
+  const result = await api.createConversation(title, { signal });
   state.currentConversation = result.conversation;
   state.currentConversationId = result.conversation.id;
   state.messages = [];
   await refreshConversations({ preserveSelection: true });
   return state.currentConversationId;
+}
+
+function stopChatResponse() {
+  const controller = state.chatAbortController;
+  if (!controller || controller.signal.aborted) return;
+  controller.abort();
+  showToast("Stopping the response…");
 }
 
 async function sendMessage() {
@@ -605,10 +627,14 @@ async function sendMessage() {
   }
   state.sending = true;
   state.transientMessage = "";
+  const controller = new AbortController();
+  state.chatAbortController = controller;
   let conversationId;
   let draftAssistant = { role: "assistant", content: "", temporary: true };
   try {
-    conversationId = await ensureConversation(content);
+    conversationId = await ensureConversation(content, {
+      signal: controller.signal,
+    });
     const userDraft = {
       role: "user",
       content,
@@ -625,6 +651,7 @@ async function sendMessage() {
       content,
       model,
       clientMessageId,
+      signal: controller.signal,
       onDelta: (delta) => {
         draftAssistant.content += delta;
         const bubble = $(
@@ -637,16 +664,30 @@ async function sendMessage() {
     });
     await loadConversation(conversationId);
   } catch (error) {
-    state.transientMessage = errorMessage(error);
-    showToast(state.transientMessage, "error");
-    if (conversationId) {
-      try {
-        await loadConversation(conversationId);
-      } catch {
-        /* keep the visible error */
+    const cancelled = controller.signal.aborted || error?.name === "AbortError";
+    if (cancelled) {
+      state.transientMessage = "";
+      showToast("Response stopped. Your message is saved.");
+      if (conversationId) {
+        try {
+          await loadConversation(conversationId);
+        } catch {
+          /* keep the current conversation visible */
+        }
+      }
+    } else {
+      state.transientMessage = errorMessage(error);
+      showToast(state.transientMessage, "error");
+      if (conversationId) {
+        try {
+          await loadConversation(conversationId);
+        } catch {
+          /* keep the visible error */
+        }
       }
     }
   } finally {
+    state.chatAbortController = null;
     state.sending = false;
     renderView();
     void refreshConversations({ preserveSelection: true });
@@ -1121,13 +1162,25 @@ async function refreshRun(id, { quiet = true } = {}) {
   }
 }
 
+function scheduleRunRefresh(id, delay = 320) {
+  if (!id || runRefreshTimers.has(id)) return;
+  const timer = window.setTimeout(() => {
+    runRefreshTimers.delete(id);
+    if (!state.authenticated) return;
+    void refreshRun(id);
+  }, delay);
+  runRefreshTimers.set(id, timer);
+}
+
 function connectRunStream(id) {
   if (!id || state.runStreams.has(id) || !state.authenticated) return;
   const controller = new AbortController();
   state.runStreams.set(id, controller);
   void (async () => {
+    let finished = false;
+    let reconnectAttempts = 0;
+    let reconnectNoticeShown = false;
     try {
-      let finished = false;
       while (!controller.signal.aborted && !finished) {
         try {
           await api.streamRunEvents(id, {
@@ -1138,16 +1191,21 @@ function connectRunStream(id) {
                 state.lastEventIds.set(id, Number(event.id));
               }
               if (event.event === "stream.end") finished = true;
+              if (event.event === "stream.error") {
+                throw new ApiError("The run event stream reported a read error.", {
+                  code: "event_stream_read_failed",
+                  retryable: true,
+                });
+              }
               if (event.data) {
                 try {
                   const payload = JSON.parse(event.data);
-                  if (payload?.status && terminal(payload.status))
-                    finished = true;
+                  if (payload?.status && terminal(payload.status)) finished = true;
                 } catch {
                   /* custom events may carry plain text */
                 }
               }
-              await refreshRun(id);
+              scheduleRunRefresh(id);
               if (state.view !== "runs" && event.event !== "message") {
                 setText(
                   "#pulse-workers-detail",
@@ -1159,24 +1217,29 @@ function connectRunStream(id) {
           await refreshRun(id);
           const run = state.runDetails.get(id)?.run;
           if (terminal(run?.status)) finished = true;
+          reconnectAttempts = 0;
+          reconnectNoticeShown = false;
+          if (!finished && !controller.signal.aborted) await wait(900, controller.signal);
         } catch (error) {
           if (controller.signal.aborted) break;
-          if (!quietStreamError(error))
-            showToast("Live run updates paused. Reconnecting…", "normal");
+          reconnectAttempts += 1;
+          if (!reconnectNoticeShown && !quietStreamError(error)) {
+            showToast("Live updates paused. Reconnecting automatically…");
+            reconnectNoticeShown = true;
+          }
+          const delay =
+            Math.min(30_000, 900 * 2 ** Math.min(reconnectAttempts - 1, 5)) +
+            Math.floor(Math.random() * 250);
+          await wait(delay, controller.signal);
         }
-        if (!finished && !controller.signal.aborted)
-          await wait(1800, controller.signal);
       }
     } finally {
       state.runStreams.delete(id);
       if (state.authenticated) {
+        scheduleRunRefresh(id, 0);
         const detail = state.runDetails.get(id);
-        if (
-          detail &&
-          !terminal(detail.run?.status) &&
-          !controller.signal.aborted
-        ) {
-          window.setTimeout(() => connectRunStream(id), 1200);
+        if (detail && !terminal(detail.run?.status) && !controller.signal.aborted) {
+          window.setTimeout(() => connectRunStream(id), 900);
         }
       }
     }
@@ -1207,6 +1270,8 @@ function wait(milliseconds, signal) {
 function stopAllRunStreams() {
   for (const controller of state.runStreams.values()) controller.abort();
   state.runStreams.clear();
+  for (const timer of runRefreshTimers.values()) window.clearTimeout(timer);
+  runRefreshTimers.clear();
 }
 
 function renderRunsView(workspace) {
@@ -2595,6 +2660,7 @@ function init() {
   });
   window.addEventListener("online", () => void refreshConnection());
   window.addEventListener("beforeunload", () => {
+    state.chatAbortController?.abort();
     stopAllRunStreams();
     stopRecordingTracks();
     for (const url of state.voiceAudioUrls.values()) URL.revokeObjectURL(url);
