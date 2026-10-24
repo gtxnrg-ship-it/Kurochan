@@ -1097,6 +1097,62 @@ describe("TaskWorker", () => {
     }
   });
 
+  it("redacts sensitive provider text before persisting task failures", async () => {
+    const catalogRoot = await fakeCatalogRoot();
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "kuro-workspaces-"));
+    created.push(workspaceRoot);
+    const runId = "a6f7b55f-80a7-4a4d-bd4a-55ccf9ad6781";
+    const store = new RunStore(":memory:");
+    try {
+      store.createRun({
+        id: runId,
+        goal: "Read the specialist profile",
+        profile: "balanced",
+        tasks: [
+          {
+            key: "read-profile",
+            agentId: "engineering/engineering-test-agent",
+            objective: "Read the configured specialist profile.",
+          },
+        ],
+      });
+      const catalog = new AgentCatalog(catalogRoot);
+      vi.spyOn(catalog, "get").mockRejectedValue(
+        new Error(
+          "Provider failed with Bearer ABCDEFGHIJKLMNOPQRSTUVWXYZ and sk-proj-1234567890abcdef",
+        ),
+      );
+      const fakeProvider = provider(
+        async (): Promise<ChatCompletionOutput> => ({
+          providerId: "openrouter",
+          model: "test-model",
+          content: "{}",
+          latencyMs: 1,
+        }),
+      );
+      const router = new OmniRouter({
+        providers: new Map<ProviderId, ChatProvider>([
+          ["openrouter", fakeProvider],
+        ]),
+      });
+      const worker = new TaskWorker({
+        store,
+        catalog,
+        router,
+        workspaceRoot: resolve(workspaceRoot),
+      });
+
+      const result = await worker.runOnce();
+      expect(result.kind).toBe("failed");
+      const task = store.listTasks(runId)[0]!;
+      expect(task.errorMessage).toContain("[REDACTED_SECRET]");
+      expect(task.errorMessage).not.toContain("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+      expect(task.errorMessage).not.toContain("sk-proj-1234567890abcdef");
+    } finally {
+      store.close();
+    }
+  });
+
   it("executes sandbox tools through the injected runtime and records real command evidence", async () => {
     const catalogRoot = await fakeCatalogRoot();
     const workspaceRoot = await mkdtemp(join(tmpdir(), "kuro-workspaces-"));
