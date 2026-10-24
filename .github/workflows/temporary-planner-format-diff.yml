@@ -1,0 +1,29 @@
+name: Temporary planner formatter diff
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  format-diff:
+    if: contains(github.event.head_commit.message, 'Remove deprecated no-op Fastify request logging option')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: pnpm install --frozen-lockfile
+      - name: Show formatter changes for planner test
+        run: |
+          pnpm exec prettier packages/orchestrator/test/planner.test.ts > /tmp/planner.test.ts
+          diff -u packages/orchestrator/test/planner.test.ts /tmp/planner.test.ts || true
