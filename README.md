@@ -1,7 +1,13 @@
 # Kuro-chan
 
+[![CI](https://github.com/gtxnrg-ship-it/Kurochan/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/gtxnrg-ship-it/Kurochan/actions/workflows/ci.yml)
+[![Repository](https://img.shields.io/badge/GitHub-source-181717?logo=github)](https://github.com/gtxnrg-ship-it/Kurochan)
+
 **A mobile-first, tool-using AI workbench powered by a coordinated ecosystem of specialist agents.**
 
+> **Project status:** Active development. The web application source is in [apps/web](https://github.com/gtxnrg-ship-it/Kurochan/tree/main/apps/web), with backend services and orchestration in this repository. **A public hosted demo is not configured yet**, so there is no honest live-app URL to click at this time. You can inspect the source, follow CI, or run it locally using the instructions below.
+
+**Quick links:** [Web app source](https://github.com/gtxnrg-ship-it/Kurochan/tree/main/apps/web) · [Backend source](https://github.com/gtxnrg-ship-it/Kurochan/tree/main/apps/server) · [Worker source](https://github.com/gtxnrg-ship-it/Kurochan/tree/main/apps/worker) · [Architecture and engineering docs](https://github.com/gtxnrg-ship-it/Kurochan/tree/main/docs) · [Issues and progress](https://github.com/gtxnrg-ship-it/Kurochan/issues)
 Kuro-chan is being built from a clean foundation. It aims to turn natural-language goals into researched plans, coordinated specialist work, real tool execution, and verifiable deliverables.
 
 ## Product principles
