@@ -1589,7 +1589,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     try {
       const conversation = store.createConversation({
         ...(parsed.data.title ? { title: parsed.data.title } : {}),
-        createdBy: "local",
+        createdBy: principalId(request),
       });
       return reply.code(201).send({ conversation });
     } catch (error) {
@@ -1625,7 +1625,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         },
       });
     }
-    const data = store.listConversations({ limit, offset, createdBy: "local" });
+    const data = store.listConversations({ limit, offset, createdBy: principalId(request) });
     return {
       data,
       pagination: { limit, offset, returned: data.length },
@@ -1635,7 +1635,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   app.get("/v1/conversations/:conversationId", async (request, reply) => {
     const { conversationId } = request.params as { conversationId: string };
     const conversation = store.getConversation(conversationId);
-    if (!conversation || conversation.createdBy !== "local") {
+    if (!conversation || conversation.createdBy !== principalId(request)) {
       return reply.code(404).send({
         error: {
           code: "conversation_not_found",
@@ -1672,7 +1672,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     async (request, reply) => {
       const { conversationId } = request.params as { conversationId: string };
       const conversation = store.getConversation(conversationId);
-      if (!conversation || conversation.createdBy !== "local") {
+      if (!conversation || conversation.createdBy !== principalId(request)) {
         return reply.code(404).send({
           error: {
             code: "conversation_not_found",
@@ -1719,7 +1719,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   app.delete("/v1/conversations/:conversationId", async (request, reply) => {
     const { conversationId } = request.params as { conversationId: string };
     const conversation = store.getConversation(conversationId);
-    if (!conversation || conversation.createdBy !== "local") {
+    if (!conversation || conversation.createdBy !== principalId(request)) {
       return reply.code(404).send({
         error: {
           code: "conversation_not_found",
@@ -1749,7 +1749,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         });
       }
       const conversation = store.getConversation(conversationId);
-      if (!conversation || conversation.createdBy !== "local") {
+      if (!conversation || conversation.createdBy !== principalId(request)) {
         return reply.code(404).send({
           error: {
             code: "conversation_not_found",
@@ -2168,7 +2168,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         messageId: string;
       };
       const conversation = store.getConversation(conversationId);
-      if (!conversation || conversation.createdBy !== "local") {
+      if (!conversation || conversation.createdBy !== principalId(request)) {
         return reply.code(404).send({
           error: {
             code: "conversation_not_found",
@@ -2204,7 +2204,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     async (request, reply) => {
       const { conversationId } = request.params as { conversationId: string };
       const conversation = store.getConversation(conversationId);
-      if (!conversation || conversation.createdBy !== "local") {
+      if (!conversation || conversation.createdBy !== principalId(request)) {
         return reply.code(404).send({
           error: {
             code: "conversation_not_found",
@@ -2732,7 +2732,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       });
     }
     const conversation = store.getConversation(conversationId);
-    if (!conversation || conversation.createdBy !== "local") {
+    if (!conversation || conversation.createdBy !== principalId(request)) {
       return reply.code(404).send({
         error: {
           code: "conversation_not_found",
@@ -2807,7 +2807,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       const run = store.createRun({
         goal: parsed.data.goal,
         profile: parsed.data.profile,
-        createdBy: "local",
+        createdBy: principalId(request),
         tasks: plan.tasks,
         plan: {
           intent: plan.intent,
@@ -2955,7 +2955,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       });
     }
     try {
-      const run = store.createRun(parsed.data as CreateRunInput);
+      const run = store.createRun({ ...parsed.data, createdBy: principalId(request) } as CreateRunInput);
       return reply.code(201).send({
         run,
         tasks: store.listTasks(run.id),
@@ -3035,7 +3035,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         goal: parsed.data.goal,
         profile: parsed.data.profile,
         tasks: plan.tasks,
-        ...(parsed.data.createdBy ? { createdBy: parsed.data.createdBy } : {}),
+        createdBy: principalId(request),
         plan: {
           intent: plan.intent,
           summary: plan.summary,
@@ -3138,7 +3138,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         },
       });
     try {
-      return { data: store.listRuns(limit, before) };
+      return { data: store.listRuns(limit, before, principalId(request)) };
     } catch {
       return reply.code(400).send({
         error: {
@@ -3153,7 +3153,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   app.get("/v1/runs/:runId", async (request, reply) => {
     const { runId } = request.params as { runId: string };
     const run = store.getRun(runId);
-    if (!run)
+    if (!ownsRun(run, principalId(request)))
       return reply.code(404).send({
         error: {
           code: "run_not_found",
@@ -3171,7 +3171,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
 
   app.get("/v1/runs/:runId/artifacts", async (request, reply) => {
     const { runId } = request.params as { runId: string };
-    if (!store.getRun(runId)) {
+    if (!ownsRun(store.getRun(runId), principalId(request))) {
       return reply.code(404).send({
         error: {
           code: "run_not_found",
@@ -3198,7 +3198,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     const { runId } = request.params as { runId: string };
     const query = request.query as Record<string, unknown>;
     const path = typeof query.path === "string" ? query.path : "";
-    if (!store.getRun(runId)) {
+    if (!ownsRun(store.getRun(runId), principalId(request))) {
       return reply.code(404).send({
         error: {
           code: "run_not_found",
@@ -3239,7 +3239,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
 
   app.get("/v1/runs/:runId/events", async (request, reply) => {
     const { runId } = request.params as { runId: string };
-    if (!store.getRun(runId))
+    if (!ownsRun(store.getRun(runId), principalId(request)))
       return reply.code(404).send({
         error: {
           code: "run_not_found",
@@ -3278,7 +3278,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   app.get("/v1/runs/:runId/events/stream", async (request, reply) => {
     const { runId } = request.params as { runId: string };
     const initialRun = store.getRun(runId);
-    if (!initialRun) {
+    if (!ownsRun(initialRun, principalId(request))) {
       return reply.code(404).send({
         error: {
           code: "run_not_found",
@@ -3456,6 +3456,16 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           retryable: false,
         },
       });
+    if (!ownsRun(store.getRun(runId), principalId(request))) {
+      return reply.code(404).send({
+        error: {
+          code: "run_not_found",
+          message: "Run not found.",
+          retryable: false,
+          requestId: request.id,
+        },
+      });
+    }
     try {
       const run = store.cancelRun(runId, body.data.reason);
       worker.cancelRun(runId);
@@ -3491,6 +3501,16 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           retryable: false,
         },
       });
+    if (!ownsRun(store.getRun(runId), principalId(request))) {
+      return reply.code(404).send({
+        error: {
+          code: "run_not_found",
+          message: "Run not found.",
+          retryable: false,
+          requestId: request.id,
+        },
+      });
+    }
     try {
       return {
         task: store.resolveTaskApproval(
