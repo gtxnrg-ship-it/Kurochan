@@ -280,7 +280,9 @@ function rankCatalogAgents(
 }
 
 function safeAgentDescription(profile: AgentProfile): string {
-  const description = profile.description.slice(0, 600);
+  // Planning needs enough metadata to route the task, not the full profile.
+  // The worker loads the selected specialist's full pinned instructions later.
+  const description = profile.description.slice(0, 320);
   const lower = description.toLowerCase();
   return FORBIDDEN_AGENT_INSTRUCTIONS.some((phrase) => lower.includes(phrase))
     ? "Specialist profile (description omitted by the plan safety filter)."
@@ -452,7 +454,7 @@ export class PlanService {
       name: agent.name,
       division: agent.division,
       description: safeAgentDescription(agent),
-      tools: agent.tools.slice(0, 12),
+      tools: agent.tools.slice(0, 8),
     }));
 
     const systemPrompt = [
