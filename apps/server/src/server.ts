@@ -31,6 +31,7 @@ import {
   GitHubProjectRuntime,
   McpToolRuntime,
   PlanError,
+  redactMcpSensitiveValues,
   PlanService,
   TaskWorker,
   WorkspaceRuntime,
@@ -2978,7 +2979,13 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         },
       });
     }
-    return { data: store.listEvents(runId, afterId, limit) };
+    const events = store.listEvents(runId, afterId, limit);
+    return {
+      data: events.map((event) => ({
+        ...event,
+        payload: redactMcpSensitiveValues(event.payload),
+      })),
+    };
   });
 
   // Keep a per-server cap so a large number of idle SSE clients cannot exhaust
@@ -3102,7 +3109,10 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
                 "\nevent: " +
                 eventName +
                 "\ndata: " +
-                JSON.stringify(event) +
+                JSON.stringify({
+                  ...event,
+                  payload: redactMcpSensitiveValues(event.payload),
+                }) +
                 "\n\n";
             }
 
@@ -3112,6 +3122,16 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
                 latestRun &&
                 ["completed", "failed", "cancelled"].includes(latestRun.status)
               ) {
+                let hasPendingEvents = true;
+                try {
+                  hasPendingEvents = store.listEvents(runId, cursor, 1).length > 0;
+                } catch {
+                  // Do not announce completion if the event cursor cannot be checked.
+                }
+                if (hasPendingEvents) {
+                  await waitForPoll();
+                  continue;
+                }
                 yield "event: stream.end\ndata: " +
                   JSON.stringify({
                     runId,
