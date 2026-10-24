@@ -200,13 +200,11 @@ describe("PlanService", () => {
     const unseen: AgentProfile = {
       id: "security/security-architect",
       name: "Security Architect",
-      description: "Threat modeling, security review, and secure system design. ".repeat(
-        30,
-      ),
+      description: "Security architecture and threat modeling. ".repeat(30),
       division: "security",
       sourcePath: "security/security-architect.md",
       sourceSha256: "d".repeat(64),
-      tools: Array.from({ length: 20 }, (_, index) => "security-tool-" + index),
+      tools: Array.from({ length: 20 }, (_, index) => `security-tool-${index}`),
     };
     const catalog = fakeCatalog();
     vi.mocked(catalog.list).mockResolvedValue([...candidates, unseen]);
