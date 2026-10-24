@@ -257,14 +257,56 @@ function withMcpDeadline<T>(
   });
 }
 
+const SENSITIVE_MCP_FIELD =
+  /authorization|cookie|password|passwd|secret|api.?key|access.?token|refresh.?token|id.?token|client.?secret|private.?key|credential/i;
+const SENSITIVE_MCP_VALUE_PATTERNS = [
+  /\\bBearer\\s+[A-Za-z0-9._~+/-]{16,}=?/gi,
+  /\\b(?:gh[pousr]|github_pat)_[A-Za-z0-9_]{12,}\\b/g,
+  /\\bsk-(?:proj-|ant-)?[A-Za-z0-9_-]{16,}\\b/g,
+  /\\bAIza[0-9A-Za-z_-]{35}\\b/g,
+  /\\beyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\b/g,
+];
+
+export function redactMcpSensitiveValues(
+  value: unknown,
+  depth = 0,
+): unknown {
+  if (depth > 32) return "[REDACTED: maximum nesting depth]";
+  if (typeof value === "string") {
+    return SENSITIVE_MCP_VALUE_PATTERNS.reduce(
+      (current, pattern) => current.replace(pattern, "[REDACTED_SECRET]"),
+      value,
+    );
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => redactMcpSensitiveValues(item, depth + 1));
+  }
+  if (value && typeof value === "object") {
+    const result: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value)) {
+      result[key] = SENSITIVE_MCP_FIELD.test(key)
+        ? "[REDACTED_SECRET]"
+        : redactMcpSensitiveValues(item, depth + 1);
+    }
+    return result;
+  }
+  return value;
+}
+
 function safeJson(value: unknown, maxCharacters: number): unknown {
-  let serialized: string;
+  let serialized: string | undefined;
   try {
     serialized = JSON.stringify(value);
   } catch {
     throw new McpToolError(
       "invalid_result",
       "MCP tool returned a non-serializable result.",
+    );
+  }
+  if (typeof serialized !== "string") {
+    throw new McpToolError(
+      "invalid_result",
+      "MCP tool returned a value that cannot be represented as JSON.",
     );
   }
   if (serialized.length > maxCharacters) {
@@ -586,7 +628,9 @@ export class McpToolRuntime {
         this.timeoutMs,
         signal,
       );
-      const safeResult = safeJson(result, this.maxResultCharacters);
+      const safeResult = redactMcpSensitiveValues(
+        safeJson(result, this.maxResultCharacters),
+      );
       state.lastUsedAt = Date.now();
       state.lastError = undefined;
       this.connectionErrors.delete(config.id);
