@@ -1,12 +1,14 @@
 # Kuro-chan
 
+**[🚀 Open the frontend preview](https://gtxnrg-ship-it.github.io/Kurochan/?preview=1)** · [Run it locally](#run-the-workbench-locally) · [Frontend guide](apps/web/README.md) · [Repository](https://github.com/gtxnrg-ship-it/Kurochan)
+
 **A mobile-first AI workbench for turning rough ideas into coordinated, verifiable work.**
 
 [![CI](https://github.com/gtxnrg-ship-it/Kurochan/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/gtxnrg-ship-it/Kurochan/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-backend%20%2B%20web-blue)](https://github.com/gtxnrg-ship-it/Kurochan)
 
-> **Status: active development.** The repository contains backend services and an installable web workbench. A public hosted demo is not deployed yet, and there is no native Android/iOS package in this repository. A real provider, speech, and device workflow still needs deployment-specific credentials and end-to-end verification.
+> **Status: active development.** The GitHub Pages preview is a static frontend showcase, not a hosted Kuro-chan API: chat responses are explicitly simulated in preview mode, integrations show catalog/setup information, and no provider credentials are embedded. To use real inference, run the API and worker using the local setup below. This repository does not contain a native Android/iOS package.
 
 ## What Kuro-chan is
 
