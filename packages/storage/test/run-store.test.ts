@@ -927,4 +927,21 @@ describe("RunStore", () => {
       store.close();
     }
   });
+  it("revokes OAuth sessions until expiry and ignores expired revocations", () => {
+    const store = makeStore();
+    try {
+      store.revokeOAuthSession("session-1", "github:123", 500, 100);
+      expect(store.isOAuthSessionRevoked("session-1", 101)).toBe(true);
+      expect(store.isOAuthSessionRevoked("session-1", 499)).toBe(true);
+      expect(store.isOAuthSessionRevoked("session-1", 500)).toBe(false);
+
+      store.revokeOAuthSession("session-2", "google:456", 120, 100);
+      expect(store.isOAuthSessionRevoked("session-2", 121)).toBe(false);
+      store.revokeOAuthSession("already-expired", "github:789", 100, 100);
+      expect(store.isOAuthSessionRevoked("already-expired", 100)).toBe(false);
+    } finally {
+      store.close();
+    }
+  });
+
 });
