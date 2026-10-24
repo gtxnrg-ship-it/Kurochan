@@ -1515,7 +1515,8 @@ describe("Kuro-chan API", () => {
 
   it("asks one blocking clarification without creating an executable run", async () => {
     const store = new RunStore(":memory:");
-    const question = "Should the first version be a web app or a native mobile app?";
+    const question =
+      "Should the first version be a web app or a native mobile app?";
     const planner = {
       createPlan: vi.fn(async () => ({
         intent: "Build a lightweight study-planning app.",
