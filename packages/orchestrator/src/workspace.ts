@@ -218,8 +218,12 @@ export class WorkspaceRuntime {
         case "workspace.read_file": {
           const args = ReadFileSchema.parse(call.arguments);
           result = await this.readFileRange(runId, args.path, {
-            ...(args.startLine === undefined ? {} : { startLine: args.startLine }),
-            ...(args.endLine === undefined ? {} : { endLine: args.endLine }),
+            ...(args.startLine === undefined
+              ? {}
+              : { startLine: args.startLine }),
+            ...(args.endLine === undefined
+              ? {}
+              : { endLine: args.endLine }),
             maxCharacters: args.maxCharacters,
           });
           break;
@@ -390,7 +394,9 @@ export class WorkspaceRuntime {
       maxCharacters < 1_000 ||
       maxCharacters > 50_000 ||
       (endLine !== undefined &&
-        (!Number.isInteger(endLine) || endLine < startLine || endLine > 1_000_000))
+        (!Number.isInteger(endLine) ||
+          endLine < startLine ||
+          endLine > 1_000_000))
     ) {
       throw new WorkspaceToolError(
         "invalid_line_range",
@@ -401,9 +407,10 @@ export class WorkspaceRuntime {
     const file = await this.readFile(runId, relativePath);
     const lines = file.content.split(/\r?\n/);
     const requestedEnd = Math.min(endLine ?? lines.length, lines.length);
-    const selected = startLine > lines.length
-      ? ""
-      : lines.slice(startLine - 1, requestedEnd).join("\n");
+    const selected =
+      startLine > lines.length
+        ? ""
+        : lines.slice(startLine - 1, requestedEnd).join("\n");
     const truncated = selected.length > maxCharacters;
     const content = truncated
       ? selected.slice(0, maxCharacters)

@@ -7,7 +7,11 @@ import { WorkspaceRuntime } from "../src/workspace.js";
 const roots: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  await Promise.all(
+    roots
+      .splice(0)
+      .map((root) => rm(root, { recursive: true, force: true })),
+  );
 });
 
 async function createWorkspace() {
@@ -22,10 +26,19 @@ async function createWorkspace() {
 describe("workspace editing tools", () => {
   it("reads a bounded, line-numbered file range", async () => {
     const { runtime, runId } = await createWorkspace();
-    await runtime.writeFile(runId, "src/app.ts", "first\nsecond\nthird\nfourth\n");
+    await runtime.writeFile(
+      runId,
+      "src/app.ts",
+      "first\nsecond\nthird\nfourth\n",
+    );
     const result = await runtime.execute(runId, {
       name: "workspace.read_file",
-      arguments: { path: "src/app.ts", startLine: 2, endLine: 3, maxCharacters: 1000 },
+      arguments: {
+        path: "src/app.ts",
+        startLine: 2,
+        endLine: 3,
+        maxCharacters: 1000,
+      },
     });
     expect(result).toMatchObject({
       ok: true,
@@ -40,7 +53,9 @@ describe("workspace editing tools", () => {
     });
   });
 
-  it("only replaces text when the expected exact-match count agrees", async () => {
+  it(
+    "only replaces text when the expected exact-match count agrees",
+    async () => {
     const { runtime, runId } = await createWorkspace();
     await runtime.writeFile(runId, "src/app.css", ".button { color: red; }\n");
     const mismatch = await runtime.execute(runId, {
@@ -56,7 +71,9 @@ describe("workspace editing tools", () => {
       ok: false,
       error: { code: "replacement_count_mismatch" },
     });
-    expect((await runtime.readFile(runId, "src/app.css")).content).toContain("color: red;");
+    expect(
+      (await runtime.readFile(runId, "src/app.css")).content,
+    ).toContain("color: red;");
 
     const replaced = await runtime.execute(runId, {
       name: "workspace.replace_text",
@@ -71,6 +88,9 @@ describe("workspace editing tools", () => {
       ok: true,
       result: { matchesReplaced: 1, overwritten: true },
     });
-    expect((await runtime.readFile(runId, "src/app.css")).content).toContain("color: blue;");
-  });
+    expect(
+      (await runtime.readFile(runId, "src/app.css")).content,
+    ).toContain("color: blue;");
+    },
+  );
 });
