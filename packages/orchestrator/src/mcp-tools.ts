@@ -1,9 +1,13 @@
 import { isAbsolute, resolve } from "node:path";
+import { createRequire } from "node:module";
 import { Ajv } from "ajv";
 import { Ajv2019 } from "ajv/dist/2019.js";
 import { Ajv2020 } from "ajv/dist/2020.js";
-import * as AjvFormats from "ajv-formats";
-const addFormats = AjvFormats.default;
+const require = createRequire(import.meta.url);
+const addFormats = require("ajv-formats") as (
+  engine: Ajv,
+  options?: { mode: "fast" },
+) => unknown;
 import type { ValidateFunction } from "ajv";
 import { z } from "zod";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
