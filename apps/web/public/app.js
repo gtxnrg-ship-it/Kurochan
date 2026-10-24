@@ -1091,6 +1091,7 @@ async function startCoordinatedRun() {
       conversationId,
       goal,
       selectedRouteProfile(),
+      { model: selectedChatModel() },
     );
     if (result.status === "clarification_required" || result.clarification) {
       const question =
