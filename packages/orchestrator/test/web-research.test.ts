@@ -132,9 +132,9 @@ describe("WebResearchRuntime", () => {
     expect(requested.searchParams.get("maximum_number_of_tokens")).toBe(
       "12288",
     );
-    expect(requested.searchParams.get("maximum_number_of_tokens_per_url")).toBe(
-      "2048",
-    );
+    expect(
+      requested.searchParams.get("maximum_number_of_tokens_per_url"),
+    ).toBe("2048");
     expect(requested.searchParams.get("maximum_number_of_snippets")).toBe("72");
     expect(
       requested.searchParams.get("maximum_number_of_snippets_per_url"),
