@@ -80,6 +80,135 @@ describe("RunStore", () => {
     }
   });
 
+  it("persists plan metadata and lease-fenced progress with safe source URLs", () => {
+    const store = makeStore();
+    try {
+      const run = store.createRun(
+        {
+          goal: "Research and build a verified deliverable",
+          profile: "balanced",
+          plan: {
+            intent: "Build the deliverable using source-backed research.",
+            summary: "Research first, implement second, then verify.",
+            assumptions: ["Use the existing project conventions."],
+            selectedAgents: [
+              {
+                id: "research/research-analyst",
+                name: "Research Analyst",
+                division: "Research",
+              },
+            ],
+            provider: {
+              id: "openrouter",
+              model: "test-model",
+              latencyMs: 42,
+            },
+          },
+          tasks: [
+            {
+              key: "research",
+              agentId: "research/research-analyst",
+              objective: "Gather source-backed findings.",
+            },
+          ],
+        },
+        1_000,
+      );
+      const planEvent = store
+        .listEvents(run.id)
+        .find((event) => event.type === "run.plan_created");
+      expect(planEvent?.payload).toMatchObject({
+        plan: {
+          intent: "Build the deliverable using source-backed research.",
+          selectedAgents: [{ id: "research/research-analyst" }],
+        },
+        taskGraph: [
+          {
+            key: "research",
+            agentId: "research/research-analyst",
+            dependencies: [],
+          },
+        ],
+      });
+
+      const task = store.claimNextTask("worker-a", {
+        now: 1_001,
+        leaseMs: 5_000,
+      })!;
+      store.recordTaskProgress(
+        {
+          runId: run.id,
+          taskId: task.id,
+          workerId: "worker-a",
+          stage: "tool_completed",
+          message: "Search returned a source reference.",
+          round: 1,
+          toolName: "web.search",
+          sources: [
+            {
+              kind: "web_source",
+              summary: "Official documentation",
+              uri: "https://example.com/docs?access_token=super-secret",
+            },
+            {
+              kind: "web_source",
+              summary: "Unsafe scheme must be discarded",
+              uri: "javascript:alert(1)",
+            },
+          ],
+        },
+        1_002,
+      );
+      const progressEvent = store
+        .listEvents(run.id)
+        .find((event) => event.type === "task.progress");
+      expect(progressEvent?.payload).toMatchObject({
+        stage: "tool_completed",
+        toolName: "web.search",
+        sources: [
+          {
+            kind: "web_source",
+            summary: "Official documentation",
+            uri: "https://example.com/docs",
+          },
+          {
+            kind: "web_source",
+            summary: "Unsafe scheme must be discarded",
+          },
+        ],
+      });
+      expect(JSON.stringify(progressEvent?.payload)).not.toContain(
+        "super-secret",
+      );
+      expect(() =>
+        store.recordTaskProgress(
+          {
+            runId: run.id,
+            taskId: task.id,
+            workerId: "worker-b",
+            stage: "thinking",
+            message: "Trying to report as another worker.",
+          },
+          1_003,
+        ),
+      ).toThrow(/lease/);
+      expect(() =>
+        store.recordTaskProgress(
+          {
+            runId: run.id,
+            taskId: task.id,
+            workerId: "worker-a",
+            stage: "thinking",
+            message: "Lease has expired.",
+          },
+          6_001,
+        ),
+      ).toThrow(/lease/);
+    } finally {
+      store.close();
+    }
+  });
+
   it("rejects cyclic and unknown task dependencies", () => {
     const store = makeStore();
     try {
