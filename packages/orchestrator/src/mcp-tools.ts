@@ -77,7 +77,11 @@ type RawMcpTool = {
 export interface McpClientAdapter {
   connect(): Promise<void>;
   listTools(): Promise<{ readonly tools: readonly RawMcpTool[] }>;
-  callTool(name: string, arguments_: Record<string, unknown>): Promise<unknown>;
+  callTool(
+    name: string,
+    arguments_: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<unknown>;
   close(): Promise<void>;
 }
 
@@ -200,20 +204,30 @@ function withMcpDeadlineAndAbort<T>(
   promise: Promise<T>,
   timeoutMs: number,
   signal?: AbortSignal,
+  onCancel?: () => void,
 ): Promise<T> {
   return new Promise<T>((resolveResult, rejectResult) => {
+    const cancelUnderlyingRequest = () => {
+      try {
+        onCancel?.();
+      } catch {
+        // Cancellation is best-effort; preserve the caller's timeout/abort error.
+      }
+    };
     const cleanup = () => {
       clearTimeout(timer);
       signal?.removeEventListener("abort", onAbort);
     };
     const onAbort = () => {
       cleanup();
+      cancelUnderlyingRequest();
       rejectResult(
         new McpToolError("cancelled", "MCP tool call was cancelled.", true),
       );
     };
     const timer = setTimeout(() => {
       cleanup();
+      cancelUnderlyingRequest();
       rejectResult(
         new McpToolError(
           "mcp_timeout",
@@ -887,8 +901,12 @@ function createSdkAdapter(
       const response = await client.listTools();
       return { tools: response.tools as RawMcpTool[] };
     },
-    callTool: (name, arguments_) =>
-      client.callTool({ name, arguments: arguments_ }),
+    callTool: (name, arguments_, signal) =>
+      signal
+        ? client.callTool({ name, arguments: arguments_ }, undefined, {
+            signal,
+          })
+        : client.callTool({ name, arguments: arguments_ }),
     close: () => client.close(),
   };
 }
@@ -1134,14 +1152,17 @@ export class McpToolRuntime {
     }
     try {
       const state = await this.getState(config);
+      const callController = new AbortController();
       const pending = state.client.callTool(
         parsed.data.toolName,
         parsed.data.arguments,
+        callController.signal,
       );
       const result = await withMcpDeadlineAndAbort(
         pending,
         this.timeoutMs,
         signal,
+        () => callController.abort(),
       );
       const safeResult = redactMcpSensitiveValues(
         safeJson(result, this.maxResultCharacters),

@@ -27,6 +27,7 @@ function adapter(
   callTool: (
     name: string,
     args: Record<string, unknown>,
+    signal?: AbortSignal,
   ) => Promise<unknown> = async (name, args) => ({
     isError: false,
     content: [{ type: "text", text: name + ":" + JSON.stringify(args) }],
@@ -167,11 +168,58 @@ describe("McpToolRuntime", () => {
         content: [{ text: 'search_records:{"query":"billing"}' }],
       },
     });
-    expect(client.callTool).toHaveBeenCalledWith("search_records", {
-      query: "billing",
-    });
+    expect(client.callTool.mock.calls[0]?.slice(0, 2)).toEqual([
+      "search_records",
+      { query: "billing" },
+    ]);
+    expect(client.callTool.mock.calls[0]?.[2]).toBeInstanceOf(AbortSignal);
     await runtime.close();
     expect(client.close).toHaveBeenCalledOnce();
+  });
+
+  it("propagates caller cancellation to an in-flight MCP tool call", async () => {
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    let observedSignal: AbortSignal | undefined;
+    const client = adapter([readonlyTool], async (_name, _args, signal) => {
+      observedSignal = signal;
+      markStarted();
+      return await new Promise<unknown>((_resolve, reject) => {
+        const rejectIfAborted = () => reject(new Error("MCP call aborted."));
+        if (signal?.aborted) {
+          rejectIfAborted();
+          return;
+        }
+        signal?.addEventListener("abort", rejectIfAborted, { once: true });
+      });
+    });
+    const runtime = new McpToolRuntime({
+      servers: [serverConfig],
+      connectorFactory: () => client,
+      timeoutMs: 10_000,
+    });
+    const abort = new AbortController();
+
+    const pending = runtime.execute(
+      {
+        serverId: "records",
+        toolName: "search_records",
+        arguments: { query: "unfinished request" },
+      },
+      abort.signal,
+    );
+    await started;
+    abort.abort();
+
+    await expect(pending).resolves.toMatchObject({
+      name: "mcp.call",
+      ok: false,
+      error: { code: "cancelled" },
+    });
+    expect(observedSignal?.aborted).toBe(true);
+    await runtime.close();
   });
 
   it("redacts credential fields and token-shaped strings from tool results", async () => {
