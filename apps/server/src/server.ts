@@ -122,7 +122,8 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     options.store ??
     new RunStore(env.KUROCHAN_DB_PATH?.trim() || "data/kurochan.sqlite");
   const catalog = options.catalog ?? new AgentCatalog();
-  const communitySkills = options.communitySkills ?? new CommunitySkillCatalog();
+  const communitySkills =
+    options.communitySkills ?? new CommunitySkillCatalog();
   const mcpTools = options.mcpTools ?? McpToolRuntime.fromEnvironment(env);
   const speech =
     options.speech ??

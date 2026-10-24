@@ -406,7 +406,8 @@ export class TaskWorker {
     this.tools = new WorkspaceRuntime({ root: options.workspaceRoot });
     this.researchTools = new GitHubResearchRuntime();
     this.webResearch = options.webResearch ?? new WebResearchRuntime();
-    this.communitySkills = options.communitySkills ?? new CommunitySkillCatalog();
+    this.communitySkills =
+      options.communitySkills ?? new CommunitySkillCatalog();
     this.leaseMs = options.leaseMs ?? 120_000;
     this.pollIntervalMs = options.pollIntervalMs ?? 1000;
     this.maxToolRounds = options.maxToolRounds ?? 6;
@@ -847,7 +848,16 @@ export class TaskWorker {
           },
           completedDependencies: dependencyResults,
           communitySkills: supplementalSkills.map(
-            ({ id, packId, packName, name, description, repository, pinnedRevision, content }) => ({
+            ({
+              id,
+              packId,
+              packName,
+              name,
+              description,
+              repository,
+              pinnedRevision,
+              content,
+            }) => ({
               id,
               packId,
               packName,

@@ -89,32 +89,38 @@ describe("Kuro-chan API", () => {
   });
 
   it("searches community skill metadata without returning instruction bodies", async () => {
-    const root = await import("node:fs/promises").then(({ mkdtemp, mkdir, writeFile }) =>
-      mkdtemp("/tmp/kuro-community-api-").then(async (path) => {
-        const skill = path + "/vendor/community/superpowers/skills/debugging/SKILL.md";
-        await mkdir(skill.slice(0, skill.lastIndexOf("/")), { recursive: true });
-        await writeFile(
-          skill,
-          [
-            "---",
-            "name: Systematic Debugging",
-            "description: Debugging and root-cause analysis.",
-            "---",
-            "# Systematic Debugging",
-            "",
-            "Never expose this body in the metadata endpoint.",
-          ].join("\n"),
-          "utf8",
-        );
-        return { path, skill };
-      }),
+    const root = await import("node:fs/promises").then(
+      ({ mkdtemp, mkdir, writeFile }) =>
+        mkdtemp("/tmp/kuro-community-api-").then(async (path) => {
+          const skill =
+            path + "/vendor/community/superpowers/skills/debugging/SKILL.md";
+          await mkdir(skill.slice(0, skill.lastIndexOf("/")), {
+            recursive: true,
+          });
+          await writeFile(
+            skill,
+            [
+              "---",
+              "name: Systematic Debugging",
+              "description: Debugging and root-cause analysis.",
+              "---",
+              "# Systematic Debugging",
+              "",
+              "Never expose this body in the metadata endpoint.",
+            ].join("\n"),
+            "utf8",
+          );
+          return { path, skill };
+        }),
     );
     try {
       app = buildServer({
         env: {},
         logger: false,
         store: new RunStore(":memory:"),
-        communitySkills: new CommunitySkillCatalog({ repositoryRoot: root.path }),
+        communitySkills: new CommunitySkillCatalog({
+          repositoryRoot: root.path,
+        }),
       });
       const response = await app.inject({
         method: "GET",
@@ -123,7 +129,10 @@ describe("Kuro-chan API", () => {
       expect(response.statusCode).toBe(200);
       expect(response.body).not.toContain("Never expose this body");
       expect(response.json().data).toContainEqual(
-        expect.objectContaining({ name: "Systematic Debugging", packId: "superpowers" }),
+        expect.objectContaining({
+          name: "Systematic Debugging",
+          packId: "superpowers",
+        }),
       );
     } finally {
       const { rm } = await import("node:fs/promises");

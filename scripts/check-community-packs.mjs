@@ -36,9 +36,13 @@ for (const source of sources) {
     );
     process.exit(1);
   }
-  const current = execFileSync("git", ["-C", source.path, "rev-parse", "HEAD"], {
-    encoding: "utf8",
-  }).trim();
+  const current = execFileSync(
+    "git",
+    ["-C", source.path, "rev-parse", "HEAD"],
+    {
+      encoding: "utf8",
+    },
+  ).trim();
   if (current !== source.commit) {
     console.error(
       "Community skill pin mismatch at " +
@@ -57,4 +61,6 @@ for (const source of sources) {
     process.exit(1);
   }
 }
-console.log("Community skill source pins, sample files, and MIT license text verified.");
+console.log(
+  "Community skill source pins, sample files, and MIT license text verified.",
+);

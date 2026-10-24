@@ -27,12 +27,7 @@ function contextResponse() {
       [url]: {
         title: "Official Guide",
         hostname: "docs.example.dev",
-        age: [
-          "2026-10-20",
-          "2026-10-20",
-          "3 days ago",
-          "x".repeat(500),
-        ],
+        age: ["2026-10-20", "2026-10-20", "3 days ago", "x".repeat(500)],
       },
     },
   };
@@ -132,9 +127,9 @@ describe("WebResearchRuntime", () => {
     expect(requested.searchParams.get("maximum_number_of_tokens")).toBe(
       "12288",
     );
-    expect(
-      requested.searchParams.get("maximum_number_of_tokens_per_url"),
-    ).toBe("2048");
+    expect(requested.searchParams.get("maximum_number_of_tokens_per_url")).toBe(
+      "2048",
+    );
     expect(requested.searchParams.get("maximum_number_of_snippets")).toBe("72");
     expect(
       requested.searchParams.get("maximum_number_of_snippets_per_url"),

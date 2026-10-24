@@ -2,13 +2,18 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { CommunitySkillCatalog, listCommunityPacks } from "../src/community-packs.js";
+import {
+  CommunitySkillCatalog,
+  listCommunityPacks,
+} from "../src/community-packs.js";
 
 const temporaryRoots: string[] = [];
 
 afterEach(async () => {
   await Promise.all(
-    temporaryRoots.splice(0).map((path) => rm(path, { recursive: true, force: true })),
+    temporaryRoots
+      .splice(0)
+      .map((path) => rm(path, { recursive: true, force: true })),
   );
 });
 
@@ -16,11 +21,19 @@ describe("community pack registry", () => {
   it("lists pinned repositories with explicit license and integration states", () => {
     const packs = listCommunityPacks();
     expect(packs).toHaveLength(16);
-    expect(packs.every((pack) => /^[a-f0-9]{40}$/.test(pack.pinnedRevision))).toBe(true);
-    expect(listCommunityPacks({ query: "debugging" }).length).toBeGreaterThan(0);
+    expect(
+      packs.every((pack) => /^[a-f0-9]{40}$/.test(pack.pinnedRevision)),
+    ).toBe(true);
+    expect(listCommunityPacks({ query: "debugging" }).length).toBeGreaterThan(
+      0,
+    );
     expect(listCommunityPacks({ mode: "vendored-skill-pack" })).toHaveLength(4);
-    expect(listCommunityPacks({ mode: "license-review-required" })).toHaveLength(1);
-    expect(() => listCommunityPacks({ limit: 0 })).toThrow("Community pack limit");
+    expect(
+      listCommunityPacks({ mode: "license-review-required" }),
+    ).toHaveLength(1);
+    expect(() => listCommunityPacks({ limit: 0 })).toThrow(
+      "Community pack limit",
+    );
     expect(() => listCommunityPacks({ mode: "unknown" as never })).toThrow(
       "Community pack mode",
     );
@@ -76,10 +89,12 @@ describe("community pack registry", () => {
     temporaryRoots.push(root);
     const catalog = new CommunitySkillCatalog({ repositoryRoot: root });
     expect(await catalog.selectForTask("debug an issue")).toEqual([]);
-    expect((await catalog.status()).every((item) => !item.available)).toBe(true);
-    await expect(catalog.selectForTask("debug", { maxSkills: 10 })).rejects.toThrow(
-      "selection limit",
+    expect((await catalog.status()).every((item) => !item.available)).toBe(
+      true,
     );
+    await expect(
+      catalog.selectForTask("debug", { maxSkills: 10 }),
+    ).rejects.toThrow("selection limit");
     await expect(catalog.search("")).rejects.toThrow("Community skill query");
   });
 });

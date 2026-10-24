@@ -33,9 +33,11 @@ const PACKS: readonly CommunityPack[] = [
     license: "MIT",
     mode: "vendored-skill-pack",
     category: "engineering-workflows",
-    summary: "Planning, TDD, systematic debugging, code review, and verification skills.",
+    summary:
+      "Planning, TDD, systematic debugging, code review, and verification skills.",
     sourceIncluded: true,
-    notes: "Pinned Git submodule. Only SKILL.md instructions are loaded; helper scripts are not executed.",
+    notes:
+      "Pinned Git submodule. Only SKILL.md instructions are loaded; helper scripts are not executed.",
   },
   {
     id: "wshobson-agents",
@@ -45,9 +47,11 @@ const PACKS: readonly CommunityPack[] = [
     license: "MIT",
     mode: "vendored-skill-pack",
     category: "multi-agent-engineering",
-    summary: "Multi-harness specialist agent plugins, skills, and workflow commands.",
+    summary:
+      "Multi-harness specialist agent plugins, skills, and workflow commands.",
     sourceIncluded: true,
-    notes: "Pinned Git submodule. Kurochan reads selected SKILL.md files only, not native plugin hooks or commands.",
+    notes:
+      "Pinned Git submodule. Kurochan reads selected SKILL.md files only, not native plugin hooks or commands.",
   },
   {
     id: "compound-engineering",
@@ -57,9 +61,11 @@ const PACKS: readonly CommunityPack[] = [
     license: "MIT",
     mode: "plugin-adapter-required",
     category: "engineering-workflows",
-    summary: "Plan, implement, review, and learn from engineering work with coordinated workflows.",
+    summary:
+      "Plan, implement, review, and learn from engineering work with coordinated workflows.",
     sourceIncluded: false,
-    notes: "Registered for a dedicated adapter. Native plugin hooks are not imported or executed.",
+    notes:
+      "Registered for a dedicated adapter. Native plugin hooks are not imported or executed.",
   },
   {
     id: "awesome-agent-skills",
@@ -69,9 +75,11 @@ const PACKS: readonly CommunityPack[] = [
     license: "MIT",
     mode: "discovery-catalog",
     category: "skill-discovery",
-    summary: "A discovery index of skills published by official teams and community authors.",
+    summary:
+      "A discovery index of skills published by official teams and community authors.",
     sourceIncluded: false,
-    notes: "The catalogue license does not automatically relicense the repositories it links to. Review each imported source separately.",
+    notes:
+      "The catalogue license does not automatically relicense the repositories it links to. Review each imported source separately.",
   },
   {
     id: "anthropic-agent-skills",
@@ -81,9 +89,11 @@ const PACKS: readonly CommunityPack[] = [
     license: null,
     mode: "license-review-required",
     category: "agent-skills",
-    summary: "Anthropic's public Agent Skills examples and reusable instructions.",
+    summary:
+      "Anthropic's public Agent Skills examples and reusable instructions.",
     sourceIncluded: false,
-    notes: "No license was declared in the repository metadata checked for this pin; reference only until licensing is clarified.",
+    notes:
+      "No license was declared in the repository metadata checked for this pin; reference only until licensing is clarified.",
   },
   {
     id: "everything-claude-code",
@@ -93,9 +103,11 @@ const PACKS: readonly CommunityPack[] = [
     license: "MIT",
     mode: "plugin-adapter-required",
     category: "agent-harness",
-    summary: "Skills, memory, security, and research-first workflows for coding agents.",
+    summary:
+      "Skills, memory, security, and research-first workflows for coding agents.",
     sourceIncluded: false,
-    notes: "Large multi-harness project. Integrate selected capabilities through an adapter instead of importing its runtime wholesale.",
+    notes:
+      "Large multi-harness project. Integrate selected capabilities through an adapter instead of importing its runtime wholesale.",
   },
   {
     id: "gstack",
@@ -105,9 +117,11 @@ const PACKS: readonly CommunityPack[] = [
     license: "MIT",
     mode: "plugin-adapter-required",
     category: "engineering-team-workflows",
-    summary: "Opinionated engineering workflows spanning planning, design, implementation, QA, and release.",
+    summary:
+      "Opinionated engineering workflows spanning planning, design, implementation, QA, and release.",
     sourceIncluded: false,
-    notes: "Large repository with its own runtime assumptions; retain as a pinned reference until an isolated adapter exists.",
+    notes:
+      "Large repository with its own runtime assumptions; retain as a pinned reference until an isolated adapter exists.",
   },
   {
     id: "graphify",
@@ -117,9 +131,11 @@ const PACKS: readonly CommunityPack[] = [
     license: "Apache-2.0",
     mode: "external-runtime",
     category: "codebase-understanding",
-    summary: "Builds a queryable knowledge graph from source code and related project files.",
+    summary:
+      "Builds a queryable knowledge graph from source code and related project files.",
     sourceIncluded: false,
-    notes: "Optional runtime with separate dependencies. Do not execute imported scripts automatically; implement and test an isolated adapter first.",
+    notes:
+      "Optional runtime with separate dependencies. Do not execute imported scripts automatically; implement and test an isolated adapter first.",
   },
   {
     id: "mattpocock-skills",
@@ -129,9 +145,11 @@ const PACKS: readonly CommunityPack[] = [
     license: "MIT",
     mode: "vendored-skill-pack",
     category: "engineering-skills",
-    summary: "Skills for codebase design, debugging, specification, code review, and test-driven development.",
+    summary:
+      "Skills for codebase design, debugging, specification, code review, and test-driven development.",
     sourceIncluded: true,
-    notes: "Pinned Git submodule. Selected skills are loaded as bounded, untrusted supplemental instructions.",
+    notes:
+      "Pinned Git submodule. Selected skills are loaded as bounded, untrusted supplemental instructions.",
   },
   {
     id: "claude-mem",
@@ -141,9 +159,11 @@ const PACKS: readonly CommunityPack[] = [
     license: "Apache-2.0",
     mode: "external-runtime",
     category: "persistent-memory",
-    summary: "Persistent cross-session memory and context retrieval for multiple agent harnesses.",
+    summary:
+      "Persistent cross-session memory and context retrieval for multiple agent harnesses.",
     sourceIncluded: false,
-    notes: "Very large project with a separate runtime. Evaluate privacy, storage, deployment, and resource costs before optional installation.",
+    notes:
+      "Very large project with a separate runtime. Evaluate privacy, storage, deployment, and resource costs before optional installation.",
   },
   {
     id: "claude-plugins-official",
@@ -155,7 +175,8 @@ const PACKS: readonly CommunityPack[] = [
     category: "plugin-marketplace",
     summary: "Anthropic-managed directory of Claude Code plugin bundles.",
     sourceIncluded: false,
-    notes: "Discovery source only. Check each plugin's dependencies, permissions, and licensing before enabling.",
+    notes:
+      "Discovery source only. Check each plugin's dependencies, permissions, and licensing before enabling.",
   },
   {
     id: "awesome-mcp-servers",
@@ -165,9 +186,11 @@ const PACKS: readonly CommunityPack[] = [
     license: "MIT",
     mode: "discovery-catalog",
     category: "tool-integrations",
-    summary: "A broad index of Model Context Protocol servers for connecting external tools.",
+    summary:
+      "A broad index of Model Context Protocol servers for connecting external tools.",
     sourceIncluded: false,
-    notes: "Catalogue license is not a license grant for linked servers. Prefer reviewed official servers with least-privileged credentials.",
+    notes:
+      "Catalogue license is not a license grant for linked servers. Prefer reviewed official servers with least-privileged credentials.",
   },
   {
     id: "addyosmani-agent-skills",
@@ -177,9 +200,11 @@ const PACKS: readonly CommunityPack[] = [
     license: "MIT",
     mode: "vendored-skill-pack",
     category: "engineering-skills",
-    summary: "Production-focused skills for debugging, planning, testing, security, documentation, and release.",
+    summary:
+      "Production-focused skills for debugging, planning, testing, security, documentation, and release.",
     sourceIncluded: true,
-    notes: "Pinned Git submodule. Kurochan loads selected SKILL.md instructions only.",
+    notes:
+      "Pinned Git submodule. Kurochan loads selected SKILL.md instructions only.",
   },
   {
     id: "context7",
@@ -189,9 +214,11 @@ const PACKS: readonly CommunityPack[] = [
     license: "MIT",
     mode: "external-runtime",
     category: "documentation-context",
-    summary: "Provides version-aware library documentation through a dedicated MCP service.",
+    summary:
+      "Provides version-aware library documentation through a dedicated MCP service.",
     sourceIncluded: false,
-    notes: "Configure as a separate server through Kurochan's existing MCP bridge; do not embed its runtime into the API process.",
+    notes:
+      "Configure as a separate server through Kurochan's existing MCP bridge; do not embed its runtime into the API process.",
   },
   {
     id: "playwright-mcp",
@@ -201,9 +228,11 @@ const PACKS: readonly CommunityPack[] = [
     license: "Apache-2.0",
     mode: "external-runtime",
     category: "browser-testing",
-    summary: "Browser inspection and automation for UI and end-to-end verification.",
+    summary:
+      "Browser inspection and automation for UI and end-to-end verification.",
     sourceIncluded: false,
-    notes: "Configure through the existing MCP bridge with test-environment boundaries and approval for state-changing actions.",
+    notes:
+      "Configure through the existing MCP bridge with test-environment boundaries and approval for state-changing actions.",
   },
   {
     id: "github-mcp-server",
@@ -215,7 +244,8 @@ const PACKS: readonly CommunityPack[] = [
     category: "repository-tools",
     summary: "Official GitHub tools exposed through MCP.",
     sourceIncluded: false,
-    notes: "Compare with Kurochan's native GitHub tools before enabling to avoid duplicated capabilities and permissions.",
+    notes:
+      "Compare with Kurochan's native GitHub tools before enabling to avoid duplicated capabilities and permissions.",
   },
 ];
 
@@ -328,16 +358,48 @@ const SKILL_SOURCES: readonly SkillSource[] = [
 ];
 
 const STOP_WORDS = new Set([
-  "a", "an", "and", "are", "as", "at", "be", "by", "code", "do", "for", "from",
-  "how", "i", "in", "is", "it", "me", "my", "of", "on", "or", "our", "please",
-  "that", "the", "their", "this", "to", "up", "use", "using", "we", "with",
-  "you", "your",
+  "a",
+  "an",
+  "and",
+  "are",
+  "as",
+  "at",
+  "be",
+  "by",
+  "code",
+  "do",
+  "for",
+  "from",
+  "how",
+  "i",
+  "in",
+  "is",
+  "it",
+  "me",
+  "my",
+  "of",
+  "on",
+  "or",
+  "our",
+  "please",
+  "that",
+  "the",
+  "their",
+  "this",
+  "to",
+  "up",
+  "use",
+  "using",
+  "we",
+  "with",
+  "you",
+  "your",
 ]);
 
 function textTerms(value: string): string[] {
-  return [...new Set(
-    value.toLowerCase().match(/[a-z0-9][a-z0-9_-]{1,}/g) ?? [],
-  )].filter((term) => !STOP_WORDS.has(term));
+  return [
+    ...new Set(value.toLowerCase().match(/[a-z0-9][a-z0-9_-]{1,}/g) ?? []),
+  ].filter((term) => !STOP_WORDS.has(term));
 }
 
 function scalar(frontmatter: string, key: string): string | undefined {
@@ -368,7 +430,11 @@ function parseSkill(
   if (!body) return undefined;
 
   const pathFromRoot = relative(root, filePath).split(sep).join("/");
-  if (!pathFromRoot || pathFromRoot.startsWith("../") || isAbsolute(pathFromRoot)) {
+  if (
+    !pathFromRoot ||
+    pathFromRoot.startsWith("../") ||
+    isAbsolute(pathFromRoot)
+  ) {
     return undefined;
   }
   const folderName = pathFromRoot.split("/").slice(-2, -1)[0] ?? "skill";
@@ -457,7 +523,9 @@ export class CommunitySkillCatalog {
       this.maxFiles < 1 ||
       this.maxFiles > 10_000
     ) {
-      throw new Error("Community skill file limit must be between 1 and 10000.");
+      throw new Error(
+        "Community skill file limit must be between 1 and 10000.",
+      );
     }
   }
 
@@ -475,7 +543,9 @@ export class CommunitySkillCatalog {
   ): Promise<readonly CommunitySkillSummary[]> {
     const normalized = query.trim();
     if (!normalized || normalized.length > 200) {
-      throw new Error("Community skill query must contain 1 to 200 characters.");
+      throw new Error(
+        "Community skill query must contain 1 to 200 characters.",
+      );
     }
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
       throw new Error("Community skill limit must be between 1 and 100.");
@@ -485,21 +555,28 @@ export class CommunitySkillCatalog {
     return skills
       .map((skill) => ({ skill, score: scoreSkill(skill, normalized) }))
       .filter((entry) => entry.score > 0)
-      .sort((a, b) => b.score - a.score || a.skill.name.localeCompare(b.skill.name))
+      .sort(
+        (a, b) => b.score - a.score || a.skill.name.localeCompare(b.skill.name),
+      )
       .slice(0, limit)
       .map(({ skill }) => this.summary(skill));
   }
 
   async selectForTask(
     taskDescription: string,
-    options: { readonly maxSkills?: number; readonly maxCharacters?: number } = {},
+    options: {
+      readonly maxSkills?: number;
+      readonly maxCharacters?: number;
+    } = {},
   ): Promise<readonly CommunitySkill[]> {
     const query = taskDescription.trim();
     if (!query || query.length > 10_000) return [];
     const maxSkills = options.maxSkills ?? 3;
     const maxCharacters = options.maxCharacters ?? 12_000;
     if (!Number.isInteger(maxSkills) || maxSkills < 1 || maxSkills > 5) {
-      throw new Error("Community skill selection limit must be between 1 and 5.");
+      throw new Error(
+        "Community skill selection limit must be between 1 and 5.",
+      );
     }
     if (
       !Number.isInteger(maxCharacters) ||
@@ -515,13 +592,18 @@ export class CommunitySkillCatalog {
     const scored = skills
       .map((skill) => ({ skill, score: scoreSkill(skill, query) }))
       .filter((entry) => entry.score >= 2)
-      .sort((a, b) => b.score - a.score || a.skill.name.localeCompare(b.skill.name));
+      .sort(
+        (a, b) => b.score - a.score || a.skill.name.localeCompare(b.skill.name),
+      );
 
     const selected: CommunitySkill[] = [];
     let remaining = maxCharacters;
     for (const { skill } of scored) {
       if (selected.length >= maxSkills || remaining < 300) break;
-      const content = skill.content.slice(0, Math.min(skill.content.length, remaining));
+      const content = skill.content.slice(
+        0,
+        Math.min(skill.content.length, remaining),
+      );
       selected.push({ ...skill, content });
       remaining -= content.length;
     }
