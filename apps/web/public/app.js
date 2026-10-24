@@ -1,4 +1,10 @@
 import { ApiClient, ApiError, normalizeApiBaseUrl } from "./api.mjs";
+import {
+  INTEGRATION_CATALOG,
+  buildMcpConfig,
+  filterIntegrations,
+  resolveIntegrationStatus,
+} from "./integrations.mjs";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -31,6 +37,16 @@ const state = {
   sending: false,
   transientMessage: "",
   lastError: "",
+  integrationSearch: "",
+  integrationCategory: "All",
+  integrationKind: "All",
+  integrationSelectedId: "github-project",
+  integrationSnapshot: {},
+  integrationPresets: [],
+  integrationsLoaded: false,
+  integrationsLoading: false,
+  integrationProbeAt: null,
+  integrationError: "",
 };
 const api = new ApiClient({
   getBaseUrl: () => state.apiBaseUrl,
@@ -50,6 +66,10 @@ const viewMeta = {
   system: {
     eyebrow: "UNDER THE HOOD",
     title: "A clear view of what is connected.",
+  },
+  integrations: {
+    eyebrow: "YOUR TOOLKIT",
+    title: "Connect the tools behind the work.",
   },
 };
 
@@ -296,6 +316,7 @@ function renderView() {
   if (state.view === "chat") renderChatView(workspace);
   else if (state.view === "runs") renderRunsView(workspace);
   else if (state.view === "agents") renderAgentsView(workspace);
+  else if (state.view === "integrations") renderIntegrationsView(workspace);
   else renderSystemView(workspace);
 }
 
@@ -1580,6 +1601,8 @@ function init() {
       if (view === "runs") void loadRuns();
       if (view === "agents" && !state.agentResults.length) void searchAgents();
       if (view === "system") void loadSystemView();
+      if (view === "integrations" && !state.integrationsLoaded)
+        void loadIntegrations();
     }),
   );
   $("#new-chat").addEventListener("click", () => void newConversation());
