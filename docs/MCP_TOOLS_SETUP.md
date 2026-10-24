@@ -60,3 +60,72 @@ The `headers` map works the same way as the stdio `env` map: each value names an
 MCP servers can access whatever resources are available to their operating-system account or network identity. Use only trusted servers and least-privileged service credentials. Do not give every integration broad administrator credentials. Stdio server commands are spawned directly with fixed configured arguments, not provided by model output.
 
 MCP is optional. If no servers are configured, Kuro-chan continues to work with its built-in workspace, GitHub research, Brave search (when configured), isolated command sandbox (when enabled) and GitHub project connector (when configured). A tool named in a specialist profile is not automatically available unless the required server is configured and its tool is discovered.
+
+## Ready-made community MCP presets
+
+Kurochan exposes \`GET /v1/community-mcp-presets\` so deployments can retrieve reviewed configuration templates without copying JSON from third-party readmes. The endpoint does not install a package, start a process, save secrets, or enable a server. Templates contain only environment-variable names; put actual credentials in the worker's secret environment.
+
+### Context7: version-aware documentation
+
+Official source: https://github.com/upstash/context7
+
+Add this entry to the \`KUROCHAN_MCP_SERVERS\` JSON array:
+
+\`\`\`json
+{
+  "id": "context7",
+  "name": "Context7 Documentation",
+  "transport": "streamable-http",
+  "url": "https://mcp.context7.com/mcp",
+  "headers": {
+    "Authorization": "CONTEXT7_AUTHORIZATION"
+  }
+}
+\`\`\`
+
+Set \`CONTEXT7_AUTHORIZATION\` in the worker environment to \`Bearer <your Context7 API key>\`. Do not put the key in the JSON configuration, repository, or prompt.
+
+### Playwright MCP: UI and browser verification
+
+Official source: https://github.com/microsoft/playwright-mcp
+
+\`\`\`json
+{
+  "id": "playwright",
+  "name": "Playwright Browser Testing",
+  "transport": "stdio",
+  "command": "npx",
+  "args": ["--yes", "@playwright/mcp@0.0.83"],
+  "env": {}
+}
+\`\`\`
+
+This template pins the npm package version rather than using \`latest\`. The worker host needs Node.js and npm/npx. Run this only in an isolated test environment with test accounts and data. Browser automation can click buttons, submit forms, and change state on websites, so non-read-only actions remain approval-gated.
+
+### GitHub MCP Server: repository and issue tools
+
+Official source: https://github.com/github/github-mcp-server
+
+\`\`\`json
+{
+  "id": "github-mcp-server",
+  "name": "GitHub MCP Server",
+  "transport": "streamable-http",
+  "url": "https://api.githubcopilot.com/mcp/",
+  "headers": {
+    "Authorization": "GITHUB_MCP_AUTHORIZATION"
+  }
+}
+\`\`\`
+
+Set \`GITHUB_MCP_AUTHORIZATION\` in the worker environment to \`Bearer <a least-privilege fine-grained GitHub token>\`. Grant only the repositories and permissions needed. This is separate from Kuro-chan's native GitHub project connector, so keep the native repository allowlist and publishing approval checks in place as well.
+
+### Enable deliberately
+
+1. Review the template returned by \`GET /v1/community-mcp-presets\`.
+2. Add only the integrations needed to \`KUROCHAN_MCP_SERVERS\` in the server/worker secret configuration.
+3. Restart the process so configuration is reloaded.
+4. Probe \`GET /v1/mcp/status?probe=true\` and confirm the expected tool schemas are discovered.
+5. Test read-only workflows first; verify every mutating tool requires approval.
+
+The preset directory is a safe setup aid, not an installer. A listed preset does not mean its server is configured, running, or available to agents.
