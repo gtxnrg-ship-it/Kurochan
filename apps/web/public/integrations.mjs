@@ -407,12 +407,19 @@ export function resolveIntegrationStatus(integration, snapshot = {}) {
           : "Connected; tool discovery has not reported a tool count yet.",
       };
     }
-    if (server) {
+    if (server?.lastError) {
       return {
         label: "Needs attention",
         tone: "warning",
+        detail: server.lastError,
+      };
+    }
+    if (server) {
+      return {
+        label: "Probe to verify",
+        tone: "neutral",
         detail:
-          server.lastError || "The server is configured but not currently connected.",
+          "Configuration exists. Run Test MCP connections to verify reachability and discover tools.",
       };
     }
     if (integration.setupMode === "oauth-required") {
