@@ -191,6 +191,42 @@ describe("Kuro-chan web API helpers", () => {
     }
   });
 
+  it("sends the selected model with an agent run request", async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ run: { id: "run-1" } }),
+          { status: 201, headers: { "content-type": "application/json" } },
+        ),
+    );
+    const client = new ApiClient({
+      getBaseUrl: () => "https://api.example.test",
+      getToken: () => "session-token",
+      fetchImpl,
+    });
+
+    await client.startRun(
+      "conversation-1",
+      "Implement a feature",
+      "quality",
+      { model: "openrouter/openrouter/free" },
+    );
+
+    const [url, options] = fetchImpl.mock.calls[0] || [];
+    expect(url).toBe(
+      "https://api.example.test/v1/conversations/conversation-1/runs",
+    );
+    expect(options?.method).toBe("POST");
+    expect(JSON.parse(String(options?.body))).toEqual({
+      goal: "Implement a feature",
+      profile: "quality",
+      model: "openrouter/openrouter/free",
+    });
+    expect(new Headers(options?.headers).get("authorization")).toBe(
+      "Bearer session-token",
+    );
+  });
+
   it("normalizes structured API errors for the UI", async () => {
     const fetchImpl = vi.fn(
       async () =>
