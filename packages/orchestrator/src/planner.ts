@@ -348,6 +348,22 @@ export class PlanService {
     if (request.signal?.aborted)
       throw new PlanError("cancelled", "Planning was cancelled.");
 
+    const configuredMaxCandidates = this.options.maxCandidates ?? 96;
+    if (
+      !Number.isInteger(configuredMaxCandidates) ||
+      configuredMaxCandidates < 16 ||
+      configuredMaxCandidates > 1000
+    ) {
+      throw new PlanError(
+        "invalid_planner_configuration",
+        "Planner candidate limit must be between 16 and 1000.",
+      );
+    }
+    const effectiveMaxCandidates = plannerCandidateBudget(
+      goal,
+      configuredMaxCandidates,
+    );
+
     let candidates: AgentProfile[];
     let relevantRunbooks: AgentRunbook[];
     let requiredRunbookAgentIds: string[] = [];
@@ -493,22 +509,6 @@ export class PlanService {
       "Do not claim that tools have run or results have been obtained. This is a plan, not an execution report.",
       "No markdown fences, prose outside the JSON, or additional fields.",
     ].join("\n");
-
-    const configuredMaxCandidates = this.options.maxCandidates ?? 96;
-    if (
-      !Number.isInteger(configuredMaxCandidates) ||
-      configuredMaxCandidates < 16 ||
-      configuredMaxCandidates > 1000
-    ) {
-      throw new PlanError(
-        "invalid_planner_configuration",
-        "Planner candidate limit must be between 16 and 1000.",
-      );
-    }
-    const effectiveMaxCandidates = plannerCandidateBudget(
-      goal,
-      configuredMaxCandidates,
-    );
 
     const userPrompt = JSON.stringify({
       goal,
