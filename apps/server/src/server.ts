@@ -122,7 +122,12 @@ function modelSelection(
   const normalized = model.toLowerCase();
   if (normalized === "omni/fast") return { profile: "fast" };
   if (normalized === "omni/balanced") return { profile: "balanced" };
-  if (normalized === "omni/quality") return { profile: "quality" };
+  if (
+    normalized === "auto" ||
+    normalized === "omni/auto" ||
+    normalized === "omni/quality"
+  )
+    return { profile: "quality" };
 
   for (const id of ["openrouter", "freellmapi"] as const) {
     const prefix = id + "/";
