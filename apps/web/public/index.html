@@ -137,7 +137,10 @@
           <label class="field-label" for="api-base-url">API address</label>
           <input id="api-base-url" name="apiBaseUrl" type="url" autocomplete="url" spellcheck="false" placeholder="http://127.0.0.1:8787" required />
           <p class="field-hint">On the same device, the default usually works. On a phone, use the computer's LAN address or your deployed HTTPS API address.</p>
-          <label class="field-label" for="api-token">API access token <span class="optional-tag">optional for local mode</span></label>
+          <div class="field-row">
+            <label class="field-label" for="api-token">API access token <span class="optional-tag">optional for local mode</span></label>
+            <button class="clear-token-button" id="clear-token" type="button">Clear token</button>
+          </div>
           <input id="api-token" name="apiToken" type="password" autocomplete="off" spellcheck="false" placeholder="Only if your API requires it" />
           <p class="field-hint">The address is saved in this browser. The token is held in session storage and cleared when this tab's session ends.</p>
           <div class="settings-error" id="settings-error" role="alert" hidden></div>
