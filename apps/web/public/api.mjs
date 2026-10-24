@@ -166,6 +166,7 @@ export class ApiClient {
   health(options) { return this.request("/healthz", options); }
   readiness(options) { return this.request("/readyz", options); }
   config(options) { return this.request("/v1/config", options); }
+  models(options) { return this.request("/v1/models", options); }
   speechStatus(options) { return this.request("/v1/speech/status", options); }
   workerStatus(options) { return this.request("/v1/worker/status", options); }
   workers(options) { return this.request("/v1/workers?staleAfterMs=30000", options); }
