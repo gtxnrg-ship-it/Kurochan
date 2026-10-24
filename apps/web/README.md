@@ -2,6 +2,8 @@
 
 The web workbench is the mobile-first browser client for the Kuro-chan API. It uses browser-native HTML, CSS, and JavaScript, so the client adds no frontend framework or runtime dependency. It can be installed as a PWA on supported browsers and secure origins; it is not a native Android/iOS package.
 
+There is no public hosted demo or app-store/download artifact published by this repository yet. To use the product today, run the web client and API using the instructions below. For an installable phone experience, serve the web client from HTTPS and use the browser's **Install app** / **Add to Home screen** command.
+
 ## Run and build
 
 From the repository root:
@@ -12,6 +14,12 @@ pnpm --filter @kurochan/web dev
 ```
 
 The development server binds to `127.0.0.1:5173` by default. Set `WEB_HOST` and `WEB_PORT` to override it. The API defaults to `http://127.0.0.1:8787`. Use **Connection settings** in the client to change the API address and enter a bearer token only when the API requires one.
+
+## Account sign-in
+
+GitHub and Google sign-in are available only when the API operator configures them. Set `KUROCHAN_PUBLIC_API_URL`, a unique `KUROCHAN_SESSION_SECRET` of at least 32 characters, the exact `WEB_ORIGIN`, and the chosen provider's OAuth client ID/secret in the server environment. Register the callback URL shown in [authentication setup](../../docs/AUTHENTICATION_SETUP.md). The web app discovers enabled providers from the API; it does not pretend unconfigured providers are connected.
+
+OAuth sessions last eight hours. The browser keeps the session token in tab-scoped session storage, not the URL or long-term local storage. Sign out removes the browser-held token. Until token revocation is configured for a multi-instance deployment, a copied bearer token remains valid until it expires, so use HTTPS and never share it. Local installs can continue using a local API without OAuth.
 
 Build the static shell and serve it with the built-in server:
 
