@@ -1697,7 +1697,11 @@ function renderIntegrationsView(workspace) {
     ...new Set(INTEGRATION_CATALOG.map((item) => item.category).sort()),
   ];
   categories.forEach((value) => {
-    const option = makeElement("option", "", value === "All" ? "All categories" : value);
+    const option = makeElement(
+      "option",
+      "",
+      value === "All" ? "All categories" : value,
+    );
     option.value = value;
     category.append(option);
   });
@@ -1724,7 +1728,11 @@ function renderIntegrationsView(workspace) {
     !state.integrationError
   ) {
     grid.replaceChildren(
-      makeElement("div", "loading-card", "Loading integration and connection status…"),
+      makeElement(
+        "div",
+        "loading-card",
+        "Loading integration and connection status…",
+      ),
     );
   }
 }
@@ -1766,18 +1774,19 @@ async function loadIntegrations({ probe = false } = {}) {
   );
   state.integrationsLoading = false;
   if (probe) state.integrationProbeAt = Date.now();
-  const firstError = results.find(
-    (result) => result.status === "rejected",
-  );
+  const firstError = results.find((result) => result.status === "rejected");
   if (!state.integrationsLoaded) {
-    const reason = firstError && firstError.status === "rejected"
-      ? firstError.reason
-      : new Error("The API did not return integration diagnostics.");
+    const reason =
+      firstError && firstError.status === "rejected"
+        ? firstError.reason
+        : new Error("The API did not return integration diagnostics.");
     state.integrationError =
       !state.authenticated || reason?.code === "unauthorized"
         ? "Connect to your Kuro-chan API in Connection settings to inspect real connection status."
         : errorMessage(reason);
-  } else if (state.integrationSnapshot.mcp?.security?.secretsReturned === true) {
+  } else if (
+    state.integrationSnapshot.mcp?.security?.secretsReturned === true
+  ) {
     state.integrationError =
       "The API reported an unexpected security configuration. Do not add secrets here.";
   }
@@ -1844,8 +1853,7 @@ function renderIntegrationCards() {
     const meta = makeElement("div", "integration-card-meta");
     const isReviewedPreset = state.integrationPresets.some(
       (preset) =>
-        preset.id === integration.id ||
-        preset.id === integration.mcpServerId,
+        preset.id === integration.id || preset.id === integration.mcpServerId,
     );
     meta.append(
       integrationBadge(status.label, status.tone),
@@ -1865,7 +1873,9 @@ function renderIntegrationCards() {
     const button = makeElement(
       "button",
       "button button-subtle integration-details-button",
-      state.integrationSelectedId === integration.id ? "Hide details" : "Details",
+      state.integrationSelectedId === integration.id
+        ? "Hide details"
+        : "Details",
     );
     button.type = "button";
     button.setAttribute(
@@ -1874,16 +1884,18 @@ function renderIntegrationCards() {
     );
     button.addEventListener("click", () => {
       state.integrationSelectedId =
-        state.integrationSelectedId === integration.id
-          ? null
-          : integration.id;
+        state.integrationSelectedId === integration.id ? null : integration.id;
       renderIntegrationCards();
     });
     foot.append(button);
     card.append(top, name, description, meta, foot);
     grid.append(card);
   }
-  if (configuredMcp > 0 && connectedMcp === 0 && snapshot.mcp?.probed !== true) {
+  if (
+    configuredMcp > 0 &&
+    connectedMcp === 0 &&
+    snapshot.mcp?.probed !== true
+  ) {
     const note = makeElement(
       "p",
       "integration-probe-note",
@@ -1899,10 +1911,7 @@ function renderIntegrationCards() {
 
 function integrationMetric(value, label) {
   const card = makeElement("div", "integration-metric");
-  card.append(
-    makeElement("strong", "", value),
-    makeElement("span", "", label),
-  );
+  card.append(makeElement("strong", "", value), makeElement("span", "", label));
   return card;
 }
 
@@ -1960,18 +1969,20 @@ function renderIntegrationDetail() {
   );
   top.append(titleBlock, integrationBadge(status.label, status.tone));
   panel.append(top, makeElement("p", "integration-detail-copy", item.detail));
-  panel.append(
-    makeElement("p", "integration-detail-status", status.detail),
-  );
+  panel.append(makeElement("p", "integration-detail-status", status.detail));
 
   const facts = makeElement("div", "integration-facts");
   facts.append(
-    integrationFact("Connection path", item.kind === "native" ? "Native backend capability" : "MCP server adapter"),
+    integrationFact(
+      "Connection path",
+      item.kind === "native"
+        ? "Native backend capability"
+        : "MCP server adapter",
+    ),
     integrationFact("Access policy", item.permissions),
   );
-  if (item.mcpServerId) facts.append(
-    integrationFact("Server ID", item.mcpServerId),
-  );
+  if (item.mcpServerId)
+    facts.append(integrationFact("Server ID", item.mcpServerId));
   panel.append(facts);
 
   if (item.kind === "mcp") {
@@ -2016,7 +2027,9 @@ function renderIntegrationDetail() {
           makeElement(
             "p",
             "subtle-copy",
-            (tools.length - 24) + " more tool definitions are available from the API.",
+            tools.length -
+              24 +
+              " more tool definitions are available from the API.",
           ),
         );
       }
@@ -2037,7 +2050,13 @@ function renderIntegrationDetail() {
       if (code) {
         const configSection = makeElement("div", "integration-config-section");
         configSection.append(
-          makeElement("h4", "", item.setupMode === "operator-config" ? "Starter configuration shape" : "MCP configuration"),
+          makeElement(
+            "h4",
+            "",
+            item.setupMode === "operator-config"
+              ? "Starter configuration shape"
+              : "MCP configuration",
+          ),
           makeElement(
             "p",
             "subtle-copy",
@@ -2112,7 +2131,11 @@ function renderIntegrationDetail() {
   }
 
   if (item.docsUrl) {
-    const docs = makeElement("a", "integration-docs-link", "Official setup guide ↗");
+    const docs = makeElement(
+      "a",
+      "integration-docs-link",
+      "Official setup guide ↗",
+    );
     docs.href = item.docsUrl;
     docs.target = "_blank";
     docs.rel = "noopener noreferrer";
@@ -2122,10 +2145,7 @@ function renderIntegrationDetail() {
 
 function integrationFact(label, value) {
   const row = makeElement("div", "integration-fact");
-  row.append(
-    makeElement("span", "", label),
-    makeElement("strong", "", value),
-  );
+  row.append(makeElement("span", "", label), makeElement("strong", "", value));
   return row;
 }
 
@@ -2152,8 +2172,7 @@ function integrationConfigSnippet(item) {
 
 function nativeEnvironmentHints(item) {
   const values = {
-    workspace:
-      "KUROCHAN_WORKER_ENABLED=true\nKUROCHAN_WORKER_CONCURRENCY=4",
+    workspace: "KUROCHAN_WORKER_ENABLED=true\nKUROCHAN_WORKER_CONCURRENCY=4",
     githubResearch: "",
     githubProject:
       "KUROCHAN_GITHUB_TOKEN=<secret in server environment>\nKUROCHAN_GITHUB_ALLOWED_REPOSITORIES=owner/repository\nKUROCHAN_GITHUB_WRITE_ENABLED=false",
