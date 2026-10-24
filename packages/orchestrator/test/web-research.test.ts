@@ -91,7 +91,12 @@ describe("WebResearchRuntime", () => {
               snippets: Array.from(
                 { length: 8 },
                 (_, snippetIndex) =>
-                   "Source " + sourceIndex + " chunk " + snippetIndex + ": " + "evidence ".repeat(220),
+                  "Source " +
+                  sourceIndex +
+                  " chunk " +
+                  snippetIndex +
+                  ": " +
+                  "evidence ".repeat(220),
               ),
             })),
           },
@@ -106,23 +111,36 @@ describe("WebResearchRuntime", () => {
 
     const result = await runtime.execute({
       name: "web.search",
-      arguments: { query: "comprehensive technical documentation review", limit: 12 },
+      arguments: {
+        query: "comprehensive technical documentation review",
+        limit: 12,
+      },
     });
 
     expect(result.ok).toBe(true);
     const requested = new URL(requestedUrl);
     expect(requested.searchParams.get("count")).toBe("12");
     expect(requested.searchParams.get("maximum_number_of_urls")).toBe("12");
-    expect(requested.searchParams.get("maximum_number_of_tokens")).toBe("12288");
-    expect(requested.searchParams.get("maximum_number_of_tokens_per_url")).toBe("2048");
-    expect(requested.searchParams.get("maximum_number_of_snippets")).toBe("72");
-    expect(requested.searchParams.get("maximum_number_of_snippets_per_url")).toBe("6");
+    expect(
+      requested.searchParams.get("maximum_number_of_tokens"),
+    ).toBe("12288");
+    expect(
+      requested.searchParams.get("maximum_number_of_tokens_per_url"),
+    ).toBe("2048");
+    expect(
+      requested.searchParams.get("maximum_number_of_snippets"),
+    ).toBe("72");
+    expect(
+      requested.searchParams.get("maximum_number_of_snippets_per_url"),
+    ).toBe("6");
 
     const body = result.result as {
       items: { snippets: string[] }[];
     };
     expect(body.items).toHaveLength(12);
-    expect(body.items.every((item) => item.snippets.length <= 4)).toBe(true);
+    expect(
+      body.items.every((item) => item.snippets.length <= 4),
+    ).toBe(true);
     const totalSnippetCharacters = body.items
       .flatMap((item) => item.snippets)
       .reduce((total, snippet) => total + snippet.length, 0);
