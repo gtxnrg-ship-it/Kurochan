@@ -1583,6 +1583,12 @@ function init() {
     }),
   );
   $("#new-chat").addEventListener("click", () => void newConversation());
+  document.addEventListener("keydown", (event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+      event.preventDefault();
+      void newConversation();
+    }
+  });
   $("#refresh-conversations").addEventListener(
     "click",
     () => void refreshConversations(),
