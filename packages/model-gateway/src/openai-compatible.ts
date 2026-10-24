@@ -24,6 +24,7 @@ export interface OpenAICompatibleProviderOptions {
   readonly includeStreamUsage?: boolean;
   readonly fetchImpl?: typeof fetch;
   readonly extraHeaders?: Readonly<Record<string, string>>;
+  readonly allowInsecureHttp?: boolean;
 }
 
 const DEFAULT_CAPABILITIES: ProviderCapabilities = {
@@ -154,7 +155,7 @@ function parseStreamEvent(event: string): {
   };
 }
 
-function safeEndpoint(baseUrl: string): string {
+function safeEndpoint(baseUrl: string, allowInsecureHttp = false): string {
   let url: URL;
   try {
     url = new URL(baseUrl);
@@ -168,6 +169,16 @@ function safeEndpoint(baseUrl: string): string {
     throw new ProviderError(
       "invalid_configuration",
       "Provider URL must use HTTP or HTTPS.",
+    );
+  }
+  const isLoopback =
+    url.hostname === "localhost" ||
+    url.hostname === "127.0.0.1" ||
+    url.hostname === "[::1]";
+  if (url.protocol === "http:" && !isLoopback && !allowInsecureHttp) {
+    throw new ProviderError(
+      "invalid_configuration",
+      "Remote provider endpoints must use HTTPS. HTTP is permitted for loopback development; insecure FreeLLMAPI endpoints require explicit opt-in.",
     );
   }
   if (url.username || url.password || url.search || url.hash) {
@@ -237,7 +248,10 @@ export class OpenAICompatibleChatProvider implements ChatProvider {
   constructor(options: OpenAICompatibleProviderOptions) {
     this.id = options.id;
     this.displayName = options.displayName;
-    this.endpoint = safeEndpoint(options.baseUrl);
+    this.endpoint = safeEndpoint(
+      options.baseUrl,
+      options.id === "freellmapi" && options.allowInsecureHttp === true,
+    );
     this.apiKey = options.apiKey?.trim() || undefined;
     this.defaultModel = options.defaultModel?.trim() || undefined;
     this.timeoutMs = options.timeoutMs ?? 60_000;
