@@ -217,6 +217,90 @@ export class ApiClient {
     if (providerError) throw providerError;
   }
 
+  async voiceTurn(conversationId, formData, { signal } = {}) {
+    if (!(formData instanceof FormData)) {
+      throw new TypeError("voiceTurn expects a FormData payload.");
+    }
+    const headers = new Headers({ accept: "application/json" });
+    const token = String(this.getToken() ?? "").trim();
+    if (token) headers.set("authorization", "Bearer " + token);
+    let response;
+    try {
+      response = await this.fetchImpl(
+        this.baseUrl +
+          "/v1/conversations/" +
+          encodeURIComponent(conversationId) +
+          "/voice-turn",
+        {
+          method: "POST",
+          headers,
+          body: formData,
+          signal,
+          cache: "no-store",
+          credentials: "omit",
+          redirect: "error",
+        },
+      );
+    } catch (error) {
+      if (error?.name === "AbortError") throw error;
+      throw new ApiError(
+        "The voice turn could not reach the Kuro-chan API.",
+        { code: "voice_unavailable", retryable: true },
+      );
+    }
+    const text = await response.text();
+    let body = null;
+    if (text) {
+      try {
+        body = JSON.parse(text);
+      } catch {
+        body = { message: text.slice(0, 300) };
+      }
+    }
+    if (!response.ok) throw apiErrorFromBody(response.status, body);
+    return body;
+  }
+
+  async conversationAudio(conversationId, messageId, { signal } = {}) {
+    const headers = new Headers();
+    const token = String(this.getToken() ?? "").trim();
+    if (token) headers.set("authorization", "Bearer " + token);
+    let response;
+    try {
+      response = await this.fetchImpl(
+        this.baseUrl +
+          "/v1/conversations/" +
+          encodeURIComponent(conversationId) +
+          "/audio/" +
+          encodeURIComponent(messageId),
+        {
+          method: "GET",
+          headers,
+          signal,
+          cache: "no-store",
+          credentials: "omit",
+          redirect: "error",
+        },
+      );
+    } catch (error) {
+      if (error?.name === "AbortError") throw error;
+      throw new ApiError(
+        "The saved audio reply could not be downloaded.",
+        { code: "audio_unavailable", retryable: true },
+      );
+    }
+    if (!response.ok) {
+      let body;
+      try {
+        body = await response.json();
+      } catch {
+        body = null;
+      }
+      throw apiErrorFromBody(response.status, body);
+    }
+    return response.blob();
+  }
+
   startRun(conversationId, goal, profile = "balanced", options = {}) {
     return this.request("/v1/conversations/" + encodeURIComponent(conversationId) + "/runs", {
       ...options,
