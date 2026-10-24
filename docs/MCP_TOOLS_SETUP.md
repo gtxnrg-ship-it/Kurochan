@@ -121,6 +121,51 @@ Official source: https://github.com/github/github-mcp-server
 
 Set \`GITHUB_MCP_AUTHORIZATION\` in the worker environment to \`Bearer <a least-privilege fine-grained GitHub token>\`. Grant only the repositories and permissions needed. This is separate from Kuro-chan's native GitHub project connector, so keep the native repository allowlist and publishing approval checks in place as well.
 
+### Supabase: hosted MCP with project scoping
+
+Official documentation: https://supabase.com/docs/guides/ai-tools/mcp
+
+For a non-interactive Kuro-chan worker, Supabase documents a manually supplied authorization header for clients that cannot complete its browser-based dynamic OAuth registration. Start with a single project and read-only access:
+
+```json
+{
+  "id": "supabase",
+  "name": "Supabase read-only project",
+  "transport": "streamable-http",
+  "url": "https://mcp.supabase.com/mcp?read_only=true&project_ref=YOUR_PROJECT_REF",
+  "headers": {
+    "Authorization": "SUPABASE_MCP_AUTHORIZATION"
+  }
+}
+```
+
+Replace `YOUR_PROJECT_REF` with the project's actual reference. In the worker's secret environment, set `SUPABASE_MCP_AUTHORIZATION` to `Bearer <a project-scoped Supabase personal access token>`. The value stored in `KUROCHAN_MCP_SERVERS` is only the **environment-variable name**. Never put the token in the URL, source control, chat, screenshots, or model context.
+
+Supabase supports a read-only URL parameter and project scoping; keep both enabled while you evaluate the integration. Use a dedicated token with the minimum permissions needed. Do not connect production data until you have reviewed the available tools and the provider's security guidance. If the server requires interactive OAuth, the current Kuro-chan runtime does not yet perform that login flow; use the documented non-interactive header method where supported or wait for an OAuth-capable adapter.
+
+### Firebase: local CLI MCP server
+
+Official documentation: https://firebase.google.com/docs/ai-assistance/mcp-server
+
+Firebase's MCP server is a local stdio process. The worker host needs Node.js/npm and an authenticated Firebase CLI identity. The basic configuration is:
+
+```json
+{
+  "id": "firebase",
+  "name": "Firebase MCP",
+  "transport": "stdio",
+  "command": "npx",
+  "args": ["-y", "firebase-tools@latest", "mcp"],
+  "env": {}
+}
+```
+
+The process runs with the worker host's operating-system access and Firebase CLI credentials, so only enable it on a trusted worker with a least-privilege identity and the intended project context. Consider restricting the tool groups and pinning a reviewed `firebase-tools` version before production use. Firebase tools can perform mutating actions; Kuro-chan still applies its approval policy, but you should begin with a test project and inspect the discovered tool list before using them on important data.
+
+### OAuth-backed hosted services
+
+Some hosted MCP services expect interactive OAuth sign-in (for example, Figma, Linear, and Notion). They are listed in the web integration directory so their support boundary is visible, but **the current Kuro-chan MCP client does not broker their interactive OAuth handshake or dynamic client registration**. A catalog entry is not a working connection. Use a supported non-interactive authentication method only if the provider documents one, or add an OAuth-capable adapter before claiming that flow is supported.
+
 ### Enable deliberately
 
 1. Review the template returned by \`GET /v1/community-mcp-presets\`.
