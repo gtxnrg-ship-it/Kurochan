@@ -6,6 +6,7 @@ import {
   RunStore,
   type Evidence,
   type RunRecord,
+  type TaskProgressStage,
   type TaskRecord,
 } from "@kurochan/storage";
 import { z } from "zod";
@@ -290,14 +291,75 @@ function boundedJsonValue(value: unknown, maxCharacters: number): unknown {
 }
 
 function boundedEvidence(evidence: readonly Evidence[]): readonly unknown[] {
-  return evidence.slice(0, 1).map((item) => ({
+  // Preserve several source/artifact references across handoffs without copying
+  // raw tool output or large metadata into the next specialist's prompt.
+  return evidence.slice(0, 4).map((item) => ({
     kind: boundedText(item.kind, 80),
     summary: boundedText(item.summary, 250),
-    ...(item.uri ? { uri: boundedText(item.uri, 300) } : {}),
+    ...(item.uri ? { uri: boundedText(item.uri, 500) } : {}),
     ...(item.metadata === undefined
       ? {}
       : { metadata: boundedJsonValue(item.metadata, 300) }),
   }));
+}
+
+function toolStartMessage(toolName: string): string {
+  if (toolName === "web.search")
+    return "Searching for relevant web sources and supporting evidence.";
+  if (toolName.startsWith("github.search_"))
+    return "Searching public GitHub repositories for relevant evidence.";
+  if (toolName === "github.get_repository")
+    return "Inspecting public repository metadata.";
+  if (toolName === "github.list_files")
+    return "Listing relevant files in a public repository.";
+  if (toolName === "github.read_file")
+    return "Reading source content from a public repository.";
+  if (toolName === "github.checkout_repository")
+    return "Preparing the allowlisted repository workspace.";
+  if (toolName === "github.create_pull_request")
+    return "Checking permissions and approval for a GitHub publication action.";
+  if (toolName === "sandbox.run")
+    return "Running a command inside the isolated sandbox.";
+  if (toolName === "workspace.write_file")
+    return "Writing a file in the run's scoped workspace.";
+  if (toolName === "workspace.read_file")
+    return "Reading a file from the run's scoped workspace.";
+  if (toolName === "workspace.list_files")
+    return "Inspecting files in the run's scoped workspace.";
+  if (toolName === "workspace.search_text")
+    return "Searching text in the run's scoped workspace.";
+  if (toolName === "mcp.call")
+    return "Checking the configured tool's permissions and approval requirements.";
+  return "Executing a permitted tool action.";
+}
+
+function toolOutcomeMessage(
+  toolName: string,
+  succeeded: boolean,
+  sourceCount: number,
+): string {
+  if (!succeeded) {
+    return "The tool reported a problem; the specialist will continue with available evidence and disclose limitations.";
+  }
+  if (toolName === "web.search") {
+    return sourceCount > 0
+      ? "Web search returned " + sourceCount + " source reference(s)."
+      : "Web search completed without source references.";
+  }
+  if (
+    toolName.startsWith("github.") &&
+    toolName !== "github.checkout_repository" &&
+    toolName !== "github.create_pull_request"
+  ) {
+    return sourceCount > 0
+      ? "Repository research returned " + sourceCount + " source reference(s)."
+      : "Repository research completed.";
+  }
+  if (toolName === "sandbox.run")
+    return "The isolated command finished; its exit status and bounded output are recorded as evidence.";
+  if (toolName === "workspace.write_file")
+    return "The workspace write completed; the artifact reference is recorded with the task result.";
+  return "The tool call completed and its result is available to the specialist.";
 }
 
 export function selectMcpToolsForContext(
@@ -599,6 +661,43 @@ export class TaskWorker {
     this.finalizationControllers.get(runId)?.abort(error);
   }
 
+  private reportProgress(
+    task: TaskRecord,
+    stage: TaskProgressStage,
+    message: string,
+    options: {
+      round?: number;
+      toolName?: string;
+      sources?: readonly Evidence[];
+    } = {},
+  ): void {
+    try {
+      const sources = (options.sources ?? []).slice(0, 8).map((item) => ({
+        kind: String(redactMcpSensitiveValues(item.kind)).slice(0, 80),
+        summary: String(redactMcpSensitiveValues(item.summary)).slice(0, 500),
+        ...(item.uri
+          ? {
+              uri: String(redactMcpSensitiveValues(item.uri)).slice(0, 2_000),
+            }
+          : {}),
+      }));
+      this.options.store.recordTaskProgress({
+        runId: task.runId,
+        taskId: task.id,
+        workerId: this.workerId,
+        stage,
+        message: String(redactMcpSensitiveValues(message)).slice(0, 500),
+        ...(options.round === undefined ? {} : { round: options.round }),
+        ...(options.toolName
+          ? { toolName: options.toolName.slice(0, 200) }
+          : {}),
+        ...(sources.length ? { sources } : {}),
+      });
+    } catch {
+      // Progress reporting is observational and must never fail useful work.
+    }
+  }
+
   private async withWorkspaceLock<T>(
     runId: string,
     action: () => Promise<T>,
@@ -722,6 +821,11 @@ export class TaskWorker {
 
     const controller = new AbortController();
     this.activeTasks.set(task.id, { runId: task.runId, controller });
+    this.reportProgress(
+      task,
+      "started",
+      "Starting the planned step and loading its task context.",
+    );
     this.writeHeartbeat("busy", task.id, {
       runId: task.runId,
       planKey: task.planKey,
@@ -942,6 +1046,18 @@ export class TaskWorker {
         evidence: dependency.evidence,
       };
     });
+    if (dependencyResults.length > 0) {
+      this.reportProgress(
+        task,
+        "handoff",
+        "Loaded " +
+          dependencyResults.length +
+          " prerequisite result(s) with bounded evidence for this step.",
+        {
+          sources: dependencyResults.flatMap((dependency) => dependency.evidence),
+        },
+      );
+    }
     const configuredMcpTools = this.options.mcpTools?.isConfigured
       ? await this.options.mcpTools.listTools()
       : [];
@@ -990,7 +1106,7 @@ export class TaskWorker {
               instructions: profileText(agent.instructions, 16_000),
             },
             completedDependencies: dependencyResults
-              .slice(0, 3)
+              .slice(0, 5)
               .map((dependency) => ({
                 taskId: dependency.taskId,
                 planKey: dependency.planKey,
@@ -999,7 +1115,7 @@ export class TaskWorker {
                 output: boundedJsonValue(dependency.output, 1_000),
                 evidence: boundedEvidence(dependency.evidence),
               })),
-            omittedDependencyCount: Math.max(0, dependencyResults.length - 3),
+            omittedDependencyCount: Math.max(0, dependencyResults.length - 5),
             communitySkills: supplementalSkills.map(
               ({
                 id,
@@ -1084,6 +1200,12 @@ export class TaskWorker {
           },
         );
       }
+      this.reportProgress(
+        task,
+        "thinking",
+        "Evaluating the task and available evidence to choose the next action.",
+        { round: round + 1 },
+      );
       const response = await this.options.router.complete({
         profile: run.profile ?? this.profile,
         context: { operation: "task", runId: run.id, taskId: task.id },
@@ -1124,6 +1246,12 @@ export class TaskWorker {
           );
         const results = [];
         for (const call of payload.toolCalls) {
+          this.reportProgress(
+            task,
+            "tool_started",
+            toolStartMessage(call.name),
+            { round: round + 1, toolName: call.name },
+          );
           const githubResearchTool = [
             "github.search_repositories",
             "github.get_repository",
@@ -1377,6 +1505,20 @@ export class TaskWorker {
             );
           }
           results.push(outcome);
+          const toolEvidence =
+            "evidence" in outcome && Array.isArray(outcome.evidence)
+              ? (outcome.evidence as Evidence[])
+              : [];
+          this.reportProgress(
+            task,
+            outcome.ok ? "tool_completed" : "tool_failed",
+            toolOutcomeMessage(call.name, outcome.ok, toolEvidence.length),
+            {
+              round: round + 1,
+              toolName: call.name,
+              sources: toolEvidence,
+            },
+          );
           if (outcome.ok && call.name === "mcp.call" && evidence.length < 20) {
             const mcpOutcome = outcome as {
               tool?: McpToolDescriptor;
@@ -1512,6 +1654,12 @@ export class TaskWorker {
           latencyMs: response.latencyMs,
         },
       });
+      this.reportProgress(
+        task,
+        "handoff",
+        "Structured result prepared; attaching evidence and checking the run.",
+        { round: round + 1, sources: evidence },
+      );
       const output = {
         summary: payload.summary,
         taskId: task.id,
