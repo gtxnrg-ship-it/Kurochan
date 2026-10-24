@@ -18,7 +18,7 @@ const state = {
   runStreams: new Map(),
   lastEventIds: new Map(),
   selectedRunId: null,
-  selectedModel: "omni/balanced",
+  selectedModel: "balanced",
   connected: false,
   authenticated: false,
   providers: [],
@@ -960,33 +960,29 @@ function closeSettings() {
 
 async function testConnection() {
   const button = $("#test-connection");
-  const status = $("#settings-status");
   const errorBox = $("#settings-error");
+  const candidateBase = normalizeApiBaseUrl($("#api-base-url").value);
+  const candidateToken = $("#api-token").value.trim() || state.apiToken;
+  const previousBase = state.apiBaseUrl;
+  const previousToken = state.apiToken;
   errorBox.hidden = true;
   button.disabled = true;
   setText("#settings-status", "Testing API connection…");
   try {
-    const candidateBase = normalizeApiBaseUrl($("#api-base-url").value);
-    const candidateToken = $("#api-token").value.trim() || state.apiToken;
-    const previousBase = state.apiBaseUrl;
-    const previousToken = state.apiToken;
     state.apiBaseUrl = candidateBase;
     state.apiToken = candidateToken;
     const ok = await refreshConnection({ quiet: false });
     if (!ok) throw new Error("The API health check did not pass.");
     if (!state.authenticated) throw new Error("The API is reachable but the access token was not accepted.");
-    setText(status ? "#settings-status" : "#settings-status", "Connected. " + state.providers.filter((provider) => provider.configured).length + " provider(s) configured.");
-    state.apiBaseUrl = previousBase;
-    state.apiToken = previousToken;
-    updateConnectionBadge("Connected", "is-online");
+    setText("#settings-status", "Connected. " + state.providers.filter((provider) => provider.configured).length + " provider(s) configured.");
   } catch (error) {
     setText("#settings-status", "Connection test failed.");
     errorBox.textContent = errorMessage(error);
     errorBox.hidden = false;
-    state.apiBaseUrl = localStorage.getItem(API_BASE_KEY) || defaultApiBaseUrl();
-    state.apiToken = sessionStorage.getItem(API_TOKEN_KEY) || "";
-    updateConnectionBadge(state.connected ? "API reachable" : "Offline", state.connected ? "is-warning" : "is-offline");
   } finally {
+    state.apiBaseUrl = previousBase;
+    state.apiToken = previousToken;
+    await refreshConnection({ quiet: true });
     button.disabled = false;
   }
 }
@@ -996,23 +992,29 @@ async function saveSettings(event) {
   const errorBox = $("#settings-error");
   errorBox.hidden = true;
   const button = $('#settings-form button[type="submit"]');
+  const previousBase = state.apiBaseUrl;
+  const previousToken = state.apiToken;
   button.disabled = true;
   try {
-    state.apiBaseUrl = normalizeApiBaseUrl($("#api-base-url").value);
+    const candidateBase = normalizeApiBaseUrl($("#api-base-url").value);
     const typedToken = $("#api-token").value.trim();
+    state.apiBaseUrl = candidateBase;
     if (typedToken) state.apiToken = typedToken;
-    localStorage.setItem(API_BASE_KEY, state.apiBaseUrl);
-    if (state.apiToken) sessionStorage.setItem(API_TOKEN_KEY, state.apiToken);
-    else sessionStorage.removeItem(API_TOKEN_KEY);
     await refreshConnection({ quiet: false });
     if (!state.connected) throw new Error("The API health check did not pass.");
     if (!state.authenticated) throw new Error("The API is reachable but authentication is required or rejected.");
+    localStorage.setItem(API_BASE_KEY, state.apiBaseUrl);
+    if (state.apiToken) sessionStorage.setItem(API_TOKEN_KEY, state.apiToken);
+    else sessionStorage.removeItem(API_TOKEN_KEY);
     closeSettings();
     await Promise.all([refreshConversations({ preserveSelection: true }), loadRuns()]);
     if (state.conversations.length && !state.currentConversationId) await loadConversation(state.conversations[0].id);
     if (state.view === "system") renderView();
     showToast("Workbench connected.", "success");
   } catch (error) {
+    state.apiBaseUrl = previousBase;
+    state.apiToken = previousToken;
+    await refreshConnection({ quiet: true });
     errorBox.textContent = errorMessage(error);
     errorBox.hidden = false;
   } finally {
@@ -1078,7 +1080,7 @@ function init() {
   window.addEventListener("beforeunload", stopAllRunStreams);
   setView("chat");
   void boot();
-  if ("serviceWorker" in navigator && location.protocol === "https:") {
+  if ("serviceWorker" in navigator && (location.protocol === "https:" || ["localhost", "127.0.0.1"].includes(location.hostname))) {
     navigator.serviceWorker.register("/sw.js").catch(() => {});
   }
   window.setInterval(() => {
