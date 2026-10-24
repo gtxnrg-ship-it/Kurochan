@@ -1,75 +1,146 @@
 # Kuro-chan
 
-**A mobile-first AI workbench for natural-language coding and research, powered by coordinated specialist agents.**
+**A mobile-first AI workbench for turning rough ideas into coordinated, verifiable work.**
 
 [![CI](https://github.com/gtxnrg-ship-it/Kurochan/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/gtxnrg-ship-it/Kurochan/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-backend%20%2B%20web-blue)](https://github.com/gtxnrg-ship-it/Kurochan)
 
-> **Project status:** Active development. The repository contains a working web-client codebase and backend services. A public hosted demo is **not deployed yet**, so there is no live app URL to click today. We will add one here after the frontend and API are deployed and verified together.
+> **Status: active development.** The repository contains backend services and an installable web workbench. A public hosted demo is not deployed yet, and there is no native Android/iOS package in this repository. A real provider, speech, and device workflow still needs deployment-specific credentials and end-to-end verification.
 
-## Explore Kuro-chan
+## What Kuro-chan is
 
-- **[Web workbench source](apps/web/README.md)**: client features, mobile/PWA behavior, voice setup, and security notes.
-- **[Run the workbench locally](#run-the-full-workbench-locally)**: start the web app, API, and worker together.
-- **[Backend architecture](docs/TARGET_BACKEND_ARCHITECTURE.md)**: how planning, specialist agents, routing, tools, and verification fit together.
-- **[Engineering foundation](docs/FOUNDATION.md)**: project principles and acceptance expectations.
-- **[CI checks](https://github.com/gtxnrg-ship-it/Kurochan/actions)** · **[Source code](https://github.com/gtxnrg-ship-it/Kurochan)** · **[Issues and ideas](https://github.com/gtxnrg-ship-it/Kurochan/issues)**
+Kuro-chan is designed to help someone start with a vague goal, clarify what matters, select relevant specialist agents, perform research and tool-based work, and return a clear result with evidence. The aim is to hide unnecessary complexity without hiding failures, costs, approvals, or verification gaps.
 
-Kuro-chan is being built from a clean foundation. It aims to turn natural-language goals into researched plans, coordinated specialist work, real tool execution, and verifiable deliverables.
+### The workbench today
 
-## Product principles
+- **Chat:** streamed model responses and retry-safe message IDs.
+- **Coordinated runs:** plan a goal, track task states and specialist handoffs, inspect events/evidence, and cancel a run.
+- **Specialist library:** search the pinned [Agency Agents](https://github.com/msitarzewski/agency-agents) profiles without treating their instructions as security policy.
+- **System health:** inspect API readiness, configured providers, router, worker heartbeats, and speech capabilities.
+- **Integration directory:** browse native capabilities and optional MCP connectors, see reported connection state, inspect discovered tools, and copy safe server-side setup examples.
+- **Voice turns:** record a clip, send it for transcription, get a routed text response, and play synthesized audio when compatible speech services are configured.
 
-- **Reuse expertise:** integrate the upstream [Agency Agents](https://github.com/msitarzewski/agency-agents) catalog rather than recreating hundreds of specialist personas.
-- **Orchestrate with OmniRouter:** Kuro-chan's internal routing layer chooses configured model providers based on route profile, availability, bounded failover, and policy. OmniRouter is not the same thing as OpenRouter.
-- **Treat providers as adapters:** OpenRouter and a configured FreeLLMAPI/OpenAI-compatible endpoint can serve as upstream inference providers. They do not own Kuro-chan's orchestration.
-- **Research before planning:** gather evidence from relevant web sources, repositories, documentation, and project files.
-- **Execute, don't simulate:** specialist prompts need real tools, permission-scoped workspaces, and execution workers.
-- **Verify outcomes:** tests, artifacts, tool results, and review evidence drive completion claims.
-- **Mobile-first by design:** the phone is the control surface. Heavy builds and untrusted code run in isolated workers.
-- **Safe by construction:** credentials remain server-side; permissions are scoped; destructive or external actions require approval.
-- **No fake completeness:** a visible screen or an untested stub does not count as a completed feature.
+A status badge has a specific meaning: *catalogued* means an option is documented; *configured* means server settings exist; *connected* means the API has reported a successful connection. None of those labels on its own proves that every possible task succeeds.
 
-## Backend architecture
+## Architecture
 
 ```text
-Client (mobile-first installable web app)
-  -> Kuro-chan API
-     -> durable run/task store and worker queue
+Installable web client
+  -> authenticated Kuro-chan API
+     -> durable conversation and run/task store
      -> planner + specialist selector
-        -> pinned Agency Agents catalog
-     -> OmniRouter (Kuro-chan-owned policy and routing)
-        -> OpenRouter provider adapter (optional)
-        -> FreeLLMAPI / OpenAI-compatible endpoint adapter (optional)
-     -> permission-scoped tools and isolated workers
-     -> evidence, audit events, and verification
+        -> pinned Agency Agents catalog and NEXUS runbooks
+     -> OmniRouter
+        -> OpenRouter adapter (optional)
+        -> FreeLLMAPI / OpenAI-compatible adapter (optional)
+     -> permission-scoped tool registry
+        -> workspace, GitHub research, optional Brave search
+        -> optional GitHub project connector and isolated sandbox
+        -> optional administrator-configured MCP servers
+     -> evidence, run events, approval gates and verification
 ```
 
-OmniRouter owns route profiles, provider selection, retry limits, circuit breakers, and normalized failures. An upstream provider never receives an agent's tool permissions and is never trusted to decide that a task is complete.
+OmniRouter is Kuro-chan's routing policy layer, not the OpenRouter service. Providers supply inference; the backend controls specialist selection, tool permissions, task state, bounded retries, approval gates, and verification claims.
 
-## Development status
+## Run the workbench locally
 
-Implementation is in progress. See [docs/FOUNDATION.md](docs/FOUNDATION.md) for engineering principles and acceptance expectations. Features are not considered complete until implementation and relevant tests exist.
+### Requirements
 
-## Run the full workbench locally
+- Node.js 22 or newer
+- pnpm 10.9 or newer
+- A model provider configured on the server for inference
+- Git with the configured submodules available
 
-Requirements: Node.js 22+ and pnpm 10.9+.
+### Install and start
+
+From the repository root:
 
 ```sh
 pnpm install --frozen-lockfile
 cp .env.example .env
-# Configure at least one model provider in .env on the server side.
+# Edit .env on the server: configure a supported model provider.
 pnpm dev
 ```
 
-Open [http://127.0.0.1:5173](http://127.0.0.1:5173). The web workbench connects to the API at `http://127.0.0.1:8787` by default. Use **Connection settings** in the workbench to change the API address or provide `KUROCHAN_API_TOKEN` when the API requires it. Provider keys belong in the server environment, never in the browser.
+Open [http://127.0.0.1:5173](http://127.0.0.1:5173). The web client connects to the API at [http://127.0.0.1:8787](http://127.0.0.1:8787) by default. Use **Connection settings** in the app if the API is listening elsewhere or requires `KUROCHAN_API_TOKEN`.
 
-The web app includes streamed chat, coordinated run creation and monitoring, resumable run events, specialist search, and API/provider/worker/speech diagnostics. It is an installable PWA on supported browsers and secure origins. It caches only the app shell, never conversation or API data.
+The development command starts the web app, API, and worker. You can also run them individually:
 
-For phone-on-LAN testing, bind the web server with `WEB_HOST=0.0.0.0`, set `HOST=0.0.0.0` and a strong `KUROCHAN_API_TOKEN` for the API, and allow the exact web origin in `CORS_ALLOWED_ORIGINS`. Do this only on a trusted network. A production deployment should use HTTPS and a reverse proxy or hosted static origin.
+```sh
+pnpm dev:web
+pnpm dev:api
+pnpm dev:worker
+```
 
-The current speech backend reports its actual configured capabilities in `/v1/speech/status`. A recorded-audio turn is not the same thing as realtime duplex voice; the final speech-to-speech provider and naturalness/latency target still need a deliberate selection and live evaluation.
- 
+Keep model-provider credentials, GitHub tokens, Brave keys, speech credentials, and MCP credentials in the server/worker environment or a secret manager. Never put them in browser code, UI settings, chat prompts, or a committed `.env` file.
+
+## Build, test and quality checks
+
+```sh
+pnpm build
+pnpm typecheck
+pnpm test
+pnpm lint
+pnpm check
+```
+
+`pnpm check` is the full repository gate: pinned catalog/community checks, type checking, build and automated tests, and Prettier validation. CI runs this gate. A green CI run validates the code and automated tests for that commit; it does **not** replace a live provider smoke test or mobile browser/device acceptance test.
+
+## Integration directory
+
+The integration view is the front door for capabilities that are already built in and for optional services the operator can connect.
+
+| Area | Built-in or optional path | Important boundary |
+| --- | --- | --- |
+| Model providers | OpenRouter and FreeLLMAPI/OpenAI-compatible endpoints | Keys stay server-side; configuration is not the same as live inference. |
+| GitHub | Read-only public research; optional authenticated project checkout | Private-repository access requires server credentials and an explicit allowlist. Publishing is separately controlled and approval-gated. |
+| Web research | Optional Brave Search | Requires a server-side key; fetched content is untrusted evidence, not instructions. |
+| Workspace and commands | Scoped workspace tools; optional Docker sandbox | Sandbox is disabled by default; command execution needs deliberate isolation and limits. |
+| Speech | Optional STT + TTS adapter pair | The web UI supports recorded turns. A chosen high-quality realtime speech-to-speech model, duplex audio, interruption handling, naturalness, and latency still need deliberate selection and live evaluation. |
+| MCP services | GitHub, Firebase, Supabase, Context7, Playwright and other curated examples; operator-configured MCP servers are extensible | The directory is not an installer. Each server must be configured in the worker environment, probed, permission-checked, and tested. |
+
+For configuration details, see [MCP setup](docs/MCP_TOOLS_SETUP.md), [GitHub projects](docs/GITHUB_PROJECTS_SETUP.md), [web research](docs/WEB_RESEARCH_SETUP.md), [speech](docs/SPEECH_SETUP.md), and the [integration roadmap](docs/INTEGRATION_PACK.md).
+
+### Connect an MCP server
+
+1. Open **Integrations** in the workbench and select a service.
+2. Copy its configuration example and merge it into `KUROCHAN_MCP_SERVERS` in the worker/server environment. Keep existing entries.
+3. Put actual credential values in the environment variables referenced by the config; the `env` and `headers` maps refer to variable names, not secret values.
+4. Restart the worker, then click **Test MCP connections** and inspect discovered tool names and read-only/approval behavior.
+5. Start with read-only permissions. Use a scoped identity and test against non-production data before permitting writes.
+
+Kuro-chan's current MCP runtime supports local stdio and Streamable HTTP. The runtime does not yet broker interactive OAuth for every hosted provider, so the UI marks those services as needing OAuth support rather than showing them as connected. Supabase can use its documented project-scoped, read-only URL and a server-side authorization header for non-interactive setup. Firebase's local MCP server uses the Firebase CLI identity on the worker host. See the official provider documentation linked from each card and [MCP_TOOLS_SETUP.md](docs/MCP_TOOLS_SETUP.md).
+
+## Install and use on a phone
+
+The current client is an **installable progressive web app (PWA)** on supported browsers and secure origins. It is not a native APK/IPA. The service worker caches only the app shell, not conversations, run data, credentials, or API responses.
+
+For LAN testing, use a trusted network and configure both servers deliberately. A typical setup needs the web host bound to the LAN interface, the API bound with a strong `KUROCHAN_API_TOKEN`, and the exact client origin in `CORS_ALLOWED_ORIGINS`. Use the phone's reachable API address in Connection settings. For any public deployment, use HTTPS, strict origin allowlists, appropriate network isolation, and server-side secret storage. Do not expose a development API directly to the public internet.
+
+## Voice and media status
+
+The API exposes its actual speech capabilities through `/v1/speech/status`. The current browser workflow records a clip, calls the backend, and retrieves synthesized audio when configured. This is **recorded-turn voice**, not proof of realtime duplex speech or natural, low-latency interruption handling. The exact STT, TTS and speech-to-speech model should be selected from deliberate quality/latency/cost evaluations before those capabilities are advertised as finished.
+
+## Security principles
+
+- Model output, imported agent profiles, repository content, fetched pages, and MCP tool descriptions are untrusted data.
+- Tool permissions are enforced by backend code, not by specialist prompts.
+- Keep tokens server-side, use least-privilege credentials, and allowlist repositories/projects.
+- Actions that write externally or have side effects require explicit approval.
+- Never claim a provider, integration, build, test, or deployment was verified unless there is corresponding evidence.
+
+## Project documentation
+
+- [Backend architecture and definition of done](docs/TARGET_BACKEND_ARCHITECTURE.md)
+- [Engineering foundation](docs/FOUNDATION.md)
+- [MCP setup and security](docs/MCP_TOOLS_SETUP.md)
+- [Integration roadmap](docs/INTEGRATION_PACK.md)
+- [GitHub project connector](docs/GITHUB_PROJECTS_SETUP.md)
+- [Speech configuration](docs/SPEECH_SETUP.md)
+- [FreeLLMAPI configuration](docs/FREELLMAPI_SETUP.md)
+- [Web research setup](docs/WEB_RESEARCH_SETUP.md)
+
 ## Upstream attribution
 
-Agency Agents is maintained independently. Kuro-chan pins the exact revision it consumes, preserves applicable license and attribution notices, and treats imported agent instructions as untrusted content that cannot override application security policy.
+Agency Agents is maintained independently. Kuro-chan pins the exact revision it consumes, preserves applicable license and attribution notices, and treats imported specialist instructions as untrusted content that cannot override application security policy.

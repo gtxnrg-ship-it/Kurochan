@@ -159,6 +159,38 @@ describe("Kuro-chan web API helpers", () => {
     expect(url).not.toContain("audio-session-token");
   });
 
+  it("requests live integration diagnostics without putting tokens in URLs", async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ ok: true, data: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    const client = new ApiClient({
+      getBaseUrl: () => "https://api.example.test",
+      getToken: () => "integration-session-token",
+      fetchImpl,
+    });
+
+    await client.mcpStatus({ probe: true });
+    await client.communityMcpPresets("firebase supabase");
+    await client.researchStatus();
+
+    expect(fetchImpl.mock.calls.map(([url]) => url)).toEqual([
+      "https://api.example.test/v1/mcp/status?probe=true",
+      "https://api.example.test/v1/community-mcp-presets?limit=100&q=firebase+supabase",
+      "https://api.example.test/v1/research/status",
+    ]);
+    for (const [url, options] of fetchImpl.mock.calls) {
+      expect(new Headers(options?.headers).get("authorization")).toBe(
+        "Bearer integration-session-token",
+      );
+      expect(options?.credentials).toBe("omit");
+      expect(url).not.toContain("integration-session-token");
+    }
+  });
+
   it("normalizes structured API errors for the UI", async () => {
     const fetchImpl = vi.fn(
       async () =>
