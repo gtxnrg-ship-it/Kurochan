@@ -1062,11 +1062,24 @@ export class TaskWorker {
                   toolName,
                   arguments: mcpArguments,
                 } = parsedMcpCall.data;
-                const descriptor = await this.options.mcpTools.getTool(
-                  serverId,
-                  toolName,
+                const selectedForTask = selectedMcpTools.some(
+                  (tool) =>
+                    tool.serverId === serverId && tool.name === toolName,
                 );
-                if (!descriptor) {
+                const descriptor = selectedForTask
+                  ? await this.options.mcpTools.getTool(serverId, toolName)
+                  : undefined;
+                if (!selectedForTask) {
+                  outcome = {
+                    name: "mcp.call" as const,
+                    ok: false,
+                    error: {
+                      code: "tool_not_selected",
+                      message:
+                        "The requested MCP tool is not in this task's allowed tool list.",
+                    },
+                  };
+                } else if (!descriptor) {
                   outcome = {
                     name: "mcp.call" as const,
                     ok: false,
