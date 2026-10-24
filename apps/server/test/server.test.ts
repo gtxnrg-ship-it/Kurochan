@@ -1416,6 +1416,65 @@ describe("Kuro-chan API", () => {
     expect(response.headers["x-omnirouter-provider"]).toBe("freellmapi");
   });
 
+  it("accepts auto as the free-first OmniRouter quality alias", async () => {
+    const calls: ProviderId[] = [];
+    const fakeProvider = (id: ProviderId, defaultModel: string): ChatProvider => ({
+      id,
+      displayName: id,
+      defaultModel,
+      isConfigured: true,
+      complete: async (input: ChatCompletionInput): Promise<ChatCompletionOutput> => {
+        calls.push(id);
+        return {
+          providerId: id,
+          model: input.model ?? defaultModel,
+          content: "ok",
+          latencyMs: 1,
+        };
+      },
+    });
+    app = buildServer({
+      env: {},
+      providers: {
+        providers: new Map<ProviderId, ChatProvider>([
+          ["openrouter", fakeProvider("openrouter", "openrouter/free")],
+          ["freellmapi", fakeProvider("freellmapi", "auto")],
+        ]),
+        statuses: [
+          {
+            id: "openrouter",
+            name: "OpenRouter",
+            configured: true,
+            defaultModel: "openrouter/free",
+            capabilityNotes: [],
+          },
+          {
+            id: "freellmapi",
+            name: "FreeLLMAPI",
+            configured: true,
+            defaultModel: "auto",
+            capabilityNotes: [],
+          },
+        ],
+      },
+      logger: false,
+      store: new RunStore(":memory:"),
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      payload: {
+        model: "auto",
+        messages: [{ role: "user", content: "hello" }],
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(calls).toEqual(["freellmapi"]);
+    expect(response.headers["x-omnirouter-profile"]).toBe("quality");
+  });
+
   it("rejects unknown model IDs instead of quietly changing route profiles", async () => {
     app = buildServer({
       env: {},
