@@ -415,7 +415,9 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         : 500;
     if (status >= 500) {
       const message =
-    error instanceof Error ? redactSensitiveText(error.message) : String(error);
+        error instanceof Error
+          ? redactSensitiveText(error.message)
+          : String(error);
       request.log.error(
         {
           err: {
@@ -3346,7 +3348,9 @@ function requestWarning(
   code: string,
 ): void {
   const message =
-    error instanceof Error ? redactSensitiveText(error.message) : String(error);
+    error instanceof Error
+      ? redactSensitiveText(error.message)
+      : String(error);
   app.log.warn(
     { error: redactSensitiveText(message), code },
     "Backend request could not be completed",
