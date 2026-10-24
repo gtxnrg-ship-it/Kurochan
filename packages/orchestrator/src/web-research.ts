@@ -67,7 +67,11 @@ export type WebResearchToolResult = {
   readonly name: "web.search";
   readonly ok: boolean;
   readonly result?: unknown;
-  readonly error?: { readonly code: string; readonly message: string };
+  readonly error?: {
+    readonly code: string;
+    readonly message: string;
+    readonly retryable?: boolean;
+  };
   readonly evidence?: readonly Evidence[];
 };
 
@@ -315,7 +319,17 @@ export class WebResearchRuntime implements WebResearchExecutor {
           { cause: error },
         );
       }
-      const data = BraveResponseSchema.parse(payload);
+      let data: z.infer<typeof BraveResponseSchema>;
+      try {
+        data = BraveResponseSchema.parse(payload);
+      } catch (error) {
+        throw new WebResearchError(
+          "invalid_web_search_response",
+          "Brave Search returned an unexpected response shape.",
+          true,
+          { cause: error },
+        );
+      }
       let remainingSnippetCharacters = MAX_CONTEXT_CHARACTERS;
       const items = data.grounding.generic
         .slice(0, args.limit)
@@ -395,7 +409,13 @@ export class WebResearchRuntime implements WebResearchExecutor {
       return {
         name: call.name,
         ok: false,
-        error: { code, message: message.slice(0, 1000) },
+        error: {
+          code,
+          message: message.slice(0, 1000),
+          ...(typeof typed.retryable === "boolean"
+            ? { retryable: typed.retryable }
+            : {}),
+        },
       };
     }
   }
