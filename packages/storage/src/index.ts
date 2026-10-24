@@ -576,6 +576,14 @@ export class RunStore {
         bytes INTEGER NOT NULL CHECK(bytes > 0 AND bytes <= 52428800),
         created_at INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS oauth_session_revocations (
+        session_id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        expires_at INTEGER NOT NULL,
+        revoked_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_oauth_session_revocations_expiry
+        ON oauth_session_revocations(expires_at);
       CREATE INDEX IF NOT EXISTS idx_conversation_audio_conversation
         ON conversation_audio(conversation_id, created_at);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_conversation_client_message
@@ -618,6 +626,42 @@ export class RunStore {
 
   close(): void {
     this.db.close();
+  }
+
+  revokeOAuthSession(
+    sessionId: string,
+    userId: string,
+    expiresAt: number,
+    now = Date.now(),
+  ): void {
+    assertText(sessionId, "OAuth session ID", 200);
+    assertText(userId, "OAuth user ID", 200);
+    if (!Number.isSafeInteger(expiresAt) || expiresAt <= now) return;
+    this.db
+      .prepare("DELETE FROM oauth_session_revocations WHERE expires_at <= ?")
+      .run(now);
+    this.db
+      .prepare(
+        "INSERT OR REPLACE INTO oauth_session_revocations(session_id,user_id,expires_at,revoked_at) VALUES(?,?,?,?)",
+      )
+      .run(sessionId, userId, expiresAt, now);
+  }
+
+  isOAuthSessionRevoked(sessionId: string, now = Date.now()): boolean {
+    assertText(sessionId, "OAuth session ID", 200);
+    const row = this.db
+      .prepare(
+        "SELECT expires_at FROM oauth_session_revocations WHERE session_id=?",
+      )
+      .get(sessionId) as { expires_at: number } | undefined;
+    if (!row) return false;
+    if (row.expires_at <= now) {
+      this.db
+        .prepare("DELETE FROM oauth_session_revocations WHERE session_id=?")
+        .run(sessionId);
+      return false;
+    }
+    return true;
   }
 
   createConversation(
@@ -1297,21 +1341,57 @@ export class RunStore {
     );
   }
 
-  listRuns(limit = 50, before?: number): readonly RunRecord[] {
+  listRuns(
+    limit = 50,
+    before?: number,
+    createdBy?: string,
+  ): readonly RunRecord[] {
     if (!Number.isInteger(limit) || limit < 1 || limit > 200)
       throw new Error("limit must be between 1 and 200.");
-    const rows =
-      before === undefined
-        ? this.db
-            .prepare(
-              "SELECT * FROM runs ORDER BY created_at DESC, id DESC LIMIT ?",
-            )
-            .all(limit)
-        : this.db
-            .prepare(
-              "SELECT * FROM runs WHERE created_at < ? ORDER BY created_at DESC, id DESC LIMIT ?",
-            )
-            .all(before, limit);
+    if (createdBy !== undefined) assertText(createdBy, "createdBy", 200);
+
+    let rows: unknown;
+    if (createdBy === undefined) {
+      rows =
+        before === undefined
+          ? this.db
+              .prepare(
+                "SELECT * FROM runs ORDER BY created_at DESC, id DESC LIMIT ?",
+              )
+              .all(limit)
+          : this.db
+              .prepare(
+                "SELECT * FROM runs WHERE created_at < ? ORDER BY created_at DESC, id DESC LIMIT ?",
+              )
+              .all(before, limit);
+    } else if (createdBy === "local") {
+      // Include historical local runs without an owner, but never a different account.
+      rows =
+        before === undefined
+          ? this.db
+              .prepare(
+                "SELECT * FROM runs WHERE created_by=? OR created_by IS NULL ORDER BY created_at DESC, id DESC LIMIT ?",
+              )
+              .all(createdBy, limit)
+          : this.db
+              .prepare(
+                "SELECT * FROM runs WHERE (created_by=? OR created_by IS NULL) AND created_at < ? ORDER BY created_at DESC, id DESC LIMIT ?",
+              )
+              .all(createdBy, before, limit);
+    } else {
+      rows =
+        before === undefined
+          ? this.db
+              .prepare(
+                "SELECT * FROM runs WHERE created_by=? ORDER BY created_at DESC, id DESC LIMIT ?",
+              )
+              .all(createdBy, limit)
+          : this.db
+              .prepare(
+                "SELECT * FROM runs WHERE created_by=? AND created_at < ? ORDER BY created_at DESC, id DESC LIMIT ?",
+              )
+              .all(createdBy, before, limit);
+    }
     return (rows as RunRow[]).map((row) => asRun(row)!);
   }
 

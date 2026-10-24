@@ -41,6 +41,8 @@ const state = {
   modelCatalogUpdatedAt: null,
   connected: false,
   authenticated: false,
+  authStatus: null,
+  authUser: null,
   providers: [],
   worker: null,
   speech: null,
@@ -259,10 +261,149 @@ function updateInspector() {
   setText("#active-run-count", String(active));
 }
 
+function renderAuthProviderPanel() {
+  const panel = $("#auth-provider-panel");
+  const buttons = $("#auth-provider-buttons");
+  const note = $("#auth-provider-note");
+  const signOutRow = $("#auth-sign-out-row");
+  if (!panel || !buttons || !note || !signOutRow) return;
+
+  buttons.replaceChildren();
+  const providers = Array.isArray(state.authStatus?.providers)
+    ? state.authStatus.providers.filter((provider) => provider.configured)
+    : [];
+  if (state.authUser) {
+    panel.hidden = false;
+    setText(
+      "#auth-provider-title",
+      "Signed in as " + (state.authUser.displayName || "your account"),
+    );
+    note.textContent = state.authUser.email
+      ? state.authUser.email +
+        " · " +
+        (state.authUser.provider === "google" ? "Google" : "GitHub")
+      : "Connected with " +
+        (state.authUser.provider === "google" ? "Google" : "GitHub");
+    signOutRow.hidden = false;
+  } else if (state.authStatus?.enabled && providers.length) {
+    panel.hidden = false;
+    setText("#auth-provider-title", "Sign in to Kuro-chan");
+    note.textContent =
+      "Use your account to keep conversations and runs separate from other users of this server.";
+    signOutRow.hidden = true;
+  } else {
+    panel.hidden = true;
+    signOutRow.hidden = true;
+    return;
+  }
+
+  for (const provider of providers) {
+    const button = makeElement(
+      "button",
+      "button button-subtle auth-provider-button",
+    );
+    button.type = "button";
+    button.dataset.oauthProvider = provider.id;
+    button.append(
+      makeElement(
+        "span",
+        "auth-provider-logo",
+        provider.id === "github" ? "⌘" : "G",
+      ),
+      makeElement("span", "", "Continue with " + provider.name),
+    );
+    button.addEventListener("click", () => {
+      try {
+        const base = normalizeApiBaseUrl(state.apiBaseUrl);
+        location.href =
+          base + "/auth/" + encodeURIComponent(provider.id) + "/start";
+      } catch (error) {
+        showToast(errorMessage(error), "error");
+      }
+    });
+    buttons.append(button);
+  }
+}
+
+async function signOutOfAccount() {
+  const wasOAuthAccount = Boolean(state.authUser);
+  let serverRevoked = false;
+  if (wasOAuthAccount) {
+    try {
+      const result = await api.logoutSession();
+      serverRevoked = result?.revoked === true;
+    } catch {
+      serverRevoked = false;
+    }
+  }
+  state.apiToken = "";
+  state.authUser = null;
+  sessionStorage.removeItem(API_TOKEN_KEY);
+  stopAllRunStreams();
+  state.currentConversationId = null;
+  state.currentConversation = null;
+  state.messages = [];
+  state.conversations = [];
+  state.runs = [];
+  state.runDetails.clear();
+  state.lastEventIds.clear();
+  state.authenticated = false;
+  renderAuthProviderPanel();
+  showToast(
+    wasOAuthAccount && !serverRevoked
+      ? "Signed out on this device. Server-side revocation could not be confirmed, so this token may remain valid until expiry."
+      : "Signed out. Your server-side conversation history was not deleted.",
+    wasOAuthAccount && !serverRevoked ? "error" : "success",
+  );
+  await refreshConnection();
+  renderView();
+}
+async function handleOAuthReturn() {
+  const fragment = new URLSearchParams(location.hash.replace(/^#/, ""));
+  const code = fragment.get("auth_code");
+  const errorCode = fragment.get("auth_error");
+  if (!code && !errorCode) return;
+  history.replaceState(null, "", location.pathname + location.search);
+
+  if (errorCode) {
+    const friendly = {
+      oauth_not_configured: "Account sign-in is not configured on this server.",
+      oauth_provider_unavailable: "That sign-in provider is not configured.",
+      oauth_state_invalid:
+        "The sign-in could not be verified. Please try again.",
+      oauth_state_expired: "The sign-in took too long. Please try again.",
+      email_not_verified:
+        "The Google account must have a verified email address.",
+    };
+    showToast(
+      friendly[errorCode] || "Sign-in did not complete. Please try again.",
+      "error",
+    );
+    return;
+  }
+
+  try {
+    const session = await api.exchangeOAuthCode(code);
+    state.apiToken = session.token;
+    state.authUser = session.user;
+    sessionStorage.setItem(API_TOKEN_KEY, session.token);
+    showToast(
+      "Signed in as " + (session.user?.displayName || "your account") + ".",
+      "success",
+    );
+  } catch (error) {
+    state.apiToken = "";
+    state.authUser = null;
+    sessionStorage.removeItem(API_TOKEN_KEY);
+    showToast(errorMessage(error), "error");
+  }
+}
+
 async function refreshConnection({ quiet = true } = {}) {
   try {
     const health = await api.health();
     state.connected = Boolean(health?.ok);
+    state.authStatus = await api.authProviders().catch(() => null);
     if (!state.connected)
       throw new Error("The API responded, but health check did not pass.");
     try {
@@ -271,17 +412,33 @@ async function refreshConnection({ quiet = true } = {}) {
       state.providers = Array.isArray(config?.providers)
         ? config.providers
         : [];
+      const currentSession = await api.session().catch(() => null);
+      state.authUser =
+        currentSession?.user?.provider &&
+        currentSession.user.provider !== "local"
+          ? currentSession.user
+          : null;
       updateConnectionBadge("Connected", "is-online");
     } catch (error) {
       if (error?.status === 401 || error?.code === "unauthorized") {
         state.authenticated = false;
-        updateConnectionBadge("Token needed", "is-warning");
+        state.authUser = null;
+        state.apiToken = "";
+        sessionStorage.removeItem(API_TOKEN_KEY);
+        state.authStatus = await api
+          .authProviders()
+          .catch(() => state.authStatus);
+        updateConnectionBadge(
+          state.authStatus?.enabled ? "Sign in required" : "Token needed",
+          "is-warning",
+        );
       } else {
         state.authenticated = false;
         updateConnectionBadge("API reachable", "is-warning");
         if (!quiet) throw error;
       }
     }
+    renderAuthProviderPanel();
     if (state.authenticated) {
       const [worker, speech, router] = await Promise.allSettled([
         api.workerStatus(),
@@ -297,7 +454,9 @@ async function refreshConnection({ quiet = true } = {}) {
   } catch (error) {
     state.connected = false;
     state.authenticated = false;
+    state.authStatus = null;
     state.providers = [];
+    renderAuthProviderPanel();
     state.worker = null;
     state.speech = null;
     state.router = null;
@@ -2882,6 +3041,7 @@ function init() {
     if (event.key === "Escape") closeSettings();
   });
   $("#clear-token")?.addEventListener("click", clearApiToken);
+  $("#sign-out")?.addEventListener("click", () => void signOutOfAccount());
   document.addEventListener("click", (event) => {
     const suggestion = event.target.closest("[data-prompt]");
     if (suggestion) {
@@ -2926,6 +3086,7 @@ async function boot() {
     renderView();
     return;
   }
+  await handleOAuthReturn();
   await refreshConnection();
   if (!state.authenticated) {
     renderView();

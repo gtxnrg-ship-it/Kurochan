@@ -1,5 +1,14 @@
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { resolve } from "node:path";
+import {
+  OAuthError,
+  OAuthService,
+  clearOAuthStateCookie,
+  isOAuthEnvironmentConfigured,
+  readOAuthStateCookie,
+  type AuthPrincipal,
+  type OAuthProviderId,
+} from "./auth.js";
 import Fastify, {
   type FastifyInstance,
   type FastifyReply,
@@ -46,6 +55,12 @@ import {
   type WebResearchExecutor,
 } from "@kurochan/orchestrator";
 
+declare module "fastify" {
+  interface FastifyRequest {
+    kurochanPrincipal?: AuthPrincipal;
+  }
+}
+
 const KUROCHAN_CONVERSATION_SYSTEM_PROMPT = [
   "You are Kuro-chan, an expert assistant that helps people turn unclear ideas into useful outcomes.",
   "Understand intent from the current message and recent conversation, not only the literal wording of the latest sentence.",
@@ -76,6 +91,7 @@ export interface ServerOptions {
   readonly mcpTools?: McpToolRuntime;
   readonly communitySkills?: CommunitySkillCatalog;
   readonly speech?: SpeechRuntime;
+  readonly oauth?: OAuthService;
 }
 
 function createRequestAbortController(
@@ -91,6 +107,31 @@ function createRequestAbortController(
   request.raw.once("aborted", abortOnRequestAborted);
   reply.raw.once("close", abortOnResponseClose);
   return controller;
+}
+
+function principalId(request: FastifyRequest): string {
+  return request.kurochanPrincipal?.userId ?? "local";
+}
+
+function ownsRun(
+  run: { readonly createdBy?: string } | undefined,
+  userId: string,
+): boolean {
+  return Boolean(run) && (run?.createdBy ?? "local") === userId;
+}
+
+function visibleWorkerHeartbeat(
+  request: FastifyRequest,
+  worker: ReturnType<RunStore["listWorkerHeartbeats"]>[number],
+) {
+  if (principalId(request) === "local") return worker;
+  return {
+    workerId: worker.workerId,
+    state: worker.state,
+    startedAt: worker.startedAt,
+    lastSeenAt: worker.lastSeenAt,
+    stale: worker.stale,
+  };
 }
 
 function safeEqual(a: string, b: string): boolean {
@@ -164,6 +205,8 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   const store =
     options.store ??
     new RunStore(env.KUROCHAN_DB_PATH?.trim() || "data/kurochan.sqlite");
+  const oauth =
+    options.oauth ?? new OAuthService(env, undefined, Date.now, store);
   const catalog = options.catalog ?? new AgentCatalog();
   const communitySkills =
     options.communitySkills ?? new CommunitySkillCatalog();
@@ -423,24 +466,166 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     }),
   });
 
+  const oauthProviderSchema = z.enum(["github", "google"]);
+
+  app.get("/auth/providers", async () => oauth.publicStatus());
+
+  app.get("/auth/:provider/start", async (request, reply) => {
+    const params = request.params as { provider?: string };
+    const parsedProvider = oauthProviderSchema.safeParse(params.provider);
+    if (!parsedProvider.success) {
+      return reply.code(404).send({
+        error: {
+          code: "oauth_provider_unavailable",
+          message: "That sign-in provider is not supported.",
+        },
+      });
+    }
+    try {
+      const start = oauth.start(parsedProvider.data);
+      return reply.header("set-cookie", start.cookie).redirect(start.url);
+    } catch (error) {
+      const typed =
+        error instanceof OAuthError
+          ? error
+          : new OAuthError(
+              "oauth_start_failed",
+              "Sign-in could not be started.",
+              500,
+            );
+      return reply.code(typed.status).send({
+        error: {
+          code: typed.code,
+          message: typed.message,
+          retryable: typed.status >= 500,
+        },
+      });
+    }
+  });
+
+  app.get("/auth/:provider/callback", async (request, reply) => {
+    const params = request.params as { provider?: string };
+    const parsedProvider = oauthProviderSchema.safeParse(params.provider);
+    if (!parsedProvider.success) {
+      return reply.redirect(
+        oauth.signInErrorRedirect("oauth_provider_unavailable"),
+      );
+    }
+    const query = request.query as Record<string, unknown>;
+    const code = typeof query.code === "string" ? query.code : "";
+    const state = typeof query.state === "string" ? query.state : "";
+    try {
+      const result = await oauth.callback(
+        parsedProvider.data,
+        code,
+        state,
+        readOAuthStateCookie(request.headers.cookie, parsedProvider.data),
+      );
+      return reply
+        .header("set-cookie", result.clearCookie)
+        .redirect(result.redirectUrl);
+    } catch (error) {
+      const typed = error instanceof OAuthError ? error : undefined;
+      const code = typed?.code ?? "oauth_failed";
+      return reply
+        .header(
+          "set-cookie",
+          clearOAuthStateCookie(parsedProvider.data, oauth.usesHttps),
+        )
+        .redirect(oauth.signInErrorRedirect(code));
+    }
+  });
+
+  app.post(
+    "/auth/session/exchange",
+    { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } },
+    async (request, reply) => {
+      const body = z
+        .object({ code: z.string().trim().min(20).max(256) })
+        .strict()
+        .safeParse(request.body);
+      if (!body.success) {
+        return reply.code(400).send({
+          error: {
+            code: "invalid_oauth_code",
+            message: "A valid single-use sign-in code is required.",
+            retryable: false,
+          },
+        });
+      }
+      try {
+        const session = oauth.exchangeCode(body.data.code);
+        return reply.header("cache-control", "no-store").send(session);
+      } catch (error) {
+        const typed =
+          error instanceof OAuthError
+            ? error
+            : new OAuthError(
+                "oauth_exchange_failed",
+                "Sign-in could not be completed.",
+                500,
+              );
+        return reply
+          .code(typed.status)
+          .header("cache-control", "no-store")
+          .send({
+            error: {
+              code: typed.code,
+              message: typed.message,
+              retryable: typed.status >= 500,
+            },
+          });
+      }
+    },
+  );
+
   const token = env.KUROCHAN_API_TOKEN?.trim();
   app.addHook("preHandler", async (request, reply) => {
-    if (!token || !request.url.startsWith("/v1/")) return;
+    if (!request.url.split("?")[0]?.startsWith("/v1/")) return;
     const header = request.headers.authorization;
     const candidate =
       typeof header === "string" && header.startsWith("Bearer ")
         ? header.slice(7)
         : "";
-    if (!candidate || !safeEqual(candidate, token)) {
-      return reply.code(401).send({
-        error: {
-          code: "unauthorized",
-          message: "A valid Kuro-chan API bearer token is required.",
-          retryable: false,
-          requestId: request.id,
-        },
-      });
+
+    if (token && candidate && safeEqual(candidate, token)) {
+      request.kurochanPrincipal = {
+        userId: "local",
+        provider: "local",
+        displayName: "Local workspace",
+      };
+      return;
     }
+
+    const principal = candidate
+      ? oauth.verifySessionToken(candidate)
+      : undefined;
+    if (principal) {
+      request.kurochanPrincipal = principal;
+      return;
+    }
+
+    // Unconfigured local installs remain easy to run. OAuth-enabled or
+    // token-protected deployments fail closed until a valid identity is present.
+    if (!token && !oauth.isEnabled) {
+      request.kurochanPrincipal = {
+        userId: "local",
+        provider: "local",
+        displayName: "Local workspace",
+      };
+      return;
+    }
+
+    return reply.code(401).send({
+      error: {
+        code: "unauthorized",
+        message: oauth.isEnabled
+          ? "Sign in with a configured account or provide the local API token."
+          : "A valid Kuro-chan API bearer token is required.",
+        retryable: false,
+        requestId: request.id,
+      },
+    });
   });
 
   app.setErrorHandler((error, request, reply) => {
@@ -591,6 +776,33 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         },
       });
     }
+  });
+
+  app.get("/v1/session", async (request) => ({
+    user: request.kurochanPrincipal ?? {
+      userId: "local",
+      provider: "local",
+      displayName: "Local workspace",
+    },
+    sessionDurationSeconds: oauth.isEnabled ? 8 * 60 * 60 : null,
+  }));
+
+  app.post("/v1/session/logout", async (request, reply) => {
+    const header = request.headers.authorization;
+    const candidate =
+      typeof header === "string" && header.startsWith("Bearer ")
+        ? header.slice(7)
+        : "";
+    const apiToken = env.KUROCHAN_API_TOKEN?.trim();
+    const isApiToken = Boolean(
+      candidate && apiToken && safeEqual(candidate, apiToken),
+    );
+    const revoked =
+      candidate && !isApiToken ? oauth.revokeSessionToken(candidate) : false;
+    return reply.header("cache-control", "no-store").send({
+      signedOut: true,
+      revoked,
+    });
   });
 
   app.get("/v1/config", async () => ({
@@ -746,7 +958,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     }
     const workers = store.listWorkerHeartbeats(Date.now(), staleAfterMs);
     return {
-      data: workers,
+      data: workers.map((worker) => visibleWorkerHeartbeat(request, worker)),
       summary: {
         total: workers.length,
         active: workers.filter(
@@ -800,7 +1012,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     };
   });
 
-  app.get("/v1/worker/status", async () => ({
+  app.get("/v1/worker/status", async (request) => ({
     enabled: workerEnabled,
     running: worker.isRunning,
     workerId: worker.workerId,
@@ -827,7 +1039,9 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       enabled: mcpTools.isConfigured,
       servers: mcpTools.status(),
     },
-    workers: store.listWorkerHeartbeats(),
+    workers: store
+      .listWorkerHeartbeats()
+      .map((worker) => visibleWorkerHeartbeat(request, worker)),
     workspaceTools: [
       "workspace.list_files",
       "workspace.read_file",
@@ -1184,6 +1398,16 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   }));
 
   app.get("/v1/usage", async (request, reply) => {
+    if (oauth.isEnabled && principalId(request) !== "local") {
+      return reply.code(501).send({
+        error: {
+          code: "account_usage_not_implemented",
+          message: "Per-account provider usage tracking is not yet available.",
+          retryable: false,
+          requestId: request.id,
+        },
+      });
+    }
     const query = request.query as Record<string, unknown>;
     const rawPeriod = typeof query.period === "string" ? query.period : "24h";
     const windows: Readonly<Record<string, number>> = {
@@ -1585,7 +1809,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     try {
       const conversation = store.createConversation({
         ...(parsed.data.title ? { title: parsed.data.title } : {}),
-        createdBy: "local",
+        createdBy: principalId(request),
       });
       return reply.code(201).send({ conversation });
     } catch (error) {
@@ -1621,7 +1845,11 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         },
       });
     }
-    const data = store.listConversations({ limit, offset, createdBy: "local" });
+    const data = store.listConversations({
+      limit,
+      offset,
+      createdBy: principalId(request),
+    });
     return {
       data,
       pagination: { limit, offset, returned: data.length },
@@ -1631,7 +1859,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   app.get("/v1/conversations/:conversationId", async (request, reply) => {
     const { conversationId } = request.params as { conversationId: string };
     const conversation = store.getConversation(conversationId);
-    if (!conversation || conversation.createdBy !== "local") {
+    if (!conversation || conversation.createdBy !== principalId(request)) {
       return reply.code(404).send({
         error: {
           code: "conversation_not_found",
@@ -1668,7 +1896,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     async (request, reply) => {
       const { conversationId } = request.params as { conversationId: string };
       const conversation = store.getConversation(conversationId);
-      if (!conversation || conversation.createdBy !== "local") {
+      if (!conversation || conversation.createdBy !== principalId(request)) {
         return reply.code(404).send({
           error: {
             code: "conversation_not_found",
@@ -1715,7 +1943,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   app.delete("/v1/conversations/:conversationId", async (request, reply) => {
     const { conversationId } = request.params as { conversationId: string };
     const conversation = store.getConversation(conversationId);
-    if (!conversation || conversation.createdBy !== "local") {
+    if (!conversation || conversation.createdBy !== principalId(request)) {
       return reply.code(404).send({
         error: {
           code: "conversation_not_found",
@@ -1745,7 +1973,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         });
       }
       const conversation = store.getConversation(conversationId);
-      if (!conversation || conversation.createdBy !== "local") {
+      if (!conversation || conversation.createdBy !== principalId(request)) {
         return reply.code(404).send({
           error: {
             code: "conversation_not_found",
@@ -2164,7 +2392,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         messageId: string;
       };
       const conversation = store.getConversation(conversationId);
-      if (!conversation || conversation.createdBy !== "local") {
+      if (!conversation || conversation.createdBy !== principalId(request)) {
         return reply.code(404).send({
           error: {
             code: "conversation_not_found",
@@ -2200,7 +2428,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     async (request, reply) => {
       const { conversationId } = request.params as { conversationId: string };
       const conversation = store.getConversation(conversationId);
-      if (!conversation || conversation.createdBy !== "local") {
+      if (!conversation || conversation.createdBy !== principalId(request)) {
         return reply.code(404).send({
           error: {
             code: "conversation_not_found",
@@ -2742,7 +2970,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       });
     }
     const conversation = store.getConversation(conversationId);
-    if (!conversation || conversation.createdBy !== "local") {
+    if (!conversation || conversation.createdBy !== principalId(request)) {
       return reply.code(404).send({
         error: {
           code: "conversation_not_found",
@@ -2824,7 +3052,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         goal: parsed.data.goal,
         profile: selection.profile,
         ...(parsed.data.model ? { model: parsed.data.model } : {}),
-        createdBy: "local",
+        createdBy: principalId(request),
         tasks: plan.tasks,
         plan: {
           intent: plan.intent,
@@ -2990,6 +3218,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       const run = store.createRun({
         ...(parsed.data as CreateRunInput),
         profile: selection.profile,
+        createdBy: principalId(request),
       });
       return reply.code(201).send({
         run,
@@ -3194,7 +3423,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         },
       });
     try {
-      return { data: store.listRuns(limit, before) };
+      return { data: store.listRuns(limit, before, principalId(request)) };
     } catch {
       return reply.code(400).send({
         error: {
@@ -3209,7 +3438,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   app.get("/v1/runs/:runId", async (request, reply) => {
     const { runId } = request.params as { runId: string };
     const run = store.getRun(runId);
-    if (!run)
+    if (!ownsRun(run, principalId(request)))
       return reply.code(404).send({
         error: {
           code: "run_not_found",
@@ -3227,7 +3456,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
 
   app.get("/v1/runs/:runId/artifacts", async (request, reply) => {
     const { runId } = request.params as { runId: string };
-    if (!store.getRun(runId)) {
+    if (!ownsRun(store.getRun(runId), principalId(request))) {
       return reply.code(404).send({
         error: {
           code: "run_not_found",
@@ -3254,7 +3483,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     const { runId } = request.params as { runId: string };
     const query = request.query as Record<string, unknown>;
     const path = typeof query.path === "string" ? query.path : "";
-    if (!store.getRun(runId)) {
+    if (!ownsRun(store.getRun(runId), principalId(request))) {
       return reply.code(404).send({
         error: {
           code: "run_not_found",
@@ -3295,7 +3524,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
 
   app.get("/v1/runs/:runId/events", async (request, reply) => {
     const { runId } = request.params as { runId: string };
-    if (!store.getRun(runId))
+    if (!ownsRun(store.getRun(runId), principalId(request)))
       return reply.code(404).send({
         error: {
           code: "run_not_found",
@@ -3334,7 +3563,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   app.get("/v1/runs/:runId/events/stream", async (request, reply) => {
     const { runId } = request.params as { runId: string };
     const initialRun = store.getRun(runId);
-    if (!initialRun) {
+    if (!ownsRun(initialRun, principalId(request))) {
       return reply.code(404).send({
         error: {
           code: "run_not_found",
@@ -3501,6 +3730,16 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
 
   app.post("/v1/runs/:runId/cancel", async (request, reply) => {
     const { runId } = request.params as { runId: string };
+    if (!ownsRun(store.getRun(runId), principalId(request))) {
+      return reply.code(404).send({
+        error: {
+          code: "run_not_found",
+          message: "Run not found.",
+          retryable: false,
+          requestId: request.id,
+        },
+      });
+    }
     const body = z
       .object({ reason: z.string().max(2000).optional() })
       .safeParse(request.body ?? {});
@@ -3532,6 +3771,16 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       runId: string;
       taskId: string;
     };
+    if (!ownsRun(store.getRun(runId), principalId(request))) {
+      return reply.code(404).send({
+        error: {
+          code: "run_not_found",
+          message: "Run not found.",
+          retryable: false,
+          requestId: request.id,
+        },
+      });
+    }
     const body = z
       .object({
         approved: z.boolean(),
@@ -3890,9 +4139,13 @@ export function validateServerConfiguration(env: Environment = process.env): {
   const parsedPort = parseEnvironmentInteger("PORT", env.PORT, 8787, 1, 65535);
   const loopback =
     host === "127.0.0.1" || host === "localhost" || host === "::1";
-  if (!loopback && !env.KUROCHAN_API_TOKEN?.trim()) {
+  if (
+    !loopback &&
+    !env.KUROCHAN_API_TOKEN?.trim() &&
+    !isOAuthEnvironmentConfigured(env)
+  ) {
     throw new Error(
-      "Refusing to bind Kuro-chan API to a non-loopback host without KUROCHAN_API_TOKEN.",
+      "Refusing to bind Kuro-chan API to a non-loopback host without KUROCHAN_API_TOKEN or fully configured HTTPS OAuth authentication.",
     );
   }
   parseEnvironmentInteger(
