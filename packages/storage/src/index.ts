@@ -1229,6 +1229,15 @@ export class RunStore {
     return (rows as RunRow[]).map((row) => asRun(row)!);
   }
 
+  listVerifyingRuns(): readonly RunRecord[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM runs WHERE status='verifying' ORDER BY updated_at ASC, id ASC",
+      )
+      .all() as RunRow[];
+    return rows.map((row) => asRun(row)!);
+  }
+
   getTask(taskId: string): TaskRecord | undefined {
     const row = this.db
       .prepare("SELECT * FROM tasks WHERE id=?")
