@@ -211,11 +211,95 @@ export function approvalGranted(
   return decision?.type === "approval.granted";
 }
 
-function profileText(instructions: string): string {
-  const max = 28_000;
+function profileText(instructions: string, max = 28_000): string {
   return instructions.length > max
     ? instructions.slice(0, max) + "\n[Profile excerpt truncated by Kuro-chan.]"
     : instructions;
+}
+
+function boundedText(value: string, maxCharacters: number): string {
+  if (value.length <= maxCharacters) return value;
+  return (
+    value.slice(0, Math.max(0, maxCharacters - 100)) +
+    "\n[Text excerpt truncated by Kuro-chan; original characters: " +
+    value.length +
+    ".]"
+  );
+}
+
+function boundedJsonValue(value: unknown, maxCharacters: number): unknown {
+  let serialized: string;
+  try {
+    const result = JSON.stringify(value);
+    serialized =
+      typeof result === "string"
+        ? result
+        : JSON.stringify({ error: "Value was not JSON-serializable." });
+  } catch {
+    return {
+      contextTruncated: true,
+      notice: "Value could not be serialized into task context.",
+    };
+  }
+  if (serialized.length <= maxCharacters) return value;
+
+  const marker = {
+    contextTruncated: true,
+    notice:
+      "This value is an incomplete JSON prefix, not complete evidence. Use available tools to inspect more if necessary.",
+    originalCharacters: serialized.length,
+    preview: "",
+  };
+  let length = Math.max(0, maxCharacters - JSON.stringify(marker).length - 8);
+  let encoded = JSON.stringify({ ...marker, preview: serialized.slice(0, length) });
+  while (encoded.length > maxCharacters && length > 0) {
+    length = Math.floor(length / 2);
+    encoded = JSON.stringify({ ...marker, preview: serialized.slice(0, length) });
+  }
+  return encoded.length <= maxCharacters
+    ? JSON.parse(encoded)
+    : { contextTruncated: true, notice: marker.notice };
+}
+
+function boundedEvidence(evidence: readonly Evidence[]): readonly unknown[] {
+  return evidence.slice(0, 1).map((item) => ({
+    kind: boundedText(item.kind, 80),
+    summary: boundedText(item.summary, 350),
+    ...(item.uri ? { uri: boundedText(item.uri, 500) } : {}),
+    ...(item.metadata === undefined
+      ? {}
+      : { metadata: boundedJsonValue(item.metadata, 500) }),
+  }));
+}
+
+function selectMcpToolsForContext(
+  rankedTools: readonly McpToolDescriptor[],
+): {
+  readonly tools: readonly McpToolDescriptor[];
+  readonly omittedCount: number;
+} {
+  const maxTools = 6;
+  const maxSchemaCharacters = 1_600;
+  let remainingSchemaCharacters = 9_000;
+  const tools: McpToolDescriptor[] = [];
+  for (const tool of rankedTools) {
+    if (tools.length >= maxTools) break;
+    let length: number;
+    try {
+      length = JSON.stringify(tool.inputSchema).length;
+    } catch {
+      continue;
+    }
+    if (
+      length > maxSchemaCharacters ||
+      length > remainingSchemaCharacters
+    ) {
+      continue;
+    }
+    tools.push(tool);
+    remainingSchemaCharacters -= length;
+  }
+  return { tools, omittedCount: Math.max(0, rankedTools.length - tools.length) };
 }
 
 function workerSystemPrompt(
