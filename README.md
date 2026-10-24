@@ -75,6 +75,14 @@ pnpm dev:worker
 
 Keep model-provider credentials, GitHub tokens, Brave keys, speech credentials, and MCP credentials in the server/worker environment or a secret manager. Never put them in browser code, UI settings, chat prompts, or a committed `.env` file.
 
+## Sign in, deploy, and install
+
+The workbench now supports optional first-party **GitHub and Google account sign-in** when the API operator configures OAuth credentials. On an unconfigured local install, the app stays local-first and continues to use the optional API bearer token. Provider buttons only appear when the API reports a provider as configured.
+
+Set `KUROCHAN_PUBLIC_API_URL`, `KUROCHAN_SESSION_SECRET` (at least 32 characters), `WEB_ORIGIN`, and the desired provider's client ID/secret in the server environment. Register the exact callback URL `https://your-api-host/auth/github/callback` or `https://your-api-host/auth/google/callback` with the provider, and set `CORS_ALLOWED_ORIGINS` to the exact web origin. See [authentication setup](docs/AUTHENTICATION_SETUP.md) before exposing the API. Do not deploy the example credentials or bind an unprotected development server to the public internet.
+
+**There is no official hosted Kuro-chan website, public download URL, or native Android/iOS package published by this repository yet.** For now, run the web client locally using the instructions above. Once served from a secure origin, supported browsers can install it as a PWA from their browser's install menu. A public website needs an actual deployment, DNS/TLS configuration, real OAuth client credentials, and live acceptance testing; a README link alone cannot provide that deployment.
+
 ## Build, test and quality checks
 
 ```sh
@@ -110,7 +118,7 @@ For configuration details, see [MCP setup](docs/MCP_TOOLS_SETUP.md), [GitHub pro
 4. Restart the worker, then click **Test MCP connections** and inspect discovered tool names and read-only/approval behavior.
 5. Start with read-only permissions. Use a scoped identity and test against non-production data before permitting writes.
 
-Kuro-chan's current MCP runtime supports local stdio and Streamable HTTP. The runtime does not yet broker interactive OAuth for every hosted provider, so the UI marks those services as needing OAuth support rather than showing them as connected. Supabase can use its documented project-scoped, read-only URL and a server-side authorization header for non-interactive setup. Firebase's local MCP server uses the Firebase CLI identity on the worker host. See the official provider documentation linked from each card and [MCP_TOOLS_SETUP.md](docs/MCP_TOOLS_SETUP.md).
+Kuro-chan's first-party web account sign-in can use GitHub or Google when configured, but that is separate from interactive OAuth inside third-party MCP integrations. The MCP runtime supports local stdio and Streamable HTTP; it does not yet broker interactive OAuth for every hosted MCP provider, so those services remain marked as needing OAuth support rather than showing as connected. Supabase can use its documented project-scoped, read-only URL and a server-side authorization header for non-interactive setup. Firebase's local MCP server uses the Firebase CLI identity on the worker host. See the official provider documentation linked from each card and [MCP_TOOLS_SETUP.md](docs/MCP_TOOLS_SETUP.md).
 
 ## Install and use on a phone
 
@@ -132,6 +140,7 @@ The API exposes its actual speech capabilities through `/v1/speech/status`. The 
 
 ## Project documentation
 
+- [Authentication and OAuth setup](docs/AUTHENTICATION_SETUP.md)
 - [Backend architecture and definition of done](docs/TARGET_BACKEND_ARCHITECTURE.md)
 - [Engineering foundation](docs/FOUNDATION.md)
 - [MCP setup and security](docs/MCP_TOOLS_SETUP.md)
