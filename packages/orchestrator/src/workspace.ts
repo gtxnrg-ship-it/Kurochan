@@ -235,7 +235,7 @@ export class WorkspaceRuntime {
   private readonly maxFiles: number;
   private readonly maxSearchResults: number;
   private readonly maxIndexedBytes: number;
-  private readonly searchIndex?: WorkspaceSearchIndexStore;
+  private readonly searchIndex: WorkspaceSearchIndexStore | undefined;
 
   constructor(options: WorkspaceRuntimeOptions) {
     if (!isAbsolute(options.root))
