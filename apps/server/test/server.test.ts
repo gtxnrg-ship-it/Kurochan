@@ -740,6 +740,7 @@ describe("Kuro-chan API", () => {
     });
     const complete = vi.fn(
       async (input: ChatCompletionInput): Promise<ChatCompletionOutput> => {
+        expect(input.systemPrompt).toContain("This is a spoken reply.");
         expect(
           input.messages.some(
             (message) => message.content === "What is two plus two?",
@@ -894,6 +895,7 @@ describe("Kuro-chan API", () => {
     const replay = await app.inject({ method: "POST", url, headers, payload });
     expect(replay.statusCode).toBe(200);
     expect(replay.json().idempotentReplay).toBe(true);
+    expect(replay.json().synthesis.model).toBe("speech-compatible");
     expect(replay.json().assistantMessage.id).toBe(
       first.json().assistantMessage.id,
     );
