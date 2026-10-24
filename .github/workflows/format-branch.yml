@@ -1,0 +1,39 @@
+name: One-time feature-branch formatting
+
+on:
+  push:
+    branches: [fix/backend-reliability-2026-10-24]
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    if: contains(github.event.head_commit.message, '[branch-format-pass]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: true
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: pnpm install --frozen-lockfile
+      - name: Apply the project's canonical formatter
+        run: pnpm format
+      - name: Verify formatted branch
+        run: pnpm check
+      - name: Commit formatting to the feature branch only
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -u
+          if [ -n "$(git diff --cached --name-only)" ]; then
+            git commit -m "style: apply canonical Prettier formatting"
+            git push origin HEAD:fix/backend-reliability-2026-10-24
+          fi
