@@ -168,9 +168,11 @@ describe("McpToolRuntime", () => {
         content: [{ text: 'search_records:{"query":"billing"}' }],
       },
     });
-    expect(client.callTool).toHaveBeenCalledWith("search_records", {
-      query: "billing",
-    });
+    expect(client.callTool.mock.calls[0]?.slice(0, 2)).toEqual([
+      "search_records",
+      { query: "billing" },
+    ]);
+    expect(client.callTool.mock.calls[0]?.[2]).toBeInstanceOf(AbortSignal);
     await runtime.close();
     expect(client.close).toHaveBeenCalledOnce();
   });
