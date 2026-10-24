@@ -1634,17 +1634,10 @@ export class RunStore {
     assertText(workerId, "workerId", 200);
     const tx = this.db.transaction(() => {
       const task = this.db
-        .prepare(
-          "SELECT status,lease_owner FROM tasks WHERE id=? AND run_id=?",
-        )
+        .prepare("SELECT status,lease_owner FROM tasks WHERE id=? AND run_id=?")
         .get(taskId, runId) as
-        | { status: TaskStatus; lease_owner: string | null }
-        | undefined;
-      if (
-        !task ||
-        task.status !== "running" ||
-        task.lease_owner !== workerId
-      ) {
+        { status: TaskStatus; lease_owner: string | null } | undefined;
+      if (!task || task.status !== "running" || task.lease_owner !== workerId) {
         return false;
       }
 
@@ -1658,8 +1651,7 @@ export class RunStore {
         payload_json: string;
       }>;
       let latestRequest:
-        | { id: number; action: Record<string, unknown> }
-        | undefined;
+        { id: number; action: Record<string, unknown> } | undefined;
       for (const event of events) {
         if (event.type !== "approval.requested") continue;
         const payload = JSON.parse(event.payload_json) as {

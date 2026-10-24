@@ -273,10 +273,16 @@ function boundedJsonValue(value: unknown, maxCharacters: number): unknown {
     preview: "",
   };
   let length = Math.max(0, maxCharacters - JSON.stringify(marker).length - 8);
-  let encoded = JSON.stringify({ ...marker, preview: serialized.slice(0, length) });
+  let encoded = JSON.stringify({
+    ...marker,
+    preview: serialized.slice(0, length),
+  });
   while (encoded.length > maxCharacters && length > 0) {
     length = Math.floor(length / 2);
-    encoded = JSON.stringify({ ...marker, preview: serialized.slice(0, length) });
+    encoded = JSON.stringify({
+      ...marker,
+      preview: serialized.slice(0, length),
+    });
   }
   return encoded.length <= maxCharacters
     ? JSON.parse(encoded)
@@ -312,16 +318,16 @@ export function selectMcpToolsForContext(
     } catch {
       continue;
     }
-    if (
-      length > maxSchemaCharacters ||
-      length > remainingSchemaCharacters
-    ) {
+    if (length > maxSchemaCharacters || length > remainingSchemaCharacters) {
       continue;
     }
     tools.push(tool);
     remainingSchemaCharacters -= length;
   }
-  return { tools, omittedCount: Math.max(0, rankedTools.length - tools.length) };
+  return {
+    tools,
+    omittedCount: Math.max(0, rankedTools.length - tools.length),
+  };
 }
 
 function workerSystemPrompt(
@@ -935,7 +941,7 @@ export class TaskWorker {
     try {
       supplementalSkills = await this.communitySkills.selectForTask(
         run.goal + " " + task.objective,
-        { maxSkills: 3, maxCharacters: 4_000 }, 
+        { maxSkills: 3, maxCharacters: 4_000 },
       );
     } catch (error) {
       this.options.onError?.(error);
@@ -977,45 +983,45 @@ export class TaskWorker {
               })),
             omittedDependencyCount: Math.max(0, dependencyResults.length - 3),
             communitySkills: supplementalSkills.map(
-            ({
-              id,
-              packId,
-              packName,
-              name,
-              description,
-              repository,
-              pinnedRevision,
-              content,
-            }) => ({
-              id,
-              packId,
-              packName,
-              name,
-              description,
-              repository,
-              pinnedRevision,
-              instructions: content,
-            }),
-          ),
-          availableTools: [
-            "workspace.list_files",
-            "workspace.read_file",
-            "workspace.write_file",
-            "workspace.search_text",
-            "github.search_repositories",
-            "github.get_repository",
-            "github.list_files",
-            "github.read_file",
-            ...(this.webResearch.isConfigured ? ["web.search"] : []),
-            ...(this.options.sandbox ? ["sandbox.run"] : []),
-            ...(this.options.githubProject?.isConfigured
-              ? ["github.checkout_repository"]
-              : []),
-            ...(this.options.githubProject?.canPublish
-              ? ["github.create_pull_request"]
-              : []),
-            ...(selectedMcpTools.length ? ["mcp.call"] : []),
-          ],
+              ({
+                id,
+                packId,
+                packName,
+                name,
+                description,
+                repository,
+                pinnedRevision,
+                content,
+              }) => ({
+                id,
+                packId,
+                packName,
+                name,
+                description,
+                repository,
+                pinnedRevision,
+                instructions: content,
+              }),
+            ),
+            availableTools: [
+              "workspace.list_files",
+              "workspace.read_file",
+              "workspace.write_file",
+              "workspace.search_text",
+              "github.search_repositories",
+              "github.get_repository",
+              "github.list_files",
+              "github.read_file",
+              ...(this.webResearch.isConfigured ? ["web.search"] : []),
+              ...(this.options.sandbox ? ["sandbox.run"] : []),
+              ...(this.options.githubProject?.isConfigured
+                ? ["github.checkout_repository"]
+                : []),
+              ...(this.options.githubProject?.canPublish
+                ? ["github.create_pull_request"]
+                : []),
+              ...(selectedMcpTools.length ? ["mcp.call"] : []),
+            ],
             availableMcpTools: selectedMcpTools.map((tool) => ({
               serverId: tool.serverId,
               serverName: boundedText(tool.serverName, 120),
@@ -1171,13 +1177,13 @@ export class TaskWorker {
               );
             } else {
               outcome = this.options.githubProject
-              ? await this.withWorkspaceLock(task.runId, () =>
-                  this.options.githubProject!.execute(
-                    task.runId,
-                    call as GitHubProjectToolCall,
-                    signal,
-                  ),
-                )
+                ? await this.withWorkspaceLock(task.runId, () =>
+                    this.options.githubProject!.execute(
+                      task.runId,
+                      call as GitHubProjectToolCall,
+                      signal,
+                    ),
+                  )
                 : {
                     name: call.name as GitHubProjectToolCall["name"],
                     ok: false,
@@ -1278,43 +1284,43 @@ export class TaskWorker {
                       },
                     )
                   ) {
-                  let preview: string;
-                  try {
-                    preview = JSON.stringify(
-                      redactMcpSensitiveValues(mcpArguments),
-                    ).slice(0, 2000);
-                  } catch {
-                    preview = "[Arguments could not be serialized]";
-                  }
-                  this.options.store.requestTaskApproval(
-                    task.runId,
-                    task.id,
-                    this.workerId,
-                    {
-                      description:
-                        "Run MCP tool " +
-                        descriptor.serverName +
-                        "/" +
-                        descriptor.name,
-                      taskId: task.id,
-                      approvalType: "external-write",
-                      mcpServerId: descriptor.serverId,
-                      mcpToolName: descriptor.name,
-                      argumentsHash: fingerprintMcpArguments(mcpArguments),
-                      argumentsPreview: preview,
-                      warning:
-                        "This MCP tool is not explicitly marked read-only. Review the configured server, tool, and arguments before approving its possible external side effects.",
-                    },
-                  );
-                  throw Object.assign(
-                    new Error(
-                      "Waiting for explicit approval before running this MCP tool.",
-                    ),
-                    {
-                      code: "approval_paused",
-                      retryable: false,
-                    },
-                  );
+                    let preview: string;
+                    try {
+                      preview = JSON.stringify(
+                        redactMcpSensitiveValues(mcpArguments),
+                      ).slice(0, 2000);
+                    } catch {
+                      preview = "[Arguments could not be serialized]";
+                    }
+                    this.options.store.requestTaskApproval(
+                      task.runId,
+                      task.id,
+                      this.workerId,
+                      {
+                        description:
+                          "Run MCP tool " +
+                          descriptor.serverName +
+                          "/" +
+                          descriptor.name,
+                        taskId: task.id,
+                        approvalType: "external-write",
+                        mcpServerId: descriptor.serverId,
+                        mcpToolName: descriptor.name,
+                        argumentsHash: fingerprintMcpArguments(mcpArguments),
+                        argumentsPreview: preview,
+                        warning:
+                          "This MCP tool is not explicitly marked read-only. Review the configured server, tool, and arguments before approving its possible external side effects.",
+                      },
+                    );
+                    throw Object.assign(
+                      new Error(
+                        "Waiting for explicit approval before running this MCP tool.",
+                      ),
+                      {
+                        code: "approval_paused",
+                        retryable: false,
+                      },
+                    );
                   } else {
                     outcome = await this.options.mcpTools.execute(
                       call.arguments,

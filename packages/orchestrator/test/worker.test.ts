@@ -92,14 +92,26 @@ describe("Bounded worker context", () => {
 describe("Approval scope", () => {
   it("fingerprints JSON arguments independent of object key order", () => {
     expect(
-      fingerprintMcpArguments({ record: { title: "draft", id: 7 }, tags: ["a", "b"] }),
+      fingerprintMcpArguments({
+        record: { title: "draft", id: 7 },
+        tags: ["a", "b"],
+      }),
     ).toBe(
-      fingerprintMcpArguments({ tags: ["a", "b"], record: { id: 7, title: "draft" } }),
+      fingerprintMcpArguments({
+        tags: ["a", "b"],
+        record: { id: 7, title: "draft" },
+      }),
     );
     expect(
-      fingerprintMcpArguments({ record: { title: "draft", id: 7 }, tags: ["a", "b"] }),
+      fingerprintMcpArguments({
+        record: { title: "draft", id: 7 },
+        tags: ["a", "b"],
+      }),
     ).not.toBe(
-      fingerprintMcpArguments({ record: { title: "published", id: 7 }, tags: ["a", "b"] }),
+      fingerprintMcpArguments({
+        record: { title: "published", id: 7 },
+        tags: ["a", "b"],
+      }),
     );
   });
 });
@@ -493,7 +505,8 @@ describe("TaskWorker", () => {
             model: "test-model",
             content: JSON.stringify({
               status: "tool_calls",
-              summary: "Attempt to use a configured but unlisted read-only tool.",
+              summary:
+                "Attempt to use a configured but unlisted read-only tool.",
               toolCalls: [
                 {
                   name: "mcp.call",
@@ -932,7 +945,11 @@ describe("TaskWorker", () => {
       });
       const fakeProvider = provider(
         async (input: ChatCompletionInput): Promise<ChatCompletionOutput> => {
-          if ((input.systemPrompt ?? "").includes("independent consistency reviewer")) {
+          if (
+            (input.systemPrompt ?? "").includes(
+              "independent consistency reviewer",
+            )
+          ) {
             return {
               providerId: "openrouter",
               model: "test-model",
@@ -969,7 +986,9 @@ describe("TaskWorker", () => {
         },
       );
       const router = new OmniRouter({
-        providers: new Map<ProviderId, ChatProvider>([["openrouter", fakeProvider]]),
+        providers: new Map<ProviderId, ChatProvider>([
+          ["openrouter", fakeProvider],
+        ]),
       });
       const worker = new TaskWorker({
         store,

@@ -394,13 +394,17 @@ function checkJsonSchema(
   if (depth > 24) {
     return {
       kind: "schema",
-      message: "Tool input schema or arguments exceed the validation depth limit.",
+      message:
+        "Tool input schema or arguments exceed the validation depth limit.",
     };
   }
   if (typeof schemaValue === "boolean") {
     return schemaValue
       ? undefined
-      : { kind: "value", message: "Arguments at " + path + " are not permitted." };
+      : {
+          kind: "value",
+          message: "Arguments at " + path + " are not permitted.",
+        };
   }
   if (!isRecord(schemaValue)) {
     return {
@@ -436,7 +440,8 @@ function checkJsonSchema(
     if (!typeValue.some((item) => matchesJsonType(value, item as string))) {
       return {
         kind: "value",
-        message: "Arguments at " + path + " do not match the tool input schema type.",
+        message:
+          "Arguments at " + path + " do not match the tool input schema type.",
       };
     }
   } else if (typeValue !== undefined) {
@@ -449,17 +454,21 @@ function checkJsonSchema(
   if ("const" in schemaValue && !jsonValuesEqual(value, schemaValue.const)) {
     return {
       kind: "value",
-      message: "Arguments at " + path + " do not match the required constant value.",
+      message:
+        "Arguments at " + path + " do not match the required constant value.",
     };
   }
   if (schemaValue.enum !== undefined) {
     if (!Array.isArray(schemaValue.enum)) {
       return {
         kind: "schema",
-        message: "Tool input schema at " + path + " has an invalid enum constraint.",
+        message:
+          "Tool input schema at " + path + " has an invalid enum constraint.",
       };
     }
-    if (!schemaValue.enum.some((candidate) => jsonValuesEqual(value, candidate))) {
+    if (
+      !schemaValue.enum.some((candidate) => jsonValuesEqual(value, candidate))
+    ) {
       return {
         kind: "value",
         message: "Arguments at " + path + " are not one of the allowed values.",
@@ -473,7 +482,12 @@ function checkJsonSchema(
     if (!Array.isArray(group) || group.length === 0) {
       return {
         kind: "schema",
-        message: "Tool input schema at " + path + " has an invalid " + keyword + " constraint.",
+        message:
+          "Tool input schema at " +
+          path +
+          " has an invalid " +
+          keyword +
+          " constraint.",
       };
     }
     const results = group.map((subschema) =>
@@ -489,7 +503,8 @@ function checkJsonSchema(
     ) {
       return {
         kind: "value",
-        message: "Arguments at " + path + " do not satisfy the tool input schema.",
+        message:
+          "Arguments at " + path + " do not satisfy the tool input schema.",
       };
     }
   }
@@ -511,10 +526,7 @@ function checkJsonSchema(
     "minProperties",
     "maxProperties",
   ];
-  if (
-    objectKeywords.some((key) => key in schemaValue) &&
-    isRecord(value)
-  ) {
+  if (objectKeywords.some((key) => key in schemaValue) && isRecord(value)) {
     const properties = schemaValue.properties;
     if (properties !== undefined && !isRecord(properties)) {
       return {
@@ -530,7 +542,8 @@ function checkJsonSchema(
     ) {
       return {
         kind: "schema",
-        message: "Tool input schema at " + path + " has invalid required fields.",
+        message:
+          "Tool input schema at " + path + " has invalid required fields.",
       };
     }
     for (const key of (required as string[] | undefined) ?? []) {
@@ -538,8 +551,11 @@ function checkJsonSchema(
         return {
           kind: "value",
           message:
-            "Arguments at " + path + " are missing required field \"" +
-            key.slice(0, 100) + "\".",
+            "Arguments at " +
+            path +
+            ' are missing required field "' +
+            key.slice(0, 100) +
+            '".',
         };
       }
     }
@@ -551,7 +567,12 @@ function checkJsonSchema(
       ) {
         return {
           kind: "schema",
-          message: "Tool input schema at " + path + " has an invalid " + key + " constraint.",
+          message:
+            "Tool input schema at " +
+            path +
+            " has an invalid " +
+            key +
+            " constraint.",
         };
       }
     }
@@ -588,8 +609,11 @@ function checkJsonSchema(
         return {
           kind: "value",
           message:
-            "Arguments at " + path + " include an unexpected field \"" +
-            key.slice(0, 100) + "\".",
+            "Arguments at " +
+            path +
+            ' include an unexpected field "' +
+            key.slice(0, 100) +
+            '".',
         };
       } else if (
         isRecord(additionalProperties) ||
@@ -605,7 +629,10 @@ function checkJsonSchema(
       } else if (additionalProperties !== undefined) {
         return {
           kind: "schema",
-          message: "Tool input schema at " + path + " has an invalid additionalProperties constraint.",
+          message:
+            "Tool input schema at " +
+            path +
+            " has an invalid additionalProperties constraint.",
         };
       }
     }
@@ -617,7 +644,10 @@ function checkJsonSchema(
       if (!isRecord(itemsSchema) && typeof itemsSchema !== "boolean") {
         return {
           kind: "schema",
-          message: "Tool input schema at " + path + " has an invalid items constraint.",
+          message:
+            "Tool input schema at " +
+            path +
+            " has an invalid items constraint.",
         };
       }
       for (let index = 0; index < value.length; index += 1) {
@@ -638,7 +668,12 @@ function checkJsonSchema(
       ) {
         return {
           kind: "schema",
-          message: "Tool input schema at " + path + " has an invalid " + key + " constraint.",
+          message:
+            "Tool input schema at " +
+            path +
+            " has an invalid " +
+            key +
+            " constraint.",
         };
       }
     }
@@ -662,7 +697,11 @@ function checkJsonSchema(
     }
     if (schemaValue.uniqueItems === true) {
       for (let index = 0; index < value.length; index += 1) {
-        if (value.slice(index + 1).some((item) => jsonValuesEqual(item, value[index]))) {
+        if (
+          value
+            .slice(index + 1)
+            .some((item) => jsonValuesEqual(item, value[index]))
+        ) {
           return {
             kind: "value",
             message: "Arguments at " + path + " contain duplicate items.",
@@ -681,7 +720,12 @@ function checkJsonSchema(
       ) {
         return {
           kind: "schema",
-          message: "Tool input schema at " + path + " has an invalid " + key + " constraint.",
+          message:
+            "Tool input schema at " +
+            path +
+            " has an invalid " +
+            key +
+            " constraint.",
         };
       }
     }
@@ -716,7 +760,12 @@ function checkJsonSchema(
       if (constraint !== undefined && typeof constraint !== "number") {
         return {
           kind: "schema",
-          message: "Tool input schema at " + path + " has an invalid " + key + " constraint.",
+          message:
+            "Tool input schema at " +
+            path +
+            " has an invalid " +
+            key +
+            " constraint.",
         };
       }
       if (
@@ -728,7 +777,10 @@ function checkJsonSchema(
       ) {
         return {
           kind: "value",
-          message: "Arguments at " + path + " are outside the permitted numeric range.",
+          message:
+            "Arguments at " +
+            path +
+            " are outside the permitted numeric range.",
         };
       }
     }
@@ -763,7 +815,9 @@ export function validateMcpToolArguments(
   return {
     valid: false,
     code:
-      issue.kind === "schema" ? "invalid_tool_schema" : "invalid_tool_arguments",
+      issue.kind === "schema"
+        ? "invalid_tool_schema"
+        : "invalid_tool_arguments",
     message: issue.message.slice(0, 500),
   };
 }

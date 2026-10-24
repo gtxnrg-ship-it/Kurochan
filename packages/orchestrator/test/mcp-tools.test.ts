@@ -252,7 +252,10 @@ describe("McpToolRuntime", () => {
     expect(JSON.stringify(result)).not.toContain("exception-secret-value");
     expect(result).toMatchObject({
       ok: false,
-      error: { code: "upstream_failed", message: expect.stringContaining("[REDACTED_SECRET]") },
+      error: {
+        code: "upstream_failed",
+        message: expect.stringContaining("[REDACTED_SECRET]"),
+      },
     });
     await runtime.close();
   });
