@@ -963,7 +963,7 @@ export class McpToolRuntime {
           if (state)
             state.lastError =
               error instanceof Error
-                ? error.message.slice(0, 500)
+                ? String(redactMcpSensitiveValues(error.message)).slice(0, 500)
                 : "MCP server connection failed.";
           return [];
         }
@@ -1182,7 +1182,7 @@ export class McpToolRuntime {
     } catch (error) {
       const message =
         error instanceof Error
-          ? error.message.slice(0, 500)
+          ? String(redactMcpSensitiveValues(error.message)).slice(0, 500)
           : "MCP server connection failed.";
       state.lastError = message;
       this.connectionErrors.set(config.id, message);
