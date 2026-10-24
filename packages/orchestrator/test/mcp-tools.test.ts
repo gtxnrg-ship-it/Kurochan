@@ -182,6 +182,7 @@ describe("McpToolRuntime", () => {
       credentials: {
         access_token: "access-secret",
         refreshToken: "refresh-secret",
+        token: "generic-token-secret",
         nested: { password: "password-secret" },
       },
       content: [
@@ -203,11 +204,36 @@ describe("McpToolRuntime", () => {
     const serialized = JSON.stringify(result);
     expect(serialized).not.toContain("access-secret");
     expect(serialized).not.toContain("refresh-secret");
+    expect(serialized).not.toContain("generic-token-secret");
     expect(serialized).not.toContain("password-secret");
     expect(serialized).not.toContain(bearerToken);
     expect(serialized).not.toContain(githubToken);
     expect(serialized).toContain("A safe status message.");
     expect(serialized).toContain("[REDACTED_SECRET]");
+    await runtime.close();
+  });
+
+  it("redacts secrets in exceptions thrown by an MCP server", async () => {
+    const client = adapter([readonlyTool], async () => {
+      throw Object.assign(
+        new Error("Request failed with token=exception-secret-value"),
+        { code: "upstream_failed" },
+      );
+    });
+    const runtime = new McpToolRuntime({
+      servers: [serverConfig],
+      connectorFactory: () => client,
+    });
+    const result = await runtime.execute({
+      serverId: "records",
+      toolName: "search_records",
+      arguments: { query: "status" },
+    });
+    expect(JSON.stringify(result)).not.toContain("exception-secret-value");
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "upstream_failed", message: expect.stringContaining("[REDACTED_SECRET]") },
+    });
     await runtime.close();
   });
 
