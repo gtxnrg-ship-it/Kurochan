@@ -1469,6 +1469,25 @@ describe("Kuro-chan API", () => {
     expect(
       events.json().data.map((event: { type: string }) => event.type),
     ).toContain("run.plan_created");
+    const planEvent = events.json().data.find(
+      (event: { type: string }) => event.type === "run.plan_created",
+    ) as { payload: { taskGraph?: Array<Record<string, unknown>> } };
+    expect(planEvent.payload.taskGraph).toEqual([
+      {
+        key: "research",
+        agentId: "game-development/unreal-engine/unreal-world-builder",
+        objective: "Gather evidence",
+        dependencies: [],
+        approvalRequired: false,
+      },
+      {
+        key: "build",
+        agentId: "game-development/unreal-engine/unreal-world-builder",
+        objective: "Build from evidence",
+        dependencies: ["research"],
+        approvalRequired: false,
+      },
+    ]);
     expect(events.body).toContain("[REDACTED_SECRET]");
     expect(events.body).not.toContain("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
     const cancelled = await app.inject({
