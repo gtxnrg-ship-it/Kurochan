@@ -2983,6 +2983,170 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     return { data: store.listEvents(runId, afterId, limit) };
   });
 
+  // Keep a per-server cap so a large number of idle SSE clients cannot exhaust
+  // file descriptors or memory on a small self-hosted device.
+  let activeRunEventStreams = 0;
+  const maxActiveRunEventStreams = 128;
+
+  app.get("/v1/runs/:runId/events/stream", async (request, reply) => {
+    const { runId } = request.params as { runId: string };
+    const initialRun = store.getRun(runId);
+    if (!initialRun) {
+      return reply.code(404).send({
+        error: {
+          code: "run_not_found",
+          message: "Run not found.",
+          retryable: false,
+          requestId: request.id,
+        },
+      });
+    }
+
+    const query = request.query as Record<string, unknown>;
+    const headerCursor = request.headers["last-event-id"];
+    let cursor: number;
+    try {
+      cursor = parseBoundedInteger(
+        query.afterId ?? headerCursor,
+        0,
+        0,
+        Number.MAX_SAFE_INTEGER,
+      );
+    } catch {
+      return reply.code(400).send({
+        error: {
+          code: "invalid_event_cursor",
+          message: "afterId or Last-Event-ID must be a non-negative integer.",
+          retryable: false,
+          requestId: request.id,
+        },
+      });
+    }
+
+    if (activeRunEventStreams >= maxActiveRunEventStreams) {
+      return reply
+        .code(503)
+        .header("retry-after", "2")
+        .send({
+          error: {
+            code: "stream_capacity",
+            message: "Too many active run event streams.",
+            retryable: true,
+            requestId: request.id,
+          },
+        });
+    }
+
+    activeRunEventStreams += 1;
+    const abort = new AbortController();
+    const raw = reply.raw;
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      activeRunEventStreams = Math.max(0, activeRunEventStreams - 1);
+    };
+    const onClose = () => {
+      if (!raw.writableEnded) abort.abort();
+      release();
+    };
+    raw.once("close", onClose);
+
+    reply
+      .header("content-type", "text/event-stream; charset=utf-8")
+      .header("cache-control", "no-cache, no-transform")
+      .header("connection", "keep-alive")
+      .header("x-accel-buffering", "no");
+
+    const waitForPoll = () =>
+      new Promise<void>((resolveWait) => {
+        const finish = () => {
+          clearTimeout(timer);
+          abort.signal.removeEventListener("abort", finish);
+          resolveWait();
+        };
+        const timer = setTimeout(finish, 750);
+        timer.unref?.();
+        abort.signal.addEventListener("abort", finish, { once: true });
+      });
+
+    const eventStream = Readable.from(
+      (async function* () {
+        try {
+          yield ": connected\n\n";
+          let lastHeartbeatAt = Date.now();
+          while (!abort.signal.aborted) {
+            let events;
+            try {
+              events = store.listEvents(runId, cursor, 200);
+            } catch {
+              request.log.warn(
+                { code: "event_stream_read_failed", requestId: request.id },
+                "Run event stream could not read persisted events",
+              );
+              yield (
+                "event: stream.error\ndata: " +
+                JSON.stringify({
+                  code: "event_stream_read_failed",
+                  message: "Run events could not be read.",
+                  requestId: request.id,
+                }) +
+                "\n\n"
+              );
+              return;
+            }
+
+            for (const event of events) {
+              if (abort.signal.aborted) return;
+              cursor = event.id;
+              const eventName = event.type.replace(/[^A-Za-z0-9._-]/g, "") || "message";
+              yield (
+                "id: " +
+                event.id +
+                "\nevent: " +
+                eventName +
+                "\ndata: " +
+                JSON.stringify(event) +
+                "\n\n"
+              );
+            }
+
+            if (events.length < 200) {
+              const latestRun = store.getRun(runId);
+              if (
+                latestRun &&
+                ["completed", "failed", "cancelled"].includes(latestRun.status)
+              ) {
+                yield (
+                  "event: stream.end\ndata: " +
+                  JSON.stringify({
+                    runId,
+                    status: latestRun.status,
+                    lastEventId: cursor,
+                  }) +
+                  "\n\n"
+                );
+                return;
+              }
+            }
+
+            if (Date.now() - lastHeartbeatAt >= 15_000) {
+              yield ": keep-alive\n\n";
+              lastHeartbeatAt = Date.now();
+            }
+            await waitForPoll();
+          }
+        } finally {
+          raw.removeListener("close", onClose);
+          release();
+        }
+      })(),
+      { objectMode: false },
+    );
+
+    return reply.send(eventStream);
+  });
+
   app.post("/v1/runs/:runId/cancel", async (request, reply) => {
     const { runId } = request.params as { runId: string };
     const body = z
