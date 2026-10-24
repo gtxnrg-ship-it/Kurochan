@@ -650,6 +650,12 @@ describe("Kuro-chan API", () => {
         customInstructionsConfigured: true,
         authenticationConfigured: true,
       },
+      voiceTurn: {
+        enabled: true,
+        mode: "recorded-audio-turn",
+        realtimeDuplex: false,
+        bargeInInterruption: false,
+      },
       security: {
         credentialsInResponses: false,
         arbitraryUrlsAllowed: false,
@@ -1572,11 +1578,20 @@ describe("Kuro-chan API", () => {
       question,
     );
 
+    const planOnly = await app.inject({
+      method: "POST",
+      url: "/v1/runs/plan",
+      payload,
+    });
+    expect(planOnly.statusCode).toBe(200);
+    expect(planOnly.json().status).toBe("clarification_required");
+    expect(store.listRuns()).toHaveLength(0);
+
     const retry = await app.inject({ method: "POST", url, payload });
     expect(retry.statusCode).toBe(200);
     expect(store.listRuns()).toHaveLength(0);
     expect(store.listConversationMessages(conversationId)).toHaveLength(1);
-    expect(planner.createPlan).toHaveBeenCalledTimes(2);
+    expect(planner.createPlan).toHaveBeenCalledTimes(3);
   });
 
   it("exposes catalog metadata and searches agents without exposing full prompts", async () => {
