@@ -14,6 +14,14 @@ const WriteFileSchema = z
     overwrite: z.boolean().default(true),
   })
   .strict();
+const ReplaceTextSchema = z
+  .object({
+    path: RelativePathSchema,
+    search: z.string().min(1).max(20_000),
+    replace: z.string().max(20_000),
+    expectedMatches: z.number().int().min(1).max(1000).default(1),
+  })
+  .strict();
 const SAFE_DOTFILES = new Set([
   ".gitignore",
   ".dockerignore",
@@ -57,6 +65,7 @@ export interface WorkspaceToolCall {
     | "workspace.list_files"
     | "workspace.read_file"
     | "workspace.write_file"
+    | "workspace.replace_text"
     | "workspace.search_text";
   readonly arguments: unknown;
 }
@@ -210,6 +219,17 @@ export class WorkspaceRuntime {
             args.path,
             args.content,
             args.overwrite,
+          );
+          break;
+        }
+        case "workspace.replace_text": {
+          const args = ReplaceTextSchema.parse(call.arguments);
+          result = await this.replaceText(
+            runId,
+            args.path,
+            args.search,
+            args.replace,
+            args.expectedMatches,
           );
           break;
         }
@@ -412,6 +432,68 @@ export class WorkspaceRuntime {
       path: relative(base, target).split(sep).join("/"),
       bytes,
       overwritten: existed,
+    };
+  }
+
+  async replaceText(
+    runId: string,
+    relativePath: string,
+    search: string,
+    replacement: string,
+    expectedMatches = 1,
+  ): Promise<{
+    path: string;
+    matchesReplaced: number;
+    previousBytes: number;
+    bytes: number;
+    overwritten: true;
+  }> {
+    if (!search) {
+      throw new WorkspaceToolError(
+        "invalid_replacement",
+        "The search text must not be empty.",
+      );
+    }
+    if (
+      !Number.isInteger(expectedMatches) ||
+      expectedMatches < 1 ||
+      expectedMatches > 1000
+    ) {
+      throw new WorkspaceToolError(
+        "invalid_replacement",
+        "expectedMatches must be an integer between 1 and 1000.",
+      );
+    }
+
+    const current = await this.readFile(runId, relativePath);
+    let matches = 0;
+    let offset = 0;
+    while (true) {
+      const index = current.content.indexOf(search, offset);
+      if (index < 0) break;
+      matches += 1;
+      offset = index + search.length;
+      if (matches > 1000) break;
+    }
+    if (matches !== expectedMatches) {
+      throw new WorkspaceToolError(
+        "replacement_count_mismatch",
+        "Exact replacement was not applied: expected " +
+          expectedMatches +
+          " match(es), found " +
+          matches +
+          ". The file was not changed.",
+      );
+    }
+
+    const updated = current.content.split(search).join(replacement);
+    const write = await this.writeFile(runId, relativePath, updated, true);
+    return {
+      path: write.path,
+      matchesReplaced: matches,
+      previousBytes: current.bytes,
+      bytes: write.bytes,
+      overwritten: true,
     };
   }
 
