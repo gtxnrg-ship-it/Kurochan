@@ -1257,6 +1257,13 @@ describe("Kuro-chan API", () => {
         }),
       ]),
     );
+    expect(response.json()).toMatchObject({
+      object: "list",
+      data: expect.arrayContaining([
+        { id: "openrouter/openrouter/free", object: "model", owned_by: "openrouter" },
+        { id: "omni/quality", object: "model", owned_by: "kurochan" },
+      ]),
+    });
   });
 
   it("requires an API token when one is configured", async () => {
