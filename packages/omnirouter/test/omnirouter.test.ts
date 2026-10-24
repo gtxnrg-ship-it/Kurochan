@@ -28,6 +28,26 @@ const success = async (): Promise<
 });
 
 describe("OmniRouter", () => {
+  it("uses the free-first default order for the quality profile", async () => {
+    const openRouter = vi.fn(success);
+    const freeLlmApi = vi.fn(success);
+    const router = new OmniRouter({
+      providers: new Map([
+        ["openrouter", provider("openrouter", openRouter)],
+        ["freellmapi", provider("freellmapi", freeLlmApi)],
+      ]),
+    });
+
+    const result = await router.complete({
+      profile: "quality",
+      messages: [{ role: "user", content: "test" }],
+    });
+
+    expect(freeLlmApi).toHaveBeenCalledOnce();
+    expect(openRouter).not.toHaveBeenCalled();
+    expect(result.attempts).toBe(1);
+  });
+
   it("routes according to the selected profile", async () => {
     const first = vi.fn(success);
     const second = vi.fn(success);
