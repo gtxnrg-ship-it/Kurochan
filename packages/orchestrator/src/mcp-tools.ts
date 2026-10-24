@@ -260,11 +260,11 @@ function withMcpDeadline<T>(
 const SENSITIVE_MCP_FIELD =
   /authorization|cookie|password|passwd|secret|api.?key|access.?token|refresh.?token|id.?token|client.?secret|private.?key|credential/i;
 const SENSITIVE_MCP_VALUE_PATTERNS = [
-  /\\bBearer\\s+[A-Za-z0-9._~+/-]{16,}=?/gi,
-  /\\b(?:gh[pousr]|github_pat)_[A-Za-z0-9_]{12,}\\b/g,
-  /\\bsk-(?:proj-|ant-)?[A-Za-z0-9_-]{16,}\\b/g,
-  /\\bAIza[0-9A-Za-z_-]{35}\\b/g,
-  /\\beyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\b/g,
+  /\bBearer\s+[A-Za-z0-9._~+/-]{16,}=?/gi,
+  /\b(?:gh[pousr]|github_pat)_[A-Za-z0-9_]{12,}\b/g,
+  /\bsk-(?:proj-|ant-)?[A-Za-z0-9_-]{16,}\b/g,
+  /\bAIza[0-9A-Za-z_-]{35}\b/g,
+  /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g,
 ];
 
 export function redactMcpSensitiveValues(
