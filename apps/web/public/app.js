@@ -2546,9 +2546,13 @@ function init() {
       setView(view);
       if (view === "runs") void loadRuns();
       if (view === "agents" && !state.agentResults.length) void searchAgents();
-      if (view === "integrations" && !state.integrationsLoaded && !state.integrationsLoading)
-         void loadIntegrations();
-       if (view === "system") void loadSystemView();
+      if (
+        view === "integrations" &&
+        !state.integrationsLoaded &&
+        !state.integrationsLoading
+      )
+        void loadIntegrations();
+      if (view === "system") void loadSystemView();
     }),
   );
   $("#new-chat").addEventListener("click", () => void newConversation());
