@@ -446,24 +446,128 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     }),
   });
 
+  const oauthProviderSchema = z.enum(["github", "google"]);
+
+  app.get("/auth/providers", async () => oauth.publicStatus());
+
+  app.get("/auth/:provider/start", async (request, reply) => {
+    const params = request.params as { provider?: string };
+    const parsedProvider = oauthProviderSchema.safeParse(params.provider);
+    if (!parsedProvider.success) {
+      return reply.code(404).send({
+        error: { code: "oauth_provider_unavailable", message: "That sign-in provider is not supported." },
+      });
+    }
+    try {
+      const start = oauth.start(parsedProvider.data);
+      return reply.header("set-cookie", start.cookie).redirect(start.url);
+    } catch (error) {
+      const typed = error instanceof OAuthError
+        ? error
+        : new OAuthError("oauth_start_failed", "Sign-in could not be started.", 500);
+      return reply.code(typed.status).send({
+        error: { code: typed.code, message: typed.message, retryable: typed.status >= 500 },
+      });
+    }
+  });
+
+  app.get("/auth/:provider/callback", async (request, reply) => {
+    const params = request.params as { provider?: string };
+    const parsedProvider = oauthProviderSchema.safeParse(params.provider);
+    if (!parsedProvider.success) {
+      return reply.redirect(oauth.signInErrorRedirect("oauth_provider_unavailable"));
+    }
+    const query = request.query as Record<string, unknown>;
+    const code = typeof query.code === "string" ? query.code : "";
+    const state = typeof query.state === "string" ? query.state : "";
+    try {
+      const result = await oauth.callback(
+        parsedProvider.data,
+        code,
+        state,
+        readOAuthStateCookie(request.headers.cookie, parsedProvider.data),
+      );
+      return reply
+        .header("set-cookie", result.clearCookie)
+        .redirect(result.redirectUrl);
+    } catch (error) {
+      const typed = error instanceof OAuthError ? error : undefined;
+      const code = typed?.code ?? "oauth_failed";
+      return reply
+        .header("set-cookie", clearOAuthStateCookie(parsedProvider.data, oauth.usesHttps))
+        .redirect(oauth.signInErrorRedirect(code));
+    }
+  });
+
+  app.post(
+    "/auth/session/exchange",
+    { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } },
+    async (request, reply) => {
+      const body = z.object({ code: z.string().trim().min(20).max(256) }).strict().safeParse(request.body);
+      if (!body.success) {
+        return reply.code(400).send({
+          error: { code: "invalid_oauth_code", message: "A valid single-use sign-in code is required.", retryable: false },
+        });
+      }
+      try {
+        const session = oauth.exchangeCode(body.data.code);
+        return reply.header("cache-control", "no-store").send(session);
+      } catch (error) {
+        const typed = error instanceof OAuthError
+          ? error
+          : new OAuthError("oauth_exchange_failed", "Sign-in could not be completed.", 500);
+        return reply.code(typed.status).header("cache-control", "no-store").send({
+          error: { code: typed.code, message: typed.message, retryable: typed.status >= 500 },
+        });
+      }
+    },
+  );
+
   const token = env.KUROCHAN_API_TOKEN?.trim();
   app.addHook("preHandler", async (request, reply) => {
-    if (!token || !request.url.startsWith("/v1/")) return;
+    if (!request.url.split("?")[0]?.startsWith("/v1/")) return;
     const header = request.headers.authorization;
     const candidate =
       typeof header === "string" && header.startsWith("Bearer ")
         ? header.slice(7)
         : "";
-    if (!candidate || !safeEqual(candidate, token)) {
-      return reply.code(401).send({
-        error: {
-          code: "unauthorized",
-          message: "A valid Kuro-chan API bearer token is required.",
-          retryable: false,
-          requestId: request.id,
-        },
-      });
+
+    if (token && candidate && safeEqual(candidate, token)) {
+      request.kurochanPrincipal = {
+        userId: "local",
+        provider: "local",
+        displayName: "Local workspace",
+      };
+      return;
     }
+
+    const principal = candidate ? oauth.verifySessionToken(candidate) : undefined;
+    if (principal) {
+      request.kurochanPrincipal = principal;
+      return;
+    }
+
+    // Unconfigured local installs remain easy to run. OAuth-enabled or
+    // token-protected deployments fail closed until a valid identity is present.
+    if (!token && !oauth.isEnabled) {
+      request.kurochanPrincipal = {
+        userId: "local",
+        provider: "local",
+        displayName: "Local workspace",
+      };
+      return;
+    }
+
+    return reply.code(401).send({
+      error: {
+        code: "unauthorized",
+        message: oauth.isEnabled
+          ? "Sign in with a configured account or provide the local API token."
+          : "A valid Kuro-chan API bearer token is required.",
+        retryable: false,
+        requestId: request.id,
+      },
+    });
   });
 
   app.setErrorHandler((error, request, reply) => {
