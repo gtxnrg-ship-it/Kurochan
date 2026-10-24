@@ -1,13 +1,21 @@
 # Kuro-chan
 
+**A mobile-first AI workbench for natural-language coding and research, powered by coordinated specialist agents.**
+
 [![CI](https://github.com/gtxnrg-ship-it/Kurochan/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/gtxnrg-ship-it/Kurochan/actions/workflows/ci.yml)
-[![Repository](https://img.shields.io/badge/GitHub-source-181717?logo=github)](https://github.com/gtxnrg-ship-it/Kurochan)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-backend%20%2B%20web-blue)](https://github.com/gtxnrg-ship-it/Kurochan)
 
-**A mobile-first, tool-using AI workbench powered by a coordinated ecosystem of specialist agents.**
+> **Project status:** Active development. The repository contains a working web-client codebase and backend services. A public hosted demo is **not deployed yet**, so there is no live app URL to click today. We will add one here after the frontend and API are deployed and verified together.
 
-> **Project status:** Active development. The web application source is in [apps/web](https://github.com/gtxnrg-ship-it/Kurochan/tree/main/apps/web), with backend services and orchestration in this repository. **A public hosted demo is not configured yet**, so there is no honest live-app URL to click at this time. You can inspect the source, follow CI, or run it locally using the instructions below.
+## Explore Kuro-chan
 
-**Quick links:** [Web app source](https://github.com/gtxnrg-ship-it/Kurochan/tree/main/apps/web) · [Backend source](https://github.com/gtxnrg-ship-it/Kurochan/tree/main/apps/server) · [Worker source](https://github.com/gtxnrg-ship-it/Kurochan/tree/main/apps/worker) · [Architecture and engineering docs](https://github.com/gtxnrg-ship-it/Kurochan/tree/main/docs) · [Issues and progress](https://github.com/gtxnrg-ship-it/Kurochan/issues)
+- **[Web workbench source](apps/web/README.md)**: client features, mobile/PWA behavior, voice setup, and security notes.
+- **[Run the workbench locally](#run-the-full-workbench-locally)**: start the web app, API, and worker together.
+- **[Backend architecture](docs/TARGET_BACKEND_ARCHITECTURE.md)**: how planning, specialist agents, routing, tools, and verification fit together.
+- **[Engineering foundation](docs/FOUNDATION.md)**: project principles and acceptance expectations.
+- **[CI checks](https://github.com/gtxnrg-ship-it/Kurochan/actions)** · **[Source code](https://github.com/gtxnrg-ship-it/Kurochan)** · **[Issues and ideas](https://github.com/gtxnrg-ship-it/Kurochan/issues)**
+
 Kuro-chan is being built from a clean foundation. It aims to turn natural-language goals into researched plans, coordinated specialist work, real tool execution, and verifiable deliverables.
 
 ## Product principles
