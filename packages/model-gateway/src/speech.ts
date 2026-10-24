@@ -25,7 +25,7 @@ export interface SpeechSynthesisStatus {
   readonly enabled: boolean;
   readonly provider: string;
   readonly model: string | null;
-  readonly voice: string;
+  readonly voice: string | null;
   readonly format: NonNullable<SpeechSynthesisConfig["responseFormat"]>;
   readonly customInstructionsConfigured: boolean;
   readonly authenticationConfigured: boolean;
@@ -309,7 +309,7 @@ export class OpenAICompatibleSpeechRuntime implements SpeechRuntime {
   private readonly synthesisBaseUrl: string | undefined;
   private readonly synthesisApiKey: string | undefined;
   private readonly synthesisModel: string | undefined;
-  private readonly synthesisVoice: string;
+  private readonly synthesisVoice: string | undefined;
   private readonly synthesisFormat: NonNullable<
     SpeechSynthesisConfig["responseFormat"]
   >;
@@ -350,8 +350,11 @@ export class OpenAICompatibleSpeechRuntime implements SpeechRuntime {
       "TTS model",
       200,
     );
-    this.synthesisVoice =
-      boundedConfig(options.synthesis?.voice, "TTS voice", 200) ?? "alloy";
+    this.synthesisVoice = boundedConfig(
+      options.synthesis?.voice,
+      "TTS voice",
+      200,
+    );
     this.synthesisFormat = options.synthesis?.responseFormat ?? "mp3";
     this.synthesisInstructions = boundedConfig(
       options.synthesis?.instructions,
@@ -485,7 +488,7 @@ export class OpenAICompatibleSpeechRuntime implements SpeechRuntime {
         enabled: this.isSynthesisConfigured,
         provider: "OpenAI-compatible text-to-speech",
         model: this.synthesisModel ?? null,
-        voice: this.synthesisVoice,
+        voice: this.synthesisVoice ?? null,
         format: this.synthesisFormat,
         customInstructionsConfigured: Boolean(this.synthesisInstructions),
         authenticationConfigured: Boolean(this.synthesisApiKey),
@@ -668,9 +671,11 @@ export class OpenAICompatibleSpeechRuntime implements SpeechRuntime {
     const body: Record<string, unknown> = {
       model: this.synthesisModel,
       input: text,
-      voice,
       response_format: format,
     };
+    // Do not silently select a model-specific voice. A provider may have its
+    // own default, or the operator can configure a voice after evaluation.
+    if (voice) body.voice = voice;
     const instructions =
       input.instructions?.trim() || this.synthesisInstructions;
     if (instructions) body.instructions = instructions;
