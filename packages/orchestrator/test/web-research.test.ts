@@ -143,7 +143,9 @@ describe("WebResearchRuntime", () => {
   });
 
   it("marks malformed provider responses as retryable provider failures", async () => {
-    const fetchImpl = vi.fn(async () => jsonResponse({ unexpected: true })) as unknown as typeof fetch;
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({ unexpected: true }),
+    ) as unknown as typeof fetch;
     const runtime = new WebResearchRuntime({
       apiKey: "brave-test-key",
       fetchImpl,
