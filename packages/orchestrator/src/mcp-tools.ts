@@ -1,8 +1,9 @@
 import { isAbsolute, resolve } from "node:path";
-import Ajv from "ajv";
-import Ajv2019 from "ajv/dist/2019.js";
-import Ajv2020 from "ajv/dist/2020.js";
-import addFormats from "ajv-formats";
+import { Ajv } from "ajv";
+import { Ajv2019 } from "ajv/dist/2019.js";
+import { Ajv2020 } from "ajv/dist/2020.js";
+import * as AjvFormats from "ajv-formats";
+const addFormats = AjvFormats.default;
 import type { ValidateFunction } from "ajv";
 import { z } from "zod";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -374,7 +375,7 @@ const draft07Ajv = new Ajv(validatorOptions);
 const draft2019Ajv = new Ajv2019(validatorOptions);
 const draft2020Ajv = new Ajv2020(validatorOptions);
 for (const engine of [draft07Ajv, draft2019Ajv, draft2020Ajv]) {
-  addFormats(engine, { mode: "fast" });
+  addFormats(engine as unknown as Ajv, { mode: "fast" });
 }
 
 function schemaDialect(schema: Record<string, unknown>): SchemaDialect {
