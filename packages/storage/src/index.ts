@@ -366,7 +366,9 @@ function normalizeProgressUri(value: string): string | undefined {
   url.username = "";
   url.password = "";
   for (const key of [...url.searchParams.keys()]) {
-    if (/token|secret|password|credential|api.?key|authorization|auth/i.test(key)) {
+    if (
+      /token|secret|password|credential|api.?key|authorization|auth/i.test(key)
+    ) {
       url.searchParams.delete(key);
     }
   }
@@ -1491,26 +1493,24 @@ export class RunStore {
       assertText(input.toolName, "toolName", 200);
     }
 
-    const sources = (input.sources ?? [])
-      .slice(0, 8)
-      .map((source) => {
-        assertText(source.kind, "source kind", 80);
-        assertText(source.summary, "source summary", 500);
-        const safeSource: {
-          kind: string;
-          summary: string;
-          uri?: string;
-        } = {
-          kind: source.kind,
-          summary: source.summary,
-        };
-        if (source.uri !== undefined) {
-          assertText(source.uri, "source uri", 2_000);
-          const uri = normalizeProgressUri(source.uri);
-          if (uri) safeSource.uri = uri;
-        }
-        return safeSource;
-      });
+    const sources = (input.sources ?? []).slice(0, 8).map((source) => {
+      assertText(source.kind, "source kind", 80);
+      assertText(source.summary, "source summary", 500);
+      const safeSource: {
+        kind: string;
+        summary: string;
+        uri?: string;
+      } = {
+        kind: source.kind,
+        summary: source.summary,
+      };
+      if (source.uri !== undefined) {
+        assertText(source.uri, "source uri", 2_000);
+        const uri = normalizeProgressUri(source.uri);
+        if (uri) safeSource.uri = uri;
+      }
+      return safeSource;
+    });
     const payload = encodeJson({
       stage: input.stage,
       message: input.message,
@@ -1543,10 +1543,7 @@ export class RunStore {
       const run = this.db
         .prepare("SELECT status FROM runs WHERE id=?")
         .get(input.runId) as { status: RunStatus } | undefined;
-      if (
-        !run ||
-        ["cancelled", "failed", "completed"].includes(run.status)
-      ) {
+      if (!run || ["cancelled", "failed", "completed"].includes(run.status)) {
         throw new Error("Task progress cannot be recorded for a terminal run.");
       }
       this.db
