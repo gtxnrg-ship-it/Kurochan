@@ -504,7 +504,23 @@ export class RunStore {
     this.db.pragma("foreign_keys = ON");
     this.db.pragma("journal_mode = WAL");
     this.db.pragma("busy_timeout = 5000");
-    this.db.exec(`
+    const schemaVersion = this.db.pragma("user_version", { simple: true }) as number;
+    const currentSchemaVersion = 5;
+    if (!Number.isInteger(schemaVersion) || schemaVersion < 0) {
+      this.db.close();
+      throw new Error("SQLite schema version is invalid.");
+    }
+    if (schemaVersion > currentSchemaVersion) {
+      this.db.close();
+      throw new Error(
+        `Database schema version ${schemaVersion} is newer than supported version ${currentSchemaVersion}.`,
+      );
+    }
+
+    // Schema creation and the only current column migration must commit together.
+    // user_version is advanced only after every required change has succeeded.
+    const createAndMigrateSchema = this.db.transaction(() => {
+      this.db.exec(`
       CREATE TABLE IF NOT EXISTS runs (
         id TEXT PRIMARY KEY, goal TEXT NOT NULL, profile TEXT NOT NULL, model TEXT,
         status TEXT NOT NULL CHECK(status IN ('queued','planning','running','waiting_for_approval','verifying','completed','failed','cancelled')),
@@ -607,13 +623,16 @@ export class RunStore {
       CREATE INDEX IF NOT EXISTS idx_tasks_claim ON tasks(status, available_at, created_at);
       CREATE INDEX IF NOT EXISTS idx_tasks_run_status ON tasks(run_id, status);
       CREATE INDEX IF NOT EXISTS idx_events_run_id ON run_events(run_id, id);
-      PRAGMA user_version = 5;
-    `);
-    const runColumns = this.db.pragma("table_info(runs)") as { name: string }[];
-    if (!runColumns.some((column) => column.name === "model")) {
-      this.db.exec("ALTER TABLE runs ADD COLUMN model TEXT");
-    }
-    this.db.pragma("user_version = 5");
+      `);
+      const runColumns = this.db.pragma("table_info(runs)") as {
+        name: string;
+      }[];
+      if (!runColumns.some((column) => column.name === "model")) {
+        this.db.exec("ALTER TABLE runs ADD COLUMN model TEXT");
+      }
+      this.db.pragma("user_version = 5");
+    });
+    createAndMigrateSchema.immediate();
   }
 
   close(): void {
