@@ -45,7 +45,7 @@ Installable web client
 
 OmniRouter is Kuro-chan's routing policy layer, not the OpenRouter service. Providers supply inference; the backend controls specialist selection, tool permissions, task state, bounded retries, approval gates, and verification claims.
 
-By default, **Auto / Quality** tries FreeLLMAPI's `auto` route first, then falls back to OpenRouter's free-only `openrouter/free` router on retryable upstream failures (including rate or quota limits reported before a stream starts). **Balanced** tries OpenRouter first. The default is intentionally free-first: OpenRouter's `openrouter/auto` may select models with paid token rates. Upstream free-tier capacity and availability vary, so token totals are estimates rather than guaranteed allocations. Change these choices through the server-side `OPENROUTER_MODEL` and `OMNIROUTER_ROUTE_*` settings.
+When configured, **Auto / Quality** tries FreeLLMAPI's `auto` route first, then falls back to OpenRouter's free-only `openrouter/free` router on retryable upstream failures (including rate or quota limits reported before a stream starts). Only configured providers are considered. **Balanced** tries OpenRouter first. The default is intentionally free-first: OpenRouter's `openrouter/auto` may select models with paid token rates. Upstream free-tier capacity and availability vary, so token totals are reports of what providers return, not guaranteed allocations. A provider-qualified model selected in the composer is also used for agent planning, task execution, and final verification. Change routing through the server-side `OPENROUTER_MODEL` and `OMNIROUTER_ROUTE_*` settings.
 
 ## Run the workbench locally
 
