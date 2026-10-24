@@ -408,6 +408,45 @@ describe("TaskWorker", () => {
       expect(JSON.stringify(store.getRun(runId)?.output)).toContain(
         "executionTestsRun",
       );
+      const progress = store
+        .listEvents(runId)
+        .filter((event) => event.type === "task.progress")
+        .map(
+          (event) =>
+            event.payload as {
+              stage?: string;
+              toolName?: string;
+              sources?: unknown[];
+            },
+        );
+      expect(progress.map((event) => event.stage)).toEqual(
+        expect.arrayContaining([
+          "started",
+          "thinking",
+          "tool_started",
+          "tool_completed",
+          "handoff",
+        ]),
+      );
+      expect(progress).toContainEqual(
+        expect.objectContaining({
+          stage: "tool_completed",
+          toolName: "workspace.write_file",
+        }),
+      );
+      expect(
+        progress.some(
+          (event) =>
+            event.stage === "handoff" &&
+            event.sources?.some(
+              (source) =>
+                source &&
+                typeof source === "object" &&
+                "uri" in source &&
+                source.uri === "workspace://" + runId + "/src/index.ts",
+            ),
+        ),
+      ).toBe(true);
     } finally {
       store.close();
     }
@@ -623,6 +662,117 @@ describe("TaskWorker", () => {
     }
   });
 
+  it("honors each run's selected routing profile during task execution", async () => {
+    const catalogRoot = await fakeCatalogRoot();
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "kuro-workspaces-"));
+    created.push(workspaceRoot);
+    const store = new RunStore(":memory:");
+    const usage: Array<{
+      operation: string;
+      profile: RouteProfile;
+      runId?: string;
+    }> = [];
+    let worker: TaskWorker | undefined;
+    try {
+      store.createRun(
+        {
+          id: "d1111111-1111-4111-8111-111111111111",
+          goal: "Return a concise summary",
+          profile: "fast",
+          tasks: [
+            {
+              key: "summary",
+              agentId: "engineering/engineering-test-agent",
+              objective: "Return a concise summary of the requested work.",
+            },
+          ],
+        },
+        1_000,
+      );
+      store.createRun(
+        {
+          id: "e1111111-1111-4111-8111-111111111111",
+          goal: "Return a concise summary",
+          profile: "quality",
+          tasks: [
+            {
+              key: "summary",
+              agentId: "engineering/engineering-test-agent",
+              objective: "Return a concise summary of the requested work.",
+            },
+          ],
+        },
+        2_000,
+      );
+      const fakeProvider = provider(
+        async (input: ChatCompletionInput): Promise<ChatCompletionOutput> => {
+          if (
+            (input.systemPrompt ?? "").includes(
+              "independent consistency reviewer",
+            )
+          ) {
+            return {
+              providerId: "openrouter",
+              model: "test-model",
+              content: JSON.stringify({
+                passed: true,
+                summary: "The result is consistent with the request.",
+                checks: [
+                  {
+                    name: "A task result was produced",
+                    passed: true,
+                    notes: "The structured task output is present.",
+                  },
+                ],
+                blockers: [],
+              }),
+              latencyMs: 1,
+            };
+          }
+          return {
+            providerId: "openrouter",
+            model: "test-model",
+            content: JSON.stringify({
+              status: "completed",
+              summary: "Produced the requested summary.",
+              toolCalls: [],
+              evidence: [],
+            }),
+            latencyMs: 1,
+          };
+        },
+      );
+      const router = new OmniRouter({
+        providers: new Map<ProviderId, ChatProvider>([
+          ["openrouter", fakeProvider],
+        ]),
+        onUsage: (event) =>
+          usage.push({
+            operation: event.operation,
+            profile: event.profile,
+            ...(event.runId ? { runId: event.runId } : {}),
+          }),
+      });
+      worker = new TaskWorker({
+        store,
+        catalog: new AgentCatalog(catalogRoot),
+        router,
+        workspaceRoot: resolve(workspaceRoot),
+      });
+
+      expect((await worker.runOnce()).kind).toBe("completed");
+      expect((await worker.runOnce()).kind).toBe("completed");
+      expect(
+        usage
+          .filter((event) => event.operation === "task")
+          .map((event) => event.profile),
+      ).toEqual(["fast", "quality"]);
+    } finally {
+      await worker?.stop();
+      store.close();
+    }
+  });
+
   it("runs independent specialist tasks concurrently up to the configured worker limit", async () => {
     const catalogRoot = await fakeCatalogRoot();
     const workspaceRoot = await mkdtemp(join(tmpdir(), "kuro-workspaces-"));
@@ -752,6 +902,78 @@ describe("TaskWorker", () => {
     } finally {
       releaseGate?.();
       await worker?.stop();
+      store.close();
+    }
+  });
+
+  it("backs off transient verification failures instead of hammering the model provider", async () => {
+    const catalogRoot = await fakeCatalogRoot();
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "kuro-workspaces-"));
+    created.push(workspaceRoot);
+    const runId = "94c95c32-fce4-4e1e-9a77-35b4b9075ab7";
+    const store = new RunStore(":memory:");
+    let reviewerCalls = 0;
+    try {
+      store.createRun({
+        id: runId,
+        goal: "Summarize the requested project structure",
+        profile: "balanced",
+        tasks: [
+          {
+            key: "summarize",
+            agentId: "engineering/engineering-test-agent",
+            objective: "Produce a concise project-structure summary.",
+          },
+        ],
+      });
+      const fakeProvider = provider(
+        async (input: ChatCompletionInput): Promise<ChatCompletionOutput> => {
+          if (
+            (input.systemPrompt ?? "").includes(
+              "independent consistency reviewer",
+            )
+          ) {
+            reviewerCalls += 1;
+            throw Object.assign(new Error("Temporary reviewer outage."), {
+              code: "upstream_unavailable",
+              retryable: true,
+            });
+          }
+          return {
+            providerId: "openrouter",
+            model: "test-model",
+            content: JSON.stringify({
+              status: "completed",
+              summary: "Summarized the project structure.",
+              toolCalls: [],
+              evidence: [],
+            }),
+            latencyMs: 1,
+          };
+        },
+      );
+      const router = new OmniRouter({
+        providers: new Map<ProviderId, ChatProvider>([
+          ["openrouter", fakeProvider],
+        ]),
+      });
+      const worker = new TaskWorker({
+        store,
+        catalog: new AgentCatalog(catalogRoot),
+        router,
+        workspaceRoot: resolve(workspaceRoot),
+        pollIntervalMs: 100,
+      });
+
+      const first = await worker.runOnce();
+      expect(first.kind).toBe("completed");
+      expect(store.getRun(runId)?.status).toBe("verifying");
+      expect(reviewerCalls).toBe(1);
+
+      await worker.runOnce();
+      expect(reviewerCalls).toBe(1);
+      expect(store.getRun(runId)?.status).toBe("verifying");
+    } finally {
       store.close();
     }
   });
@@ -1092,6 +1314,62 @@ describe("TaskWorker", () => {
       });
       expect(store.getRun(runId)?.status).toBe("cancelled");
       expect(store.listTasks(runId)[0]?.status).toBe("cancelled");
+    } finally {
+      store.close();
+    }
+  });
+
+  it("redacts sensitive provider text before persisting task failures", async () => {
+    const catalogRoot = await fakeCatalogRoot();
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "kuro-workspaces-"));
+    created.push(workspaceRoot);
+    const runId = "a6f7b55f-80a7-4a4d-bd4a-55ccf9ad6781";
+    const store = new RunStore(":memory:");
+    try {
+      store.createRun({
+        id: runId,
+        goal: "Read the specialist profile",
+        profile: "balanced",
+        tasks: [
+          {
+            key: "read-profile",
+            agentId: "engineering/engineering-test-agent",
+            objective: "Read the configured specialist profile.",
+          },
+        ],
+      });
+      const catalog = new AgentCatalog(catalogRoot);
+      vi.spyOn(catalog, "get").mockRejectedValue(
+        new Error(
+          "Provider failed with Bearer ABCDEFGHIJKLMNOPQRSTUVWXYZ and sk-proj-1234567890abcdef",
+        ),
+      );
+      const fakeProvider = provider(
+        async (): Promise<ChatCompletionOutput> => ({
+          providerId: "openrouter",
+          model: "test-model",
+          content: "{}",
+          latencyMs: 1,
+        }),
+      );
+      const router = new OmniRouter({
+        providers: new Map<ProviderId, ChatProvider>([
+          ["openrouter", fakeProvider],
+        ]),
+      });
+      const worker = new TaskWorker({
+        store,
+        catalog,
+        router,
+        workspaceRoot: resolve(workspaceRoot),
+      });
+
+      const result = await worker.runOnce();
+      expect(result.kind).toBe("failed");
+      const task = store.listTasks(runId)[0]!;
+      expect(task.errorMessage).toContain("[REDACTED_SECRET]");
+      expect(task.errorMessage).not.toContain("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+      expect(task.errorMessage).not.toContain("sk-proj-1234567890abcdef");
     } finally {
       store.close();
     }

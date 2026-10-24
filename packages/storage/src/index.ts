@@ -56,12 +56,55 @@ export interface PlannedTask {
   readonly approvalRequired?: boolean;
 }
 
+export interface RunPlanMetadata {
+  readonly intent: string;
+  readonly summary: string;
+  readonly assumptions: readonly string[];
+  readonly selectedAgents: readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly division: string;
+  }[];
+  readonly selectedRunbook?: { readonly slug: string; readonly title: string };
+  readonly provider?: {
+    readonly id: string;
+    readonly model: string;
+    readonly latencyMs: number;
+  };
+}
+
 export interface CreateRunInput {
   readonly id?: string;
   readonly goal: string;
   readonly profile: RouteProfile;
   readonly tasks: readonly PlannedTask[];
   readonly createdBy?: string;
+  readonly plan?: RunPlanMetadata;
+}
+
+export type TaskProgressStage =
+  | "started"
+  | "thinking"
+  | "handoff"
+  | "tool_started"
+  | "tool_completed"
+  | "tool_failed";
+
+export interface TaskProgressSource {
+  readonly kind: string;
+  readonly summary: string;
+  readonly uri?: string;
+}
+
+export interface TaskProgressInput {
+  readonly runId: string;
+  readonly taskId: string;
+  readonly workerId: string;
+  readonly stage: TaskProgressStage;
+  readonly message: string;
+  readonly round?: number;
+  readonly toolName?: string;
+  readonly sources?: readonly TaskProgressSource[];
 }
 
 export interface RunRecord {
@@ -311,6 +354,27 @@ function decodeJson(value: string | null): unknown {
   if (value === null) return undefined;
   return JSON.parse(value) as unknown;
 }
+function normalizeProgressUri(value: string): string | undefined {
+  if (value.startsWith("workspace://")) return value.slice(0, 2_000);
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return undefined;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+  url.username = "";
+  url.password = "";
+  for (const key of [...url.searchParams.keys()]) {
+    if (
+      /token|secret|password|credential|api.?key|authorization|auth/i.test(key)
+    ) {
+      url.searchParams.delete(key);
+    }
+  }
+  return url.toString().slice(0, 2_000);
+}
+
 function assertText(value: string, field: string, max = 20_000): void {
   if (
     typeof value !== "string" ||
@@ -1190,7 +1254,17 @@ export class RunStore {
         runId,
         undefined,
         "run.plan_created",
-        { taskKeys: input.tasks.map((task) => task.key) },
+        {
+          taskKeys: input.tasks.map((task) => task.key),
+          taskGraph: input.tasks.map((task) => ({
+            key: task.key,
+            agentId: task.agentId,
+            objective: task.objective,
+            dependencies: task.dependsOn ?? [],
+            approvalRequired: Boolean(task.approvalRequired),
+          })),
+          ...(input.plan ? { plan: input.plan } : {}),
+        },
         now,
       );
     });
@@ -1227,6 +1301,15 @@ export class RunStore {
             )
             .all(before, limit);
     return (rows as RunRow[]).map((row) => asRun(row)!);
+  }
+
+  listVerifyingRuns(): readonly RunRecord[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM runs WHERE status='verifying' ORDER BY updated_at ASC, id ASC",
+      )
+      .all() as RunRow[];
+    return rows.map((row) => asRun(row)!);
   }
 
   getTask(taskId: string): TaskRecord | undefined {
@@ -1382,6 +1465,94 @@ export class RunStore {
       throw new Error("Task lease is no longer valid for this worker.");
     }
     return leaseExpiresAt;
+  }
+
+  recordTaskProgress(input: TaskProgressInput, now = Date.now()): void {
+    assertText(input.runId, "runId", 200);
+    assertText(input.taskId, "taskId", 200);
+    assertText(input.workerId, "workerId", 200);
+    assertText(input.message, "progress message", 500);
+    const allowedStages = new Set<TaskProgressStage>([
+      "started",
+      "thinking",
+      "handoff",
+      "tool_started",
+      "tool_completed",
+      "tool_failed",
+    ]);
+    if (!allowedStages.has(input.stage)) {
+      throw new Error("Unknown task progress stage.");
+    }
+    if (
+      input.round !== undefined &&
+      (!Number.isInteger(input.round) || input.round < 1 || input.round > 12)
+    ) {
+      throw new Error("Progress round must be an integer between 1 and 12.");
+    }
+    if (input.toolName !== undefined) {
+      assertText(input.toolName, "toolName", 200);
+    }
+
+    const sources = (input.sources ?? []).slice(0, 8).map((source) => {
+      assertText(source.kind, "source kind", 80);
+      assertText(source.summary, "source summary", 500);
+      const safeSource: {
+        kind: string;
+        summary: string;
+        uri?: string;
+      } = {
+        kind: source.kind,
+        summary: source.summary,
+      };
+      if (source.uri !== undefined) {
+        assertText(source.uri, "source uri", 2_000);
+        const uri = normalizeProgressUri(source.uri);
+        if (uri) safeSource.uri = uri;
+      }
+      return safeSource;
+    });
+    const payload = encodeJson({
+      stage: input.stage,
+      message: input.message,
+      ...(input.round === undefined ? {} : { round: input.round }),
+      ...(input.toolName === undefined ? {} : { toolName: input.toolName }),
+      ...(sources.length ? { sources } : {}),
+    });
+
+    const tx = this.db.transaction(() => {
+      const task = this.db
+        .prepare(
+          "SELECT status,lease_owner,lease_expires_at FROM tasks WHERE id=? AND run_id=?",
+        )
+        .get(input.taskId, input.runId) as
+        | {
+            status: TaskStatus;
+            lease_owner: string | null;
+            lease_expires_at: number | null;
+          }
+        | undefined;
+      if (
+        !task ||
+        task.status !== "running" ||
+        task.lease_owner !== input.workerId ||
+        task.lease_expires_at === null ||
+        task.lease_expires_at <= now
+      ) {
+        throw new Error("Task progress requires a current, owned task lease.");
+      }
+      const run = this.db
+        .prepare("SELECT status FROM runs WHERE id=?")
+        .get(input.runId) as { status: RunStatus } | undefined;
+      if (!run || ["cancelled", "failed", "completed"].includes(run.status)) {
+        throw new Error("Task progress cannot be recorded for a terminal run.");
+      }
+      this.db
+        .prepare(
+          "INSERT INTO run_events(run_id,task_id,type,payload_json,created_at) VALUES(?,?,?,?,?)",
+        )
+        .run(input.runId, input.taskId, "task.progress", payload, now);
+    });
+    tx.immediate();
   }
 
   completeTask(

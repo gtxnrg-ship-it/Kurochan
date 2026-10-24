@@ -1,0 +1,21 @@
+{
+  "id": "/",
+  "name": "Kuro-chan AI Workbench",
+  "short_name": "Kuro-chan",
+  "description": "Turn rough ideas into clear answers, coordinated work, and verified outcomes.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f4f1e9",
+  "theme_color": "#304e3f",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/icons/kurochan.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

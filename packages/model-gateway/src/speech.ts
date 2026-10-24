@@ -12,6 +12,42 @@ export interface SpeechSynthesisConfig extends SpeechEndpointConfig {
   readonly instructions?: string;
 }
 
+export interface SpeechTranscriptionStatus {
+  readonly enabled: boolean;
+  readonly provider: string;
+  readonly model: string | null;
+  readonly authenticationConfigured: boolean;
+  readonly maxAudioBytes: number;
+  readonly defaultLanguage: string | null;
+}
+
+export interface SpeechSynthesisStatus {
+  readonly enabled: boolean;
+  readonly provider: string;
+  readonly model: string | null;
+  readonly voice: string;
+  readonly format: NonNullable<SpeechSynthesisConfig["responseFormat"]>;
+  readonly customInstructionsConfigured: boolean;
+  readonly authenticationConfigured: boolean;
+  readonly maxTextCharacters: number;
+  readonly maxResponseBytes: number;
+}
+
+export interface SpeechRuntimeStatus {
+  readonly transcription: SpeechTranscriptionStatus;
+  readonly synthesis: SpeechSynthesisStatus;
+}
+
+export interface SpeechRuntime {
+  readonly isTranscriptionConfigured: boolean;
+  readonly isSynthesisConfigured: boolean;
+  readonly status: SpeechRuntimeStatus;
+  transcribe(
+    input: SpeechTranscriptionInput,
+  ): Promise<SpeechTranscriptionResult>;
+  synthesize(input: SpeechSynthesisInput): Promise<SpeechSynthesisResult>;
+}
+
 export interface SpeechRuntimeOptions {
   readonly transcription?: SpeechEndpointConfig;
   readonly synthesis?: SpeechSynthesisConfig;
@@ -266,7 +302,7 @@ async function responseFailure(
  * does not assume that an LLM chat provider also supports audio. A local Whisper/
  * Piper-compatible server can be used without a hosted speech API key.
  */
-export class OpenAICompatibleSpeechRuntime {
+export class OpenAICompatibleSpeechRuntime implements SpeechRuntime {
   private readonly transcriptionBaseUrl: string | undefined;
   private readonly transcriptionApiKey: string | undefined;
   private readonly transcriptionModel: string | undefined;

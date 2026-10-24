@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { request as httpRequest } from "node:http";
+import type { AddressInfo } from "node:net";
 import type { FastifyInstance } from "fastify";
 import { buildServer, validateServerConfiguration } from "../src/server.js";
 import {
@@ -648,6 +650,12 @@ describe("Kuro-chan API", () => {
         customInstructionsConfigured: true,
         authenticationConfigured: true,
       },
+      voiceTurn: {
+        enabled: true,
+        mode: "recorded-audio-turn",
+        realtimeDuplex: false,
+        bargeInInterruption: false,
+      },
       security: {
         credentialsInResponses: false,
         arbitraryUrlsAllowed: false,
@@ -738,6 +746,7 @@ describe("Kuro-chan API", () => {
     });
     const complete = vi.fn(
       async (input: ChatCompletionInput): Promise<ChatCompletionOutput> => {
+        expect(input.systemPrompt).toContain("This is a spoken reply.");
         expect(
           input.messages.some(
             (message) => message.content === "What is two plus two?",
@@ -892,6 +901,7 @@ describe("Kuro-chan API", () => {
     const replay = await app.inject({ method: "POST", url, headers, payload });
     expect(replay.statusCode).toBe(200);
     expect(replay.json().idempotentReplay).toBe(true);
+    expect(replay.json().synthesis.model).toBe("speech-compatible");
     expect(replay.json().assistantMessage.id).toBe(
       first.json().assistantMessage.id,
     );
@@ -1104,6 +1114,92 @@ describe("Kuro-chan API", () => {
       },
     ]);
     expect(response.body).not.toContain("api_key");
+  });
+
+  it("cancels upstream inference when the HTTP client disconnects", async () => {
+    let signal: AbortSignal | undefined;
+    let signalProviderEntered!: () => void;
+    const providerEntered = new Promise<void>((resolve) => {
+      signalProviderEntered = resolve;
+    });
+    let signalAborted!: () => void;
+    const providerAborted = new Promise<void>((resolve) => {
+      signalAborted = resolve;
+    });
+    const slowProvider: ChatProvider = {
+      id: "openrouter",
+      displayName: "OpenRouter",
+      defaultModel: "test-model",
+      isConfigured: true,
+      complete: async (input): Promise<ChatCompletionOutput> => {
+        signal = input.signal;
+        signalProviderEntered();
+        return await new Promise<ChatCompletionOutput>((_resolve, reject) => {
+          const onAbort = () => {
+            signalAborted();
+            reject(
+              Object.assign(new Error("cancelled"), { code: "cancelled" }),
+            );
+          };
+          if (input.signal?.aborted) onAbort();
+          else input.signal?.addEventListener("abort", onAbort, { once: true });
+        });
+      },
+    };
+    app = buildServer({
+      env: {},
+      providers: {
+        providers: new Map<ProviderId, ChatProvider>([
+          ["openrouter", slowProvider],
+        ]),
+        statuses: [
+          {
+            id: "openrouter",
+            name: "OpenRouter",
+            configured: true,
+            defaultModel: "test-model",
+            capabilityNotes: [],
+          },
+        ],
+      },
+      logger: false,
+      store: new RunStore(":memory:"),
+    });
+    await app.listen({ host: "127.0.0.1", port: 0 });
+    const address = app.server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Test API server did not bind to a TCP address.");
+    }
+    const request = httpRequest(
+      {
+        hostname: "127.0.0.1",
+        port: (address as AddressInfo).port,
+        path: "/v1/chat/completions",
+        method: "POST",
+        headers: { "content-type": "application/json" },
+      },
+      (response) => response.resume(),
+    );
+    request.on("error", () => undefined);
+    request.end(
+      JSON.stringify({
+        model: "omni/balanced",
+        messages: [{ role: "user", content: "Wait for cancellation." }],
+      }),
+    );
+    await providerEntered;
+    request.destroy();
+
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const wasAborted = await Promise.race([
+      providerAborted.then(() => true),
+      new Promise<boolean>((resolve) => {
+        timeout = setTimeout(() => resolve(false), 2000);
+      }),
+    ]);
+    if (timeout) clearTimeout(timeout);
+    expect(wasAborted).toBe(true);
+    expect(signal?.aborted).toBe(true);
   });
 
   it("requires an API token when one is configured", async () => {
@@ -1337,7 +1433,7 @@ describe("Kuro-chan API", () => {
       method: "POST",
       url: "/v1/runs",
       payload: {
-        goal: "Build a verified project",
+        goal: "Build a verified project with Bearer ABCDEFGHIJKLMNOPQRSTUVWXYZ",
         profile: "balanced",
         tasks: [
           {
@@ -1356,6 +1452,17 @@ describe("Kuro-chan API", () => {
     });
     expect(created.statusCode).toBe(201);
     const runId = created.json().run.id as string;
+    const createdEvent = created
+      .json()
+      .events.find(
+        (event: { type: string }) => event.type === "run.created",
+      ) as {
+      payload: { goal: string };
+    };
+    expect(createdEvent.payload.goal).toContain("[REDACTED_SECRET]");
+    expect(createdEvent.payload.goal).not.toContain(
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    );
     expect(created.json().tasks).toHaveLength(2);
     expect(
       created
@@ -1373,6 +1480,45 @@ describe("Kuro-chan API", () => {
     expect(
       events.json().data.map((event: { type: string }) => event.type),
     ).toContain("run.plan_created");
+    const details = await app.inject({
+      method: "GET",
+      url: `/v1/runs/${runId}`,
+    });
+    expect(details.statusCode).toBe(200);
+    const detailCreatedEvent = details
+      .json()
+      .events.find(
+        (event: { type: string }) => event.type === "run.created",
+      ) as {
+      payload: { goal: string };
+    };
+    expect(detailCreatedEvent.payload.goal).toContain("[REDACTED_SECRET]");
+    expect(detailCreatedEvent.payload.goal).not.toContain(
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    );
+    const planEvent = events
+      .json()
+      .data.find(
+        (event: { type: string }) => event.type === "run.plan_created",
+      ) as { payload: { taskGraph?: Array<Record<string, unknown>> } };
+    expect(planEvent.payload.taskGraph).toEqual([
+      {
+        key: "research",
+        agentId: "game-development/unreal-engine/unreal-world-builder",
+        objective: "Gather evidence",
+        dependencies: [],
+        approvalRequired: false,
+      },
+      {
+        key: "build",
+        agentId: "game-development/unreal-engine/unreal-world-builder",
+        objective: "Build from evidence",
+        dependencies: ["research"],
+        approvalRequired: false,
+      },
+    ]);
+    expect(events.body).toContain("[REDACTED_SECRET]");
+    expect(events.body).not.toContain("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
     const cancelled = await app.inject({
       method: "POST",
       url: `/v1/runs/${runId}/cancel`,
@@ -1380,6 +1526,121 @@ describe("Kuro-chan API", () => {
     });
     expect(cancelled.statusCode).toBe(200);
     expect(cancelled.json().run.status).toBe("cancelled");
+
+    const invalidCursor = await app.inject({
+      method: "GET",
+      url: `/v1/runs/${runId}/events/stream?afterId=-1`,
+    });
+    expect(invalidCursor.statusCode).toBe(400);
+    expect(invalidCursor.json()).toMatchObject({
+      error: { code: "invalid_event_cursor" },
+    });
+
+    const stream = await app.inject({
+      method: "GET",
+      url: `/v1/runs/${runId}/events/stream`,
+    });
+    expect(stream.statusCode).toBe(200);
+    expect(stream.headers["content-type"]).toContain("text/event-stream");
+    expect(stream.body).toContain("event: run.plan_created");
+    expect(stream.body).toContain("event: run.cancelled");
+    expect(stream.body).toContain("event: stream.end");
+    expect(stream.body).toContain("[REDACTED_SECRET]");
+    expect(stream.body).not.toContain("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+
+    const priorEvents = events.json().data as Array<{ id: number }>;
+    const cursor = Math.max(...priorEvents.map((event) => event.id));
+    const resumed = await app.inject({
+      method: "GET",
+      url: `/v1/runs/${runId}/events/stream`,
+      headers: { "last-event-id": String(cursor) },
+    });
+    expect(resumed.statusCode).toBe(200);
+    expect(resumed.body).not.toContain("event: run.plan_created");
+    expect(resumed.body).toContain("event: run.cancelled");
+    expect(resumed.body).toContain("event: stream.end");
+  });
+
+  it("asks one blocking clarification without creating an executable run", async () => {
+    const store = new RunStore(":memory:");
+    const question =
+      "Should the first version be a web app or a native mobile app?";
+    const planner = {
+      createPlan: vi.fn(async () => ({
+        intent: "Build a lightweight study-planning app.",
+        summary: "Confirm the target platform before implementation.",
+        assumptions: ["Keep the first version small and easy to use."],
+        clarificationRequired: true,
+        clarificationQuestion: question,
+        tasks: [
+          {
+            key: "define-mvp",
+            agentId: "game-development/unreal-engine/unreal-world-builder",
+            objective: "Define a platform-neutral MVP.",
+            dependsOn: [],
+          },
+        ],
+        selectedAgents: [
+          {
+            id: "game-development/unreal-engine/unreal-world-builder",
+            name: "Unreal World Builder",
+            division: "game-development",
+          },
+        ],
+        providerId: "freellmapi",
+        model: "auto",
+        latencyMs: 5,
+        attempts: 1,
+      })),
+    };
+    app = buildServer({
+      env: {},
+      planner: planner as unknown as PlanService,
+      logger: false,
+      store,
+    });
+    const created = await app.inject({
+      method: "POST",
+      url: "/v1/conversations",
+      payload: {},
+    });
+    const conversationId = created.json().conversation.id as string;
+    const payload = {
+      goal: "Make it real",
+      profile: "balanced",
+    };
+    const url = `/v1/conversations/${conversationId}/runs`;
+
+    const response = await app.inject({ method: "POST", url, payload });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      status: "clarification_required",
+      clarification: {
+        question,
+        intent: "Build a lightweight study-planning app.",
+      },
+    });
+    expect(response.json().run).toBeUndefined();
+    expect(store.listRuns()).toHaveLength(0);
+    expect(store.listConversationMessages(conversationId)).toHaveLength(1);
+    expect(store.listConversationMessages(conversationId)[0]?.content).toBe(
+      question,
+    );
+
+    const planOnly = await app.inject({
+      method: "POST",
+      url: "/v1/runs/plan",
+      payload,
+    });
+    expect(planOnly.statusCode).toBe(200);
+    expect(planOnly.json().status).toBe("clarification_required");
+    expect(store.listRuns()).toHaveLength(0);
+
+    const retry = await app.inject({ method: "POST", url, payload });
+    expect(retry.statusCode).toBe(200);
+    expect(store.listRuns()).toHaveLength(0);
+    expect(store.listConversationMessages(conversationId)).toHaveLength(1);
+    expect(planner.createPlan).toHaveBeenCalledTimes(3);
   });
 
   it("exposes catalog metadata and searches agents without exposing full prompts", async () => {

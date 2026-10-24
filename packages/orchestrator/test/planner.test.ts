@@ -130,6 +130,72 @@ describe("PlanService", () => {
     );
   });
 
+  it("turns vague goals into an explicit intent, bounded assumptions, or one blocker question", async () => {
+    const router = fakeRouter(
+      JSON.stringify({
+        intent: "Build a lightweight study-planning app for a student.",
+        summary:
+          "Confirm the target platform before committing to platform-specific implementation.",
+        assumptions: [
+          "Keep the first version small and easy to use.",
+          "Avoid paid infrastructure unless it becomes necessary.",
+        ],
+        clarificationRequired: true,
+        clarificationQuestion:
+          "Should the first version be a web app or a native mobile app?",
+        tasks: [
+          {
+            key: "define-mvp",
+            agentId: "engineering/backend-architect",
+            objective:
+              "Define a platform-neutral MVP and identify the decisions that depend on the target platform.",
+            dependsOn: [],
+          },
+        ],
+      }),
+    );
+    const catalog = fakeCatalog();
+    const planner = new PlanService({ catalog, router });
+    const plan = await planner.createPlan({
+      goal: "Make it real",
+      profile: "balanced",
+      conversationContext: [
+        {
+          role: "user",
+          content:
+            "I want a lightweight study planner that helps me stay organized.",
+        },
+        {
+          role: "assistant",
+          content: "We can start with a small MVP and grow it later.",
+        },
+      ],
+    });
+
+    expect(plan.intent).toContain("study-planning app");
+    expect(plan.assumptions).toHaveLength(2);
+    expect(plan.clarificationRequired).toBe(true);
+    expect(plan.clarificationQuestion).toContain(
+      "web app or a native mobile app",
+    );
+    expect(plan.tasks[0]?.input).toMatchObject({
+      userIntent: plan.intent,
+      assumptions: plan.assumptions,
+    });
+    const prompted = JSON.parse(
+      router.complete.mock.calls[0]![0].messages[0]!.content,
+    );
+    expect(prompted.goal).toBe("Make it real");
+    expect(prompted.recentConversation).toHaveLength(2);
+    expect(prompted.recentConversation[0].content).toContain("study planner");
+    expect(router.complete.mock.calls[0]![0].systemPrompt).toContain(
+      "A vague idea is not automatically a reason to interrogate the user",
+    );
+    const catalogGoalSearch = vi.mocked(catalog.search).mock.calls[0]?.[0];
+    expect(catalogGoalSearch).toContain("Make it real");
+    expect(catalogGoalSearch).toContain("study planner");
+  });
+
   it("retrieves runbook specialists from the complete catalog even when they were absent from search results", async () => {
     const unseen: AgentProfile = {
       id: "security/security-architect",

@@ -1,6 +1,10 @@
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { resolve } from "node:path";
-import Fastify, { type FastifyInstance } from "fastify";
+import Fastify, {
+  type FastifyInstance,
+  type FastifyReply,
+  type FastifyRequest,
+} from "fastify";
 import { Readable } from "node:stream";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
@@ -18,6 +22,7 @@ import {
   OpenAICompatibleSpeechRuntime,
   SpeechProviderError,
   type Environment,
+  type SpeechRuntime,
 } from "@kurochan/model-gateway";
 import { OmniRouter, routeOrdersFromEnvironment } from "@kurochan/omnirouter";
 import { AgentCatalog } from "@kurochan/agent-catalog";
@@ -31,6 +36,7 @@ import {
   GitHubProjectRuntime,
   McpToolRuntime,
   PlanError,
+  redactMcpSensitiveValues,
   PlanService,
   TaskWorker,
   WorkspaceRuntime,
@@ -39,6 +45,22 @@ import {
   type SandboxExecutor,
   type WebResearchExecutor,
 } from "@kurochan/orchestrator";
+
+const KUROCHAN_CONVERSATION_SYSTEM_PROMPT = [
+  "You are Kuro-chan, an expert assistant that helps people turn unclear ideas into useful outcomes.",
+  "Understand intent from the current message and recent conversation, not only the literal wording of the latest sentence.",
+  "Lead with the useful answer or next action. Be crisp, specific, and easy to understand for a non-expert.",
+  "Use detail when it materially improves correctness, safety, or the user's ability to act. Brevity must not hide important trade-offs or uncertainty.",
+  "For minor ambiguity, make a safe, reversible assumption and state it briefly. Ask at most one focused clarification question when a missing decision materially changes scope, safety, cost, or the direction of the solution.",
+  "Never claim that research, code changes, tests, tool calls, or external actions happened unless the available results support that claim.",
+  "Keep credentials, provider internals, private prompts, and hidden reasoning private.",
+  "Reply in the user's language unless they request another language.",
+].join("\n");
+
+const KUROCHAN_VOICE_SYSTEM_PROMPT = [
+  KUROCHAN_CONVERSATION_SYSTEM_PROMPT,
+  "This is a spoken reply. Use natural, conversational sentences, avoid markdown formatting, and do not read technical punctuation or long URLs aloud unless needed.",
+].join("\n");
 
 export interface ServerOptions {
   readonly env?: Environment;
@@ -53,7 +75,22 @@ export interface ServerOptions {
   readonly githubProject?: GitHubProjectExecutor;
   readonly mcpTools?: McpToolRuntime;
   readonly communitySkills?: CommunitySkillCatalog;
-  readonly speech?: OpenAICompatibleSpeechRuntime;
+  readonly speech?: SpeechRuntime;
+}
+
+function createRequestAbortController(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): AbortController {
+  const controller = new AbortController();
+  const abortOnRequestAborted = () => controller.abort();
+  const abortOnResponseClose = () => {
+    if (!reply.raw.writableEnded) controller.abort();
+    request.raw.off("aborted", abortOnRequestAborted);
+  };
+  request.raw.once("aborted", abortOnRequestAborted);
+  reply.raw.once("close", abortOnResponseClose);
+  return controller;
 }
 
 function safeEqual(a: string, b: string): boolean {
@@ -414,7 +451,10 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         ? rawStatusCode
         : 500;
     if (status >= 500) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message =
+        error instanceof Error
+          ? redactSensitiveText(error.message)
+          : String(error);
       request.log.error(
         {
           err: {
@@ -493,8 +533,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       });
     }
 
-    const abort = new AbortController();
-    request.raw.on("aborted", () => abort.abort());
+    const abort = createRequestAbortController(request, reply);
     try {
       const result = await router.complete({
         profile: "balanced",
@@ -745,6 +784,13 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
 
   app.get("/v1/speech/status", async () => ({
     ...speech.status,
+    voiceTurn: {
+      enabled: speech.isTranscriptionConfigured && speech.isSynthesisConfigured,
+      mode: "recorded-audio-turn",
+      realtimeDuplex: false,
+      bargeInInterruption: false,
+      requiresConfiguredTranscriptionAndSynthesis: true,
+    },
     security: {
       credentialsInResponses: false,
       arbitraryUrlsAllowed: false,
@@ -830,8 +876,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           },
         });
       }
-      const abort = new AbortController();
-      request.raw.on("aborted", () => abort.abort());
+      const abort = createRequestAbortController(request, reply);
       try {
         const result = await speech.transcribe({
           audio,
@@ -882,7 +927,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
             code,
             message:
               error instanceof SpeechProviderError
-                ? error.message
+                ? redactSensitiveText(error.message)
                 : "Speech transcription failed. Check the server-side speech configuration.",
             retryable:
               error instanceof SpeechProviderError
@@ -923,8 +968,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           },
         });
       }
-      const abort = new AbortController();
-      request.raw.on("aborted", () => abort.abort());
+      const abort = createRequestAbortController(request, reply);
       try {
         const result = await speech.synthesize({
           text: parsed.data.input,
@@ -979,7 +1023,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
             code,
             message:
               error instanceof SpeechProviderError
-                ? error.message
+                ? redactSensitiveText(error.message)
                 : "Speech synthesis failed. Check the server-side speech configuration.",
             retryable:
               error instanceof SpeechProviderError
@@ -1424,7 +1468,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           code: "conversation_create_failed",
           message:
             error instanceof Error
-              ? error.message
+              ? redactSensitiveText(error.message)
               : "Conversation could not be created.",
           retryable: false,
           requestId: request.id,
@@ -1609,7 +1653,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       } catch (error) {
         const message =
           error instanceof Error
-            ? error.message
+            ? redactSensitiveText(error.message)
             : "Message could not be saved.";
         const idempotencyConflict = message.includes(
           "clientMessageId was already used",
@@ -1719,13 +1763,13 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       const history = store
         .listConversationMessages(conversationId, { limit: 40 })
         .map((message) => ({ role: message.role, content: message.content }));
-      const abort = new AbortController();
-      request.raw.on("aborted", () => abort.abort());
+      const abort = createRequestAbortController(request, reply);
       try {
         if (parsed.data.stream) {
           const routed = await router.stream({
             profile: selection.profile,
             context: { operation: "chat" },
+            systemPrompt: KUROCHAN_CONVERSATION_SYSTEM_PROMPT,
             ...(selection.preferredProvider
               ? {
                   preferredProvider: selection.preferredProvider,
@@ -1898,6 +1942,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         const result = await router.complete({
           profile: selection.profile,
           context: { operation: "chat" },
+          systemPrompt: KUROCHAN_CONVERSATION_SYSTEM_PROMPT,
           ...(selection.preferredProvider
             ? {
                 preferredProvider: selection.preferredProvider,
@@ -1972,9 +2017,10 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         return reply.code(status).send({
           error: {
             code,
-            message:
+            message: redactSensitiveText(
               typed.message ??
-              "The assistant could not complete this reply. Your message is saved, so you can retry with the same clientMessageId.",
+                "The assistant could not complete this reply. Your message is saved, so you can retry with the same clientMessageId.",
+            ),
             retryable: typed.retryable ?? status >= 500,
             requestId: request.id,
           },
@@ -2187,8 +2233,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         speech.status.transcription.defaultLanguage ||
         "en";
       const audioSha256 = createHash("sha256").update(audio).digest("hex");
-      const abort = new AbortController();
-      request.raw.on("aborted", () => abort.abort());
+      const abort = createRequestAbortController(request, reply);
 
       try {
         let userMessage: ReturnType<
@@ -2332,6 +2377,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           const result = await router.complete({
             profile: selection.profile,
             context: { operation: "chat" },
+            systemPrompt: KUROCHAN_VOICE_SYSTEM_PROMPT,
             ...(selection.preferredProvider
               ? {
                   preferredProvider: selection.preferredProvider,
@@ -2371,6 +2417,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
               routeProfile: result.routeProfile,
               voice: voice ?? speech.status.synthesis.voice,
               format: requestedFormat ?? speech.status.synthesis.format,
+              synthesisModel: speech.status.synthesis.model,
               transcriptionModel: transcription.model,
             },
           });
@@ -2526,7 +2573,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
             code,
             message:
               error instanceof SpeechProviderError
-                ? error.message
+                ? redactSensitiveText(error.message)
                 : "Voice turn failed. Retry with the same clientMessageId to resume from persisted transcript/reply state.",
             retryable:
               error instanceof SpeechProviderError
@@ -2564,19 +2611,87 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         },
       });
     }
-    const abort = new AbortController();
-    request.raw.on("aborted", () => abort.abort());
+    const abort = createRequestAbortController(request, reply);
     try {
       const plan = await planner.createPlan({
         goal: parsed.data.goal,
         profile: parsed.data.profile,
+        conversationContext: store
+          .listConversationMessages(conversationId, { limit: 10 })
+          .filter(
+            (message) =>
+              message.role === "user" || message.role === "assistant",
+          )
+          .map((message) => ({
+            role: message.role as "user" | "assistant",
+            content: message.content,
+          })),
         signal: abort.signal,
       });
+      if (plan.clarificationRequired) {
+        const question =
+          plan.clarificationQuestion ??
+          "What is the most important outcome you want this work to achieve?";
+        const clarificationKey =
+          "run-clarification-" +
+          createHash("sha256")
+            .update(conversationId + ":" + parsed.data.goal + ":" + question)
+            .digest("hex")
+            .slice(0, 32);
+        const message = store.appendConversationMessage(conversationId, {
+          role: "assistant",
+          content: question,
+          clientMessageId: clarificationKey,
+          metadata: {
+            kind: "run_clarification",
+            intent: plan.intent,
+            summary: plan.summary,
+            assumptions: plan.assumptions,
+          },
+        });
+        return reply.code(200).send({
+          status: "clarification_required",
+          conversation: store.getConversation(conversationId),
+          message: message.message,
+          clarification: {
+            question,
+            intent: plan.intent,
+            assumptions: plan.assumptions,
+          },
+          plan: {
+            intent: plan.intent,
+            summary: plan.summary,
+            assumptions: plan.assumptions,
+            selectedAgents: plan.selectedAgents,
+            selectedRunbook: plan.selectedRunbook,
+            provider: {
+              id: plan.providerId,
+              model: plan.model,
+              latencyMs: plan.latencyMs,
+            },
+            planningAttempts: plan.attempts,
+          },
+        });
+      }
       const run = store.createRun({
         goal: parsed.data.goal,
         profile: parsed.data.profile,
         createdBy: "local",
         tasks: plan.tasks,
+        plan: {
+          intent: plan.intent,
+          summary: plan.summary,
+          assumptions: plan.assumptions,
+          selectedAgents: plan.selectedAgents,
+          ...(plan.selectedRunbook
+            ? { selectedRunbook: plan.selectedRunbook }
+            : {}),
+          provider: {
+            id: plan.providerId,
+            model: plan.model,
+            latencyMs: plan.latencyMs,
+          },
+        },
       });
       const eventMessage = store.appendConversationMessage(conversationId, {
         role: "assistant",
@@ -2594,7 +2709,9 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         message: eventMessage.message,
         run,
         plan: {
+          intent: plan.intent,
           summary: plan.summary,
+          assumptions: plan.assumptions,
           selectedAgents: plan.selectedAgents,
           selectedRunbook: plan.selectedRunbook,
           provider: {
@@ -2605,7 +2722,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           planningAttempts: plan.attempts,
         },
         tasks: store.listTasks(run.id),
-        events: store.listEvents(run.id),
+        events: safeRunEvents(store, run.id),
       });
     } catch (error) {
       if (error instanceof PlanError) {
@@ -2622,7 +2739,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         return reply.code(status).send({
           error: {
             code: error.code,
-            message: error.message,
+            message: redactSensitiveText(error.message),
             retryable: error.retryable,
             requestId: request.id,
           },
@@ -2711,15 +2828,16 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       return reply.code(201).send({
         run,
         tasks: store.listTasks(run.id),
-        events: store.listEvents(run.id),
+        events: safeRunEvents(store, run.id),
       });
     } catch (error) {
       requestWarning(app, error, "invalid_run_plan");
       return reply.code(400).send({
         error: {
           code: "invalid_run_plan",
-          message:
+          message: redactSensitiveText(
             error instanceof Error ? error.message : "Run plan was rejected.",
+          ),
           retryable: false,
           requestId: request.id,
         },
@@ -2748,26 +2866,71 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         },
       });
     }
-    const abort = new AbortController();
-    request.raw.on("aborted", () => abort.abort());
+    const abort = createRequestAbortController(request, reply);
     try {
       const plan = await planner.createPlan({
         goal: parsed.data.goal,
         profile: parsed.data.profile,
         signal: abort.signal,
       });
+      if (plan.clarificationRequired) {
+        return reply.code(200).send({
+          status: "clarification_required",
+          clarification: {
+            question:
+              plan.clarificationQuestion ??
+              "What is the most important outcome you want this work to achieve?",
+            intent: plan.intent,
+            assumptions: plan.assumptions,
+          },
+          plan: {
+            intent: plan.intent,
+            summary: plan.summary,
+            assumptions: plan.assumptions,
+            selectedAgents: plan.selectedAgents,
+            ...(plan.selectedRunbook
+              ? { selectedRunbook: plan.selectedRunbook }
+              : {}),
+            provider: {
+              id: plan.providerId,
+              model: plan.model,
+              latencyMs: plan.latencyMs,
+            },
+            planningAttempts: plan.attempts,
+          },
+        });
+      }
       const input: CreateRunInput = {
         goal: parsed.data.goal,
         profile: parsed.data.profile,
         tasks: plan.tasks,
         ...(parsed.data.createdBy ? { createdBy: parsed.data.createdBy } : {}),
+        plan: {
+          intent: plan.intent,
+          summary: plan.summary,
+          assumptions: plan.assumptions,
+          selectedAgents: plan.selectedAgents,
+          ...(plan.selectedRunbook
+            ? { selectedRunbook: plan.selectedRunbook }
+            : {}),
+          provider: {
+            id: plan.providerId,
+            model: plan.model,
+            latencyMs: plan.latencyMs,
+          },
+        },
       };
       const run = store.createRun(input);
       return reply.code(201).send({
         run,
         plan: {
+          intent: plan.intent,
           summary: plan.summary,
+          assumptions: plan.assumptions,
           selectedAgents: plan.selectedAgents,
+          ...(plan.selectedRunbook
+            ? { selectedRunbook: plan.selectedRunbook }
+            : {}),
           provider: {
             id: plan.providerId,
             model: plan.model,
@@ -2776,7 +2939,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           planningAttempts: plan.attempts,
         },
         tasks: store.listTasks(run.id),
-        events: store.listEvents(run.id),
+        events: safeRunEvents(store, run.id),
       });
     } catch (error) {
       if (error instanceof PlanError) {
@@ -2798,7 +2961,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         return reply.code(status).send({
           error: {
             code: error.code,
-            message: error.message,
+            message: redactSensitiveText(error.message),
             retryable: error.retryable,
             requestId: request.id,
           },
@@ -2871,7 +3034,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     return {
       run,
       tasks: store.listTasks(runId),
-      events: store.listEvents(runId, 0, 100),
+      events: safeRunEvents(store, runId, 0, 100),
     };
   });
 
@@ -2935,7 +3098,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           code,
           message:
             error instanceof Error
-              ? error.message
+              ? redactSensitiveText(error.message)
               : "Artifact could not be read.",
           retryable: false,
         },
@@ -2973,7 +3136,180 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         },
       });
     }
-    return { data: store.listEvents(runId, afterId, limit) };
+    return { data: safeRunEvents(store, runId, afterId, limit) };
+  });
+
+  // Keep a per-server cap so a large number of idle SSE clients cannot exhaust
+  // file descriptors or memory on a small self-hosted device.
+  let activeRunEventStreams = 0;
+  const maxActiveRunEventStreams = 128;
+
+  app.get("/v1/runs/:runId/events/stream", async (request, reply) => {
+    const { runId } = request.params as { runId: string };
+    const initialRun = store.getRun(runId);
+    if (!initialRun) {
+      return reply.code(404).send({
+        error: {
+          code: "run_not_found",
+          message: "Run not found.",
+          retryable: false,
+          requestId: request.id,
+        },
+      });
+    }
+
+    const query = request.query as Record<string, unknown>;
+    const headerCursor = request.headers["last-event-id"];
+    let cursor: number;
+    try {
+      cursor = parseBoundedInteger(
+        query.afterId ?? headerCursor,
+        0,
+        0,
+        Number.MAX_SAFE_INTEGER,
+      );
+    } catch {
+      return reply.code(400).send({
+        error: {
+          code: "invalid_event_cursor",
+          message: "afterId or Last-Event-ID must be a non-negative integer.",
+          retryable: false,
+          requestId: request.id,
+        },
+      });
+    }
+
+    if (activeRunEventStreams >= maxActiveRunEventStreams) {
+      return reply
+        .code(503)
+        .header("retry-after", "2")
+        .send({
+          error: {
+            code: "stream_capacity",
+            message: "Too many active run event streams.",
+            retryable: true,
+            requestId: request.id,
+          },
+        });
+    }
+
+    activeRunEventStreams += 1;
+    const abort = new AbortController();
+    const raw = reply.raw;
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      activeRunEventStreams = Math.max(0, activeRunEventStreams - 1);
+    };
+    const onClose = () => {
+      if (!raw.writableEnded) abort.abort();
+      release();
+    };
+    raw.once("close", onClose);
+
+    reply
+      .header("content-type", "text/event-stream; charset=utf-8")
+      .header("cache-control", "no-cache, no-transform")
+      .header("connection", "keep-alive")
+      .header("x-accel-buffering", "no");
+
+    const waitForPoll = () =>
+      new Promise<void>((resolveWait) => {
+        const finish = () => {
+          clearTimeout(timer);
+          abort.signal.removeEventListener("abort", finish);
+          resolveWait();
+        };
+        const timer = setTimeout(finish, 750);
+        timer.unref?.();
+        abort.signal.addEventListener("abort", finish, { once: true });
+      });
+
+    const eventStream = Readable.from(
+      (async function* () {
+        try {
+          yield ": connected\n\n";
+          let lastHeartbeatAt = Date.now();
+          while (!abort.signal.aborted) {
+            let events;
+            try {
+              events = store.listEvents(runId, cursor, 200);
+            } catch {
+              request.log.warn(
+                { code: "event_stream_read_failed", requestId: request.id },
+                "Run event stream could not read persisted events",
+              );
+              yield "event: stream.error\ndata: " +
+                JSON.stringify({
+                  code: "event_stream_read_failed",
+                  message: "Run events could not be read.",
+                  requestId: request.id,
+                }) +
+                "\n\n";
+              return;
+            }
+
+            for (const event of events) {
+              if (abort.signal.aborted) return;
+              cursor = event.id;
+              const eventName =
+                event.type.replace(/[^A-Za-z0-9._-]/g, "") || "message";
+              yield "id: " +
+                event.id +
+                "\nevent: " +
+                eventName +
+                "\ndata: " +
+                JSON.stringify({
+                  ...event,
+                  payload: redactMcpSensitiveValues(event.payload),
+                }) +
+                "\n\n";
+            }
+
+            if (events.length < 200) {
+              const latestRun = store.getRun(runId);
+              if (
+                latestRun &&
+                ["completed", "failed", "cancelled"].includes(latestRun.status)
+              ) {
+                let hasPendingEvents = true;
+                try {
+                  hasPendingEvents =
+                    store.listEvents(runId, cursor, 1).length > 0;
+                } catch {
+                  // Do not announce completion if the event cursor cannot be checked.
+                }
+                if (hasPendingEvents) {
+                  await waitForPoll();
+                  continue;
+                }
+                yield "event: stream.end\ndata: " +
+                  JSON.stringify({
+                    runId,
+                    status: latestRun.status,
+                    lastEventId: cursor,
+                  }) +
+                  "\n\n";
+                return;
+              }
+            }
+
+            if (Date.now() - lastHeartbeatAt >= 15_000) {
+              yield ": keep-alive\n\n";
+              lastHeartbeatAt = Date.now();
+            }
+            await waitForPoll();
+          }
+        } finally {
+          raw.removeListener("close", onClose);
+          release();
+        }
+      })(),
+      { objectMode: false },
+    );
+
+    return reply.send(eventStream);
   });
 
   app.post("/v1/runs/:runId/cancel", async (request, reply) => {
@@ -3039,7 +3375,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           code: "approval_conflict",
           message:
             error instanceof Error
-              ? error.message
+              ? redactSensitiveText(error.message)
               : "Task is not awaiting approval.",
           retryable: false,
         },
@@ -3090,8 +3426,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       });
     }
 
-    const abort = new AbortController();
-    request.raw.on("aborted", () => abort.abort());
+    const abort = createRequestAbortController(request, reply);
 
     try {
       if (body.stream) {
@@ -3282,9 +3617,10 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       return reply.code(status).send({
         error: {
           code: err.code ?? "routing_error",
-          message:
+          message: redactSensitiveText(
             err.message ??
-            "OmniRouter could not complete the inference request.",
+              "OmniRouter could not complete the inference request.",
+          ),
           retryable: err.retryable ?? status >= 500,
           requestId: request.id,
         },
@@ -3314,13 +3650,35 @@ function parseBoundedInteger(
   return parsed;
 }
 
+function safeRunEvents(
+  store: RunStore,
+  runId: string,
+  afterId = 0,
+  limit = 200,
+) {
+  return store.listEvents(runId, afterId, limit).map((event) => ({
+    ...event,
+    payload: redactMcpSensitiveValues(event.payload),
+  }));
+}
+
 function redactSensitiveText(value: string): string {
   return value
     .replace(/\bBearer\s+[A-Za-z0-9._~+/-]{12,}=?/gi, "Bearer [REDACTED]")
-    .replace(/\b(?:gh[pousr]|github_pat)_[A-Za-z0-9_]{12,}\b/g, "[REDACTED_TOKEN]")
+    .replace(
+      /\b(?:gh[pousr]|github_pat)_[A-Za-z0-9_]{12,}\b/g,
+      "[REDACTED_TOKEN]",
+    )
     .replace(/\bsk-(?:proj-|ant-)?[A-Za-z0-9_-]{16,}\b/g, "[REDACTED_TOKEN]")
+    .replace(
+      /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g,
+      "[REDACTED_TOKEN]",
+    )
     .replace(/\bAIza[0-9A-Za-z_-]{35}\b/g, "[REDACTED_TOKEN]")
-    .replace(/\b(?:api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|client[-_ ]?secret|password|passwd|secret|token)\s*[:=]\s*["']?[A-Za-z0-9._~+/-]{8,}["']?/gi, "[REDACTED_SECRET]")
+    .replace(
+      /\b(?:api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|client[-_ ]?secret|password|passwd|secret|token)\s*[:=]\s*["']?[A-Za-z0-9._~+/-]{8,}["']?/gi,
+      "[REDACTED_SECRET]",
+    )
     .slice(0, 2000);
 }
 
@@ -3329,7 +3687,8 @@ function requestWarning(
   error: unknown,
   code: string,
 ): void {
-  const message = error instanceof Error ? error.message : String(error);
+  const message =
+    error instanceof Error ? redactSensitiveText(error.message) : String(error);
   app.log.warn(
     { error: redactSensitiveText(message), code },
     "Backend request could not be completed",

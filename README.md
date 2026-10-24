@@ -19,7 +19,7 @@ Kuro-chan is being built from a clean foundation. It aims to turn natural-langua
 ## Backend architecture
 
 ```text
-Client (later; backend-first build)
+Client (mobile-first installable web app)
   -> Kuro-chan API
      -> durable run/task store and worker queue
      -> planner + specialist selector
@@ -37,6 +37,25 @@ OmniRouter owns route profiles, provider selection, retry limits, circuit breake
 
 Implementation is in progress. See [docs/FOUNDATION.md](docs/FOUNDATION.md) for engineering principles and acceptance expectations. Features are not considered complete until implementation and relevant tests exist.
 
+## Run the full workbench locally
+
+Requirements: Node.js 22+ and pnpm 10.9+.
+
+```sh
+pnpm install --frozen-lockfile
+cp .env.example .env
+# Configure at least one model provider in .env on the server side.
+pnpm dev
+```
+
+Open [http://127.0.0.1:5173](http://127.0.0.1:5173). The web workbench connects to the API at `http://127.0.0.1:8787` by default. Use **Connection settings** in the workbench to change the API address or provide `KUROCHAN_API_TOKEN` when the API requires it. Provider keys belong in the server environment, never in the browser.
+
+The web app includes streamed chat, coordinated run creation and monitoring, resumable run events, specialist search, and API/provider/worker/speech diagnostics. It is an installable PWA on supported browsers and secure origins. It caches only the app shell, never conversation or API data.
+
+For phone-on-LAN testing, bind the web server with `WEB_HOST=0.0.0.0`, set `HOST=0.0.0.0` and a strong `KUROCHAN_API_TOKEN` for the API, and allow the exact web origin in `CORS_ALLOWED_ORIGINS`. Do this only on a trusted network. A production deployment should use HTTPS and a reverse proxy or hosted static origin.
+
+The current speech backend reports its actual configured capabilities in `/v1/speech/status`. A recorded-audio turn is not the same thing as realtime duplex voice; the final speech-to-speech provider and naturalness/latency target still need a deliberate selection and live evaluation.
+ 
 ## Upstream attribution
 
 Agency Agents is maintained independently. Kuro-chan pins the exact revision it consumes, preserves applicable license and attribution notices, and treats imported agent instructions as untrusted content that cannot override application security policy.
