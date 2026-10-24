@@ -11,6 +11,7 @@ const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const API_BASE_KEY = "kurochan.apiBaseUrl.v1";
 const API_TOKEN_KEY = "kurochan.apiToken.session.v1";
+const FRONTEND_PREVIEW = new URLSearchParams(location.search).get("preview") === "1";
 const TERMINAL = new Set(["completed", "failed", "cancelled"]);
 const state = {
   view: "chat",
@@ -32,7 +33,7 @@ const state = {
   runStreams: new Map(),
   lastEventIds: new Map(),
   selectedRunId: null,
-  selectedModel: "balanced",
+  selectedModel: "auto",
   connected: false,
   authenticated: false,
   providers: [],
@@ -41,6 +42,7 @@ const state = {
   router: null,
   agentQuery: "",
   agentResults: [],
+  integrationTab: "connectors",
   integrationSearch: "",
   integrationCategory: "All",
   integrationKind: "All",
@@ -328,6 +330,12 @@ function renderView() {
   else renderSystemView(workspace);
 }
 
+function selectedRouteProfile() {
+  // Auto uses the strongest existing route profile until catalog-aware model
+  // ranking is available in OmniRouter.
+  return state.selectedModel === "auto" ? "quality" : state.selectedModel;
+}
+
 function renderChatView(workspace) {
   const shell = makeElement("div", "chat-view");
   const scroll = makeElement("div", "chat-scroll");
@@ -403,6 +411,26 @@ function renderChatView(workspace) {
   if (state.messages.length || state.sending || state.transientMessage)
     scroll.append(list);
   shell.append(scroll);
+  const modelRow = makeElement("div", "composer-model-row");
+  const modelLabel = makeElement("label", "model-select-wrap");
+  modelLabel.append(makeElement("span", "sr-only", "Model routing mode"));
+  const modelSelect = makeElement("select", "model-profile-select");
+  modelSelect.id = "model-profile";
+  modelSelect.setAttribute("aria-label", "Model routing mode");
+  [
+    ["auto", "Auto · OmniRoute"],
+    ["fast", "Fast"],
+    ["balanced", "Balanced"],
+    ["quality", "Quality"],
+  ].forEach(([value, label]) => {
+    const option = makeElement("option", "", label);
+    option.value = value;
+    modelSelect.append(option);
+  });
+  modelSelect.value = state.selectedModel;
+  modelLabel.append(modelSelect);
+  modelRow.append(modelLabel);
+
   const compose = makeElement("form", "composer");
   compose.id = "message-form";
   const composeBox = makeElement("div", "composer-box");
@@ -416,7 +444,7 @@ function renderChatView(workspace) {
     : "Tell Kuro-chan what you have in mind…";
   textarea.setAttribute("aria-label", "Message Kuro-chan");
   textarea.required = true;
-  textarea.disabled = state.sending || state.recording || !state.authenticated;
+  textarea.disabled = state.sending || state.recording || (!state.authenticated && !FRONTEND_PREVIEW);
   const toolbar = makeElement("div", "composer-toolbar");
   const hint = makeElement(
     "span",
@@ -427,7 +455,7 @@ function renderChatView(workspace) {
   const runButton = makeElement("button", "button button-run");
   runButton.type = "button";
   runButton.id = "start-run";
-  runButton.disabled = state.sending || state.recording || !state.authenticated;
+  runButton.disabled = state.sending || state.recording || (!state.authenticated && !FRONTEND_PREVIEW);
   runButton.append(
     makeElement("span", "button-icon", "✳"),
     makeElement("span", "", "Build with agents"),
@@ -461,7 +489,7 @@ function renderChatView(workspace) {
   sendButton.type = "submit";
   sendButton.id = "send-message";
   sendButton.disabled =
-    state.sending || state.recording || !state.authenticated;
+    state.sending || state.recording || (!state.authenticated && !FRONTEND_PREVIEW);
   sendButton.append(
     makeElement("span", "", state.sending ? "Sending…" : "Send"),
     makeElement("span", "send-arrow", "↗"),
@@ -474,12 +502,14 @@ function renderChatView(workspace) {
     makeElement(
       "p",
       "composer-footnote",
-      state.authenticated
-        ? "Your provider credentials stay on the server. Replies are streamed as they arrive."
-        : "Connect your Kuro-chan API to start chatting.",
+      FRONTEND_PREVIEW
+        ? "Frontend preview only · messages here never leave this page."
+        : state.authenticated
+          ? "Provider credentials stay on the server. Replies stream as they arrive."
+          : "Connect your Kuro-chan API to start chatting.",
     ),
   );
-  shell.append(compose);
+  shell.append(modelRow, compose);
   workspace.append(shell);
   textarea.addEventListener("input", resizeTextarea);
   compose.addEventListener("submit", (event) => {
@@ -595,6 +625,20 @@ async function sendMessage() {
   const textarea = $("#message-input");
   const content = textarea?.value.trim();
   if (!content || state.sending) return;
+  if (!state.authenticated && FRONTEND_PREVIEW) {
+    state.messages = [
+      ...state.messages,
+      { role: "user", content, createdAt: new Date().toISOString() },
+      {
+        role: "assistant",
+        content: "This is a frontend-only preview. No AI model was called and your message was not sent anywhere. Connect a running Kuro-chan API to use real inference.",
+        createdAt: new Date().toISOString(),
+      },
+    ];
+    state.transientMessage = "";
+    renderView();
+    return;
+  }
   if (!state.authenticated) {
     showToast(
       "Connect to the Kuro-chan API before sending a message.",
@@ -619,7 +663,7 @@ async function sendMessage() {
     renderView();
     const input = $("#message-input");
     if (input) input.value = "";
-    const model = "omni/" + state.selectedModel;
+    const model = "omni/" + selectedRouteProfile();
     const clientMessageId = makeId();
     await api.streamChat(conversationId, {
       content,
@@ -836,7 +880,7 @@ async function submitVoiceTurn(blob, details) {
     const form = new FormData();
     form.append("file", blob, "kurochan-recording." + details.extension);
     form.append("clientMessageId", makeId());
-    form.append("model", "omni/" + state.selectedModel);
+    form.append("model", "omni/" + selectedRouteProfile());
     const language = state.speech?.transcription?.defaultLanguage;
     if (typeof language === "string" && language.trim()) {
       form.append("language", language.trim());
@@ -944,7 +988,7 @@ async function startCoordinatedRun() {
     const result = await api.startRun(
       conversationId,
       goal,
-      state.selectedModel,
+      selectedRouteProfile(),
     );
     if (result.status === "clarification_required" || result.clarification) {
       const question =
@@ -1608,14 +1652,38 @@ function renderAgentsView(workspace) {
 
 function renderIntegrationsView(workspace) {
   const page = makeElement("div", "page-view integrations-page");
+  const tabs = makeElement("div", "integration-tabs");
+  [
+    ["connectors", "Connectors"],
+    ["mcp", "MCP"],
+    ["api", "API"],
+    ["tools", "Tools"],
+  ].forEach(([id, label]) => {
+    const tab = makeElement("button", "integration-tab", label);
+    tab.type = "button";
+    tab.dataset.integrationTab = id;
+    tab.classList.toggle("is-active", state.integrationTab === id);
+    tab.setAttribute("aria-pressed", String(state.integrationTab === id));
+    tab.addEventListener("click", () => {
+      state.integrationTab = id;
+      state.integrationKind =
+        id === "connectors" ? "Built in" : id === "mcp" ? "MCP" : "All";
+      state.integrationCategory = "All";
+      state.integrationSearch = "";
+      renderView();
+      if (!state.integrationsLoaded && !state.integrationsLoading)
+        void loadIntegrations();
+    });
+    tabs.append(tab);
+  });
   const intro = makeElement("div", "page-intro integration-intro");
   intro.append(
-    makeElement("span", "section-kicker", "A FLEXIBLE TOOLKIT"),
-    makeElement("h2", "", "Give every task the right tools."),
+    makeElement("span", "section-kicker", "INTEGRATIONS"),
+    makeElement("h2", "", "Connect apps, APIs, and custom tools."),
     makeElement(
       "p",
       "",
-      "Browse native capabilities and optional MCP connectors. Kuro-chan only reports a service as connected when the API reports it; a catalog card is not a live connection.",
+      "Choose a connector, MCP server, provider API, or custom tool. Connection status comes from the running Kuro-chan API.",
     ),
   );
 
@@ -1713,13 +1781,17 @@ function renderIntegrationsView(workspace) {
   categoryLabel.append(category);
 
   filters.append(searchWrap, kindLabel, categoryLabel);
+  kindLabel.hidden = true;
+  categoryLabel.hidden = true;
   const grid = makeElement("div", "integration-grid");
   grid.id = "integration-cards";
   const detail = makeElement("section", "integration-detail");
   detail.id = "integration-detail";
   detail.setAttribute("aria-live", "polite");
 
-  page.append(intro, actions, message, summary, filters, grid, detail);
+  actions.hidden = state.integrationTab === "api" || state.integrationTab === "tools";
+  message.hidden = state.integrationTab === "api" || state.integrationTab === "tools";
+  page.append(intro, tabs, actions, message, summary, filters, grid, detail);
   workspace.append(page);
   renderIntegrationCards();
   if (
@@ -1798,6 +1870,108 @@ function renderIntegrationCards() {
   const summary = $("#integration-summary");
   if (!grid || !summary) return;
   const snapshot = state.integrationSnapshot;
+  const filters = $("#integration-filters");
+  const detailPanel = $("#integration-detail");
+  const actions = $(".integration-actions");
+  const notice = $("#integration-status");
+
+  if (state.integrationTab === "api") {
+    if (filters) filters.hidden = true;
+    if (detailPanel) detailPanel.hidden = true;
+    if (actions) actions.hidden = true;
+    if (notice) notice.hidden = true;
+    const providers = Array.isArray(snapshot.config?.providers)
+      ? snapshot.config.providers
+      : [];
+    const configured = providers.filter(
+      (provider) => provider.configured === true || provider.isConfigured === true,
+    ).length;
+    summary.replaceChildren(
+      integrationMetric(String(configured), "Providers configured"),
+      integrationMetric(String(providers.length), "Providers reported by API"),
+      integrationMetric("Server-side", "Credential storage"),
+    );
+    grid.replaceChildren();
+    if (!providers.length) {
+      grid.append(
+        makeElement(
+          "div",
+          "empty-state-card",
+          "Connect to a running Kuro-chan API to inspect real provider status. Provider keys stay on the server and are never displayed here.",
+        ),
+      );
+      return;
+    }
+    providers.forEach((provider) => {
+      const isConfigured =
+        provider.configured === true || provider.isConfigured === true;
+      const name = provider.name || provider.id || provider.provider || "Model provider";
+      const card = makeElement("article", "integration-card");
+      const top = makeElement("div", "integration-card-top");
+      top.append(
+        makeElement("span", "integration-symbol", "◎"),
+        makeElement("div", "integration-vendor", "MODEL PROVIDER"),
+      );
+      card.append(
+        top,
+        makeElement("h3", "integration-card-name", name),
+        makeElement(
+          "p",
+          "integration-card-copy",
+          provider.model || provider.defaultModel
+            ? "Configured model: " + (provider.model || provider.defaultModel)
+            : "Provider configuration is managed on the API server.",
+        ),
+      );
+      const meta = makeElement("div", "integration-card-meta");
+      meta.append(
+        integrationBadge(
+          isConfigured ? "Configured" : "Needs setup",
+          isConfigured ? "success" : "warning",
+        ),
+      );
+      card.append(meta);
+      grid.append(card);
+    });
+    return;
+  }
+
+  if (state.integrationTab === "tools") {
+    if (filters) filters.hidden = true;
+    if (detailPanel) detailPanel.hidden = true;
+    if (actions) actions.hidden = true;
+    if (notice) notice.hidden = true;
+    summary.replaceChildren(
+      integrationMetric("Not available", "Custom tool builder"),
+      integrationMetric("Server-side", "Execution boundary"),
+      integrationMetric("Approval-gated", "External writes"),
+    );
+    grid.replaceChildren();
+    const card = makeElement("article", "integration-card custom-tools-status");
+    const top = makeElement("div", "integration-card-top");
+    top.append(
+      makeElement("span", "integration-symbol", "⚒"),
+      makeElement("div", "integration-vendor", "CUSTOM INTEGRATIONS"),
+    );
+    card.append(
+      top,
+      makeElement("h3", "integration-card-name", "Custom Tools"),
+      integrationBadge("Coming soon", "warning"),
+      makeElement(
+        "p",
+        "integration-card-copy",
+        "Webhook creation and custom-tool management are not implemented in this client yet. No inactive Connect button is shown.",
+      ),
+    );
+    grid.append(card);
+    return;
+  }
+
+  if (filters) filters.hidden = false;
+  if (detailPanel) detailPanel.hidden = false;
+  if (actions) actions.hidden = false;
+  if (notice) notice.hidden = false;
+
   const nativeReady = INTEGRATION_CATALOG.filter((item) => {
     if (item.kind !== "native") return false;
     return resolveIntegrationStatus(item, snapshot).tone === "success";
@@ -2537,8 +2711,13 @@ function toggleSidebar() {
 }
 
 function init() {
-  $("#model-profile").addEventListener("change", (event) => {
-    state.selectedModel = event.target.value;
+  document.addEventListener("change", (event) => {
+    if (
+      event.target instanceof HTMLSelectElement &&
+      event.target.id === "model-profile"
+    ) {
+      state.selectedModel = event.target.value;
+    }
   });
   $$(".nav-item").forEach((button) =>
     button.addEventListener("click", () => {
@@ -2606,7 +2785,7 @@ function init() {
     (location.protocol === "https:" ||
       ["localhost", "127.0.0.1"].includes(location.hostname))
   ) {
-    navigator.serviceWorker.register("/sw.js").catch(() => {});
+    navigator.serviceWorker.register(new URL("./sw.js", import.meta.url)).catch(() => {});
   }
   window.setInterval(() => {
     if (document.visibilityState === "visible") void refreshConnection();
@@ -2614,6 +2793,13 @@ function init() {
 }
 
 async function boot() {
+  if (FRONTEND_PREVIEW) {
+    state.connected = false;
+    state.authenticated = false;
+    updateConnectionBadge("Preview only", "is-offline");
+    renderView();
+    return;
+  }
   await refreshConnection();
   if (!state.authenticated) {
     renderView();
