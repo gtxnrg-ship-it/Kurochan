@@ -1239,11 +1239,16 @@ export class TaskWorker {
                     };
                   } else if (
                     !descriptor.readOnly &&
-                    !approvalGranted(this.options.store, task, "external-write", {
-                      mcpServerId: descriptor.serverId,
-                      mcpToolName: descriptor.name,
-                      argumentsHash: fingerprintMcpArguments(mcpArguments),
-                    })
+                    !this.options.store.consumeExternalWriteApproval(
+                      task.runId,
+                      task.id,
+                      this.workerId,
+                      {
+                        mcpServerId: descriptor.serverId,
+                        mcpToolName: descriptor.name,
+                        argumentsHash: fingerprintMcpArguments(mcpArguments),
+                      },
+                    )
                   ) {
                   let preview: string;
                   try {
