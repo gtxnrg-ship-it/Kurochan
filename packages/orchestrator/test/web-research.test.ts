@@ -142,6 +142,27 @@ describe("WebResearchRuntime", () => {
     expect(totalSnippetCharacters).toBeGreaterThan(25_000);
   });
 
+  it("marks malformed provider responses as retryable provider failures", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ unexpected: true })) as unknown as typeof fetch;
+    const runtime = new WebResearchRuntime({
+      apiKey: "brave-test-key",
+      fetchImpl,
+    });
+
+    const result = await runtime.execute({
+      name: "web.search",
+      arguments: { query: "official documentation response" },
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: "invalid_web_search_response",
+        retryable: true,
+      },
+    });
+  });
+
   it("does not invent API credentials or make a request when unconfigured", async () => {
     const fetchImpl = vi.fn(async () =>
       jsonResponse(contextResponse()),
