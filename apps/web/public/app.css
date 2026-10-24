@@ -2144,3 +2144,22 @@ button:disabled {
   background: #f6e5df;
   color: #883e33;
 }
+
+.message-text > :first-child { margin-top: 0; }
+.message-text > :last-child { margin-bottom: 0; }
+.message-text p { margin: 0 0 11px; }
+.message-text h1, .message-text h2, .message-text h3 { color: #30372e; line-height: 1.3; font-weight: 700; letter-spacing: -.025em; }
+.message-text h1 { margin: 17px 0 9px; font-size: 19px; }
+.message-text h2 { margin: 15px 0 8px; font-size: 16px; }
+.message-text h3 { margin: 13px 0 7px; font-size: 13px; }
+.message-text ul, .message-text ol { margin: 7px 0 13px; padding-left: 23px; }
+.message-text li { padding-left: 3px; margin: 4px 0; }
+.message-text li::marker { color: #72856d; }
+.message-text blockquote { margin: 10px 0 13px; padding: 4px 0 4px 12px; border-left: 3px solid #c6d3bf; color: #70796b; }
+.message-text blockquote p { margin: 0; }
+.message-text hr { width: 100%; margin: 14px 0; border: 0; border-top: 1px solid #e5e1d7; }
+.message-text code { padding: 2px 5px; border: 1px solid #e7e4da; border-radius: 5px; background: #f4f1e8; color: #53684e; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .9em; overflow-wrap: anywhere; }
+.message-text pre { overflow: auto; max-width: 100%; margin: 10px 0 13px; padding: 12px 13px; border: 1px solid #e1ded4; border-radius: 10px; background: #f4f2e9; scrollbar-width: thin; }
+.message-text pre code { display: block; padding: 0; border: 0; background: transparent; color: #42483d; font-size: 10px; line-height: 1.7; white-space: pre; overflow-wrap: normal; }
+.message-text a { color: #456f55; text-decoration-thickness: 1px; text-underline-offset: 2px; overflow-wrap: anywhere; }
+.message-text a:hover { color: #2d4d39; }
