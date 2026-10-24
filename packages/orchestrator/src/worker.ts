@@ -119,7 +119,9 @@ function parsePayload(content: string): unknown {
 
 export function jsonCharacterLimit(value: unknown, limit = 60_000): string {
   if (!Number.isInteger(limit) || limit < 128 || limit > 200_000) {
-    throw new Error("JSON context character limit must be between 128 and 200000.");
+    throw new Error(
+      "JSON context character limit must be between 128 and 200000.",
+    );
   }
 
   let result: string;
@@ -142,10 +144,16 @@ export function jsonCharacterLimit(value: unknown, limit = 60_000): string {
     preview: "",
   };
   let previewLength = Math.max(0, limit - JSON.stringify(base).length - 8);
-  let encoded = JSON.stringify({ ...base, preview: result.slice(0, previewLength) });
+  let encoded = JSON.stringify({
+    ...base,
+    preview: result.slice(0, previewLength),
+  });
   while (encoded.length > limit && previewLength > 0) {
     previewLength = Math.floor(previewLength / 2);
-    encoded = JSON.stringify({ ...base, preview: result.slice(0, previewLength) });
+    encoded = JSON.stringify({
+      ...base,
+      preview: result.slice(0, previewLength),
+    });
   }
   return encoded.length <= limit
     ? encoded
