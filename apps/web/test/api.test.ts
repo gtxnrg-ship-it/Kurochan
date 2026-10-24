@@ -1,0 +1,80 @@
+import { describe, expect, it, vi } from "vitest";
+import {
+  ApiClient,
+  ApiError,
+  consumeSse,
+  normalizeApiBaseUrl,
+  parseSseEvent,
+} from "../public/api.mjs";
+
+describe("Kuro-chan web API helpers", () => {
+  it("normalizes API addresses without silently accepting credentials or query strings", () => {
+    expect(normalizeApiBaseUrl(" http://127.0.0.1:8787/ ")).toBe("http://127.0.0.1:8787");
+    expect(normalizeApiBaseUrl("https://example.test/kurochan/")).toBe("https://example.test/kurochan");
+    expect(() => normalizeApiBaseUrl("")).toThrow(/API/);
+    expect(() => normalizeApiBaseUrl("ftp://example.test")).toThrow(/HTTP or HTTPS/);
+    expect(() => normalizeApiBaseUrl("https://user:secret@example.test")).toThrow(/credentials/);
+    expect(() => normalizeApiBaseUrl("https://example.test/?token=secret")).toThrow(/query/);
+  });
+
+  it("parses named and multi-line SSE events while ignoring comments", () => {
+    expect(parseSseEvent(": keep-alive\nevent: task.updated\nid: 42\ndata: first\ndata: second")).toEqual({
+      event: "task.updated",
+      id: "42",
+      data: "first\nsecond",
+    });
+    expect(parseSseEvent(": keep-alive")).toBeNull();
+  });
+
+  it("consumes SSE events split across arbitrary network chunks", async () => {
+    const chunks = [
+      "id: 1\nevent: run.started\ndata: {\"status\":",
+      "\"running\"}\r\n\r\n",
+      "data: [DONE]\n\n",
+    ];
+    const stream = new ReadableStream({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(new TextEncoder().encode(chunk));
+        controller.close();
+      },
+    });
+    const events: unknown[] = [];
+    await consumeSse({ body: stream }, (event) => events.push(event));
+    expect(events).toEqual([
+      { event: "run.started", id: "1", data: "{\"status\":\"running\"}" },
+      { event: "message", id: undefined, data: "[DONE]" },
+    ]);
+  });
+
+  it("sends bearer authentication without putting a token in the URL", async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }));
+    const client = new ApiClient({
+      getBaseUrl: () => "http://127.0.0.1:8787/",
+      getToken: () => "session-secret",
+      fetchImpl,
+    });
+    await expect(client.health()).resolves.toEqual({ ok: true });
+    const [url, options] = fetchImpl.mock.calls[0] || [];
+    expect(url).toBe("http://127.0.0.1:8787/healthz");
+    expect(new Headers(options?.headers).get("authorization")).toBe("Bearer session-secret");
+    expect(url).not.toContain("session-secret");
+    expect(options?.credentials).toBe("omit");
+  });
+
+  it("normalizes structured API errors for the UI", async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      error: { code: "no_provider_available", message: "Configure a model.", retryable: false, requestId: "req-1" },
+    }), { status: 503, headers: { "content-type": "application/json" } }));
+    const client = new ApiClient({ getBaseUrl: () => "http://localhost:8787", fetchImpl });
+    await expect(client.config()).rejects.toMatchObject({
+      name: "ApiError",
+      status: 503,
+      code: "no_provider_available",
+      requestId: "req-1",
+      retryable: false,
+    } satisfies Partial<ApiError>);
+  });
+});
