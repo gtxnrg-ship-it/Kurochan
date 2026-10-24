@@ -24,7 +24,11 @@ import type {
   GitHubProjectToolCall,
   GitHubProjectToolResult,
 } from "./github-project.js";
-import { McpToolRuntime, type McpToolDescriptor } from "./mcp-tools.js";
+import {
+  McpToolRuntime,
+  redactMcpSensitiveValues,
+  type McpToolDescriptor,
+} from "./mcp-tools.js";
 import { CommunitySkillCatalog } from "./community-packs.js";
 
 const WorkerToolCallSchema = z
@@ -1080,7 +1084,10 @@ export class TaskWorker {
                 ) {
                   let preview: string;
                   try {
-                    preview = JSON.stringify(mcpArguments).slice(0, 2000);
+                    preview = JSON.stringify(redactMcpSensitiveValues(mcpArguments)).slice(
+                      0,
+                      2000,
+                    );
                   } catch {
                     preview = "[Arguments could not be serialized]";
                   }
