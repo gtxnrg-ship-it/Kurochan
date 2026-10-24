@@ -510,13 +510,10 @@ function checkJsonSchema(
     "minProperties",
     "maxProperties",
   ];
-  if (objectKeywords.some((key) => key in schemaValue)) {
-    if (!isRecord(value)) {
-      return {
-        kind: "value",
-        message: "Arguments at " + path + " must be an object.",
-      };
-    }
+  if (
+    objectKeywords.some((key) => key in schemaValue) &&
+    isRecord(value)
+  ) {
     const properties = schemaValue.properties;
     if (properties !== undefined && !isRecord(properties)) {
       return {
